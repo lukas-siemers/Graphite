@@ -6,20 +6,20 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// Skia requires a native build — not available in Expo Go.
-// Wrap in try/catch so the module loads safely in Expo Go.
+import Constants from 'expo-constants';
+// Skia is always present in native builds. It is absent in Expo Go.
+// Use Constants.appOwnership to detect Expo Go reliably — a try/catch
+// on require() is not sufficient because the JSI bootstrap can throw in
+// release builds too, incorrectly setting skiaAvailable = false.
+const isExpoGo = Constants.appOwnership === 'expo';
 let Canvas: any = null;
 let Path: any = null;
 let Skia: any = null;
-let skiaAvailable = false;
-try {
+if (!isExpoGo) {
   const skia = require('@shopify/react-native-skia');
   Canvas = skia.Canvas;
   Path = skia.Path;
   Skia = skia.Skia;
-  skiaAvailable = true;
-} catch {
-  // Running in Expo Go — drawing canvas will show a placeholder
 }
 import {
   Gesture,
@@ -128,7 +128,7 @@ export default function DrawingCanvas({
   onSave,
   onClose,
 }: DrawingCanvasProps) {
-  if (!skiaAvailable) {
+  if (isExpoGo) {
     return (
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(19,19,19,0.97)', alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: tokens.textMuted, fontSize: 14, textAlign: 'center', paddingHorizontal: 32 }}>

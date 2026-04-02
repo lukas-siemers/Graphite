@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, useWindowDimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, Pressable, useWindowDimensions } from 'react-native';
 import {
   initDatabase,
   getNotebooks,
@@ -60,7 +60,7 @@ function PhoneLayout() {
           alignItems: 'center',
           height: 44,
           paddingHorizontal: 16,
-          backgroundColor: tokens.bgSidebar,
+          backgroundColor: tokens.bgBase,
           borderBottomWidth: 1,
           borderBottomColor: tokens.border,
         }}
@@ -102,16 +102,16 @@ function PhoneLayout() {
               onToggleDrawing={() => setDrawingOpen((v) => !v)}
               drawingOpen={drawingOpen}
             />
-            {/* FAB — tangerine circle, draws over the editor */}
+            {/* FAB — square tangerine, draws over the editor */}
             <Pressable
               onPress={() => setDrawingOpen((v) => !v)}
               style={({ pressed }) => ({
                 position: 'absolute',
                 bottom: 24,
                 right: 24,
-                width: 56,
-                height: 56,
-                borderRadius: 28,
+                width: 48,
+                height: 48,
+                borderRadius: 0,
                 backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -132,6 +132,172 @@ function PhoneLayout() {
             )}
           </View>
         )}
+      </View>
+    </View>
+  );
+}
+
+interface IPadLayoutProps {
+  drawingOpen: boolean;
+  setDrawingOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  activeNoteId: string | null;
+}
+
+function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutProps) {
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const TOOLBAR_ITEMS = ['B', 'I', 'T', '<>', 'Link', '\u2014'] as const;
+  const RIGHT_ICONS = ['\u21BB', '\u2197', '\u2699', '\u22EE'] as const;
+
+  return (
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
+      {/* Sidebar — collapses via width */}
+      <View
+        style={{
+          width: sidebarVisible ? 220 : 0,
+          overflow: 'hidden',
+          backgroundColor: tokens.bgSidebar,
+          borderRightWidth: sidebarVisible ? 1 : 0,
+          borderRightColor: tokens.border,
+        }}
+      >
+        <Sidebar />
+      </View>
+
+      {/* Editor column */}
+      <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgBase }}>
+        {/* Top nav bar */}
+        <View
+          style={{
+            height: 48,
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: tokens.bgBase,
+            borderBottomWidth: 1,
+            borderBottomColor: tokens.border,
+            paddingHorizontal: 8,
+          }}
+        >
+          {/* Sidebar toggle */}
+          <Pressable
+            onPress={() => setSidebarVisible((v) => !v)}
+            style={{
+              width: 36,
+              height: 36,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
+          </Pressable>
+
+          {/* Vertical divider */}
+          <View
+            style={{
+              width: 1,
+              height: 20,
+              backgroundColor: tokens.border,
+              marginHorizontal: 8,
+            }}
+          />
+
+          {/* Search input */}
+          <View style={{ flex: 1, maxWidth: 380 }}>
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search Graphite..."
+              placeholderTextColor={tokens.textHint}
+              style={{
+                backgroundColor: tokens.bgSidebar,
+                borderWidth: 1,
+                borderColor: tokens.border,
+                borderRadius: 0,
+                paddingTop: 6,
+                paddingBottom: 6,
+                paddingLeft: 36,
+                paddingRight: 12,
+                fontSize: 12,
+                color: tokens.textBody,
+              }}
+            />
+          </View>
+
+          {/* Formatting buttons */}
+          <View style={{ flexDirection: 'row', marginLeft: 8 }}>
+            {TOOLBAR_ITEMS.map((label) => (
+              <Pressable
+                key={label}
+                style={({ pressed }) => ({
+                  width: 36,
+                  height: 36,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: pressed ? tokens.bgBright : tokens.bgHover,
+                  marginRight: 2,
+                })}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: tokens.textMuted }}>
+                  {label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Right side icons */}
+          <View style={{ flexDirection: 'row', marginLeft: 'auto' }}>
+            {RIGHT_ICONS.map((icon) => (
+              <Pressable
+                key={icon}
+                style={{
+                  width: 36,
+                  height: 36,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 16, color: tokens.textMuted }}>{icon}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        {/* Editor area */}
+        <View style={{ flex: 1, position: 'relative' }}>
+          <Editor
+            onToggleDrawing={() => setDrawingOpen((v) => !v)}
+            drawingOpen={drawingOpen}
+          />
+          {/* FAB — square tangerine */}
+          <Pressable
+            onPress={() => setDrawingOpen((v) => !v)}
+            style={({ pressed }) => ({
+              position: 'absolute',
+              bottom: 24,
+              right: 24,
+              width: 48,
+              height: 48,
+              borderRadius: 0,
+              backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+            })}
+          >
+            <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
+          </Pressable>
+          {drawingOpen && activeNoteId && (
+            <DrawingCanvas
+              noteId={activeNoteId}
+              initialStrokes={drawingStore.get(activeNoteId) ?? []}
+              onClose={() => setDrawingOpen(false)}
+              onSave={(strokes) => {
+                drawingStore.set(activeNoteId, strokes);
+                setDrawingOpen(false);
+              }}
+            />
+          )}
+        </View>
       </View>
     </View>
   );
@@ -222,64 +388,11 @@ export default function MainLayout() {
   }
 
   if (isIPad) {
-    return (
-      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
-        <View
-          style={{
-            width: 220,
-            backgroundColor: tokens.bgSidebar,
-            borderRightWidth: 1,
-            borderRightColor: tokens.border,
-          }}
-        >
-          <Sidebar />
-        </View>
-        <View
-          style={{
-            width: 280,
-            backgroundColor: tokens.bgBase,
-            borderRightWidth: 1,
-            borderRightColor: tokens.border,
-          }}
-        >
-          <NoteList />
-        </View>
-        <View style={{ flex: 1, backgroundColor: tokens.bgBase, position: 'relative' }}>
-          <Editor
-            onToggleDrawing={() => setDrawingOpen((v) => !v)}
-            drawingOpen={drawingOpen}
-          />
-          {/* FAB — tangerine circle, draws over the editor */}
-          <Pressable
-            onPress={() => setDrawingOpen((v) => !v)}
-            style={({ pressed }) => ({
-              position: 'absolute',
-              bottom: 24,
-              right: 24,
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
-              alignItems: 'center',
-              justifyContent: 'center',
-            })}
-          >
-            <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-          </Pressable>
-          {drawingOpen && activeNoteId && (
-            <DrawingCanvas
-              noteId={activeNoteId}
-              initialStrokes={drawingStore.get(activeNoteId) ?? []}
-              onClose={() => setDrawingOpen(false)}
-              onSave={(strokes) => {
-                drawingStore.set(activeNoteId, strokes);
-                setDrawingOpen(false);
-              }}
-            />
-          )}
-        </View>
-      </View>
-    );
+    return <IPadLayout
+      drawingOpen={drawingOpen}
+      setDrawingOpen={setDrawingOpen}
+      activeNoteId={activeNoteId}
+    />;
   }
 
   return <PhoneLayout />;

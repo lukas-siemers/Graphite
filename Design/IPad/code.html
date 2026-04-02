@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Graphite — System Design Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "on-tertiary-container": "#503100",
+            "tertiary-fixed-dim": "#ffb95a",
+            "surface-container-low": "#1b1b1c",
+            "tertiary-container": "#d99328",
+            "on-secondary-fixed": "#171c23",
+            "secondary-fixed": "#dee3ec",
+            "on-primary-fixed-variant": "#6e3900",
+            "surface-bright": "#393939",
+            "on-primary-container": "#582d00",
+            "outline-variant": "#564335",
+            "tertiary": "#ffb95a",
+            "inverse-on-surface": "#303030",
+            "primary-container": "#f28500",
+            "secondary-container": "#444951",
+            "on-background": "#e5e2e1",
+            "primary-fixed-dim": "#ffb77d",
+            "outline": "#a48c7b",
+            "on-tertiary-fixed": "#2a1800",
+            "on-tertiary": "#462a00",
+            "background": "#131313",
+            "on-surface": "#e5e2e1",
+            "on-tertiary-fixed-variant": "#643f00",
+            "primary": "#ffb77d",
+            "surface": "#131313",
+            "surface-container-lowest": "#0e0e0e",
+            "inverse-surface": "#e5e2e1",
+            "surface-variant": "#353535",
+            "on-primary-fixed": "#2f1500",
+            "inverse-primary": "#904d00",
+            "on-secondary-container": "#b4b9c2",
+            "on-error": "#690005",
+            "primary-fixed": "#ffdcc3",
+            "secondary": "#c2c7d0",
+            "surface-container-high": "#2a2a2a",
+            "on-secondary-fixed-variant": "#42474f",
+            "on-surface-variant": "#dcc1ae",
+            "surface-tint": "#ffb77d",
+            "error": "#ffb4ab",
+            "on-primary": "#4d2600",
+            "on-error-container": "#ffdad6",
+            "surface-dim": "#131313",
+            "on-secondary": "#2c3138",
+            "surface-container-highest": "#353535",
+            "tertiary-fixed": "#ffddb6",
+            "error-container": "#93000a",
+            "secondary-fixed-dim": "#c2c7d0"
+          },
+          fontFamily: {
+            "headline": ["Inter", "sans-serif"],
+            "body": ["Inter", "sans-serif"],
+            "label": ["Inter", "sans-serif"],
+            "mono": ["JetBrains Mono", "monospace"]
+          },
+          borderRadius: {
+            "DEFAULT": "0px",
+            "lg": "0px",
+            "xl": "0px",
+            "full": "9999px"
+          },
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      font-size: 18px;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-color: #131313;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333333; }
+    ::-webkit-scrollbar-thumb:hover { background: #444444; }
+
+    /* Transitions for collapsible sidebar */
+    #sidebar-container {
+      transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+    }
+    #sidebar-container.collapsed {
+      width: 0;
+      border-right: none;
+    }
+  </style>
+</head>
+<body class="text-on-surface bg-background h-screen overflow-hidden flex">
+<!-- Column A: SideNavBar (Collapsible) -->
+<aside class="w-[220px] flex-shrink-0 bg-[#1b1b1c] border-r border-[#333333] flex flex-col h-full z-30" id="sidebar-container">
+<div class="px-4 h-12 flex items-center flex-shrink-0">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="diamond">diamond</span>
+<span class="text-[15px] font-semibold text-white tracking-tight">Graphite</span>
+</div>
+</div>
+<div class="border-b border-[#333333] mb-4"></div>
+<div class="flex-grow overflow-y-auto px-2 space-y-6">
+<!-- Notebooks Section -->
+<div>
+<h3 class="px-2 mb-2 text-[11px] uppercase font-medium tracking-wider text-[#8a8f98]">Notebooks</h3>
+<nav class="space-y-[1px]">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-[#8a8f98] hover:bg-[#353535] transition-none group">
+<span class="material-symbols-outlined opacity-70" data-icon="folder">folder</span>
+<span class="whitespace-nowrap">Personal</span>
+</button>
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-[#8a8f98] hover:bg-[#353535] transition-none group">
+<span class="material-symbols-outlined opacity-70" data-icon="work">work</span>
+<span class="whitespace-nowrap">Work</span>
+</button>
+<!-- Dev Notes (Expanded) -->
+<div class="space-y-[1px]">
+<button class="w-full flex items-center justify-between px-2 py-1.5 text-sm text-[#8a8f98] hover:bg-[#353535] transition-none">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined opacity-70" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="whitespace-nowrap">Dev Notes</span>
+</div>
+</button>
+<!-- Sub-folders -->
+<div class="pl-4 space-y-[1px]">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-[#8a8f98] hover:bg-[#353535] transition-none">
+<span class="material-symbols-outlined text-[16px] opacity-50" data-icon="description">description</span>
+<span class="whitespace-nowrap">React Native</span>
+</button>
+</div>
+</div>
+</nav>
+</div>
+</div>
+<!-- Footer of Sidebar -->
+<div class="p-4 border-t border-[#333333] space-y-4">
+<button class="w-full py-2 bg-[#2c1800] border border-[#f28500] text-[#ffb347] text-[13px] font-medium transition-none hover:bg-[#3a2000] whitespace-nowrap">
+      New Note
+    </button>
+<div class="flex items-center justify-between overflow-hidden">
+<div class="flex items-center gap-2 min-w-0">
+<img alt="Lukas S." class="w-6 h-6 bg-surface-container-high flex-shrink-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDsmgQh-m6cHFU9W4WrKvhSjG0K8lBWODSy2LZZ0STFKHg-d58xy31SY905Bc8LJSIhQUBUMTunPrRSWSbHXOWUEaidr6vTYIpCYGZk7rpzhn-kJfqvZT_ExPT62ZofO6YXVPlxeX9oDba4e_ZE-BINxNIxUCCSYPkoJpx-hTg9kv9o9uUKvrkNlHfkJ5HHvdhSoeKOyR8sn-BOvEnmZJ9dRELaK29bTSmUNJCy_w-EAanvMEtyTES8gIs-vs2wdLTsd6ZJjFvUYoM"/>
+<span class="text-xs font-medium text-[#e5e2e1] truncate">Lukas S.</span>
+</div>
+<button class="text-[#8a8f98] hover:text-white flex-shrink-0">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</div>
+</div>
+</aside>
+<!-- Main Wrapper for B and C -->
+<div class="flex flex-grow flex-row overflow-hidden">
+<!-- Column C: Editor (Now directly after Sidebar) -->
+<main class="flex-grow bg-[#1e1e1e] flex flex-col h-full relative overflow-hidden">
+<!-- TopNavBar -->
+<header class="h-12 border-b border-[#333333] flex items-center px-4 justify-between bg-[#131313] flex-shrink-0 z-50">
+<div class="flex items-center gap-4 flex-grow">
+<!-- Hamburger to Toggle Sidebar -->
+<button class="text-[#8a8f98] hover:text-[#ffb77d] transition-none p-1 -ml-1" id="sidebar-toggle">
+<span class="material-symbols-outlined" data-icon="side_navigation">side_navigation</span>
+</button>
+<div class="h-4 w-[1px] bg-[#333333]"></div>
+<!-- Global Search Bar -->
+<div class="relative w-full max-w-md mx-2">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[#555558] text-[16px]" data-icon="search">search</span>
+<input class="w-full bg-[#252525] border border-[#333333] rounded-none pl-9 py-1.5 text-xs text-on-surface placeholder-[#555558] focus:outline-none focus:border-primary transition-none" placeholder="Search Graphite..." type="text"/>
+</div>
+<div class="hidden md:flex items-center gap-3 ml-2">
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="format_bold">format_bold</span></button>
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="format_italic">format_italic</span></button>
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="title">title</span></button>
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="code">code</span></button>
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="link">link</span></button>
+<button class="text-[#8a8f98] hover:text-white transition-none"><span class="material-symbols-outlined" data-icon="horizontal_rule">horizontal_rule</span></button>
+</div>
+</div>
+<div class="flex items-center gap-3 ml-4">
+<span class="material-symbols-outlined text-[#8a8f98] cursor-pointer hover:text-[#ffb77d]" data-icon="sync">sync</span>
+<span class="material-symbols-outlined text-[#8a8f98] cursor-pointer hover:text-white" data-icon="share">share</span>
+<span class="material-symbols-outlined text-[#8a8f98] cursor-pointer hover:text-white" data-icon="settings">settings</span>
+<span class="material-symbols-outlined text-[#8a8f98] cursor-pointer hover:text-white" data-icon="more_vert">more_vert</span>
+</div>
+</header>
+<!-- Editor Canvas -->
+<div class="flex-grow overflow-y-auto px-6 md:px-16 py-12 w-full">
+<div class="max-w-[720px] mx-auto">
+<nav class="mb-6">
+<p class="text-[12px] text-[#8a8f98] flex items-center gap-2">
+            Dev Notes <span class="material-symbols-outlined text-[14px]" data-icon="chevron_right">chevron_right</span> Architecture
+          </p>
+</nav>
+<h1 class="text-[28px] font-semibold text-white mb-8 tracking-tight">System Design Overview</h1>
+<div class="space-y-6 text-[#dcddde] text-[15px] leading-[1.7]">
+<h2 class="text-[20px] font-semibold text-white mt-10 mb-4">## Overview</h2>
+<p>
+            The Graphite system is designed as a distributed, collaborative note-taking environment. It leverages a local-first philosophy where data is primarily stored on the client device and synchronized asynchronously with a central coordinator. This ensures zero-latency interactions and offline availability while maintaining global consistency across multiple devices.
+          </p>
+<h2 class="text-[20px] font-semibold text-white mt-10 mb-4">## Components</h2>
+<ul class="list-disc pl-5 space-y-2 text-[#dcddde]">
+<li>Graphite Client: A cross-platform application built with React and Electron.</li>
+<li>Sync Coordinator: A Node.js backend managing WebSocket connections and state broadcasting.</li>
+<li>Persistence Layer: SQLite on the edge, backed by a distributed PostgreSQL cluster in the cloud.</li>
+</ul>
+<!-- Code Block -->
+<div class="mt-8 bg-[#141414] border border-[#333333] p-4 overflow-hidden">
+<div class="flex justify-between items-center mb-3">
+<span class="text-[11px] text-[#555558] font-mono">architecture.ts</span>
+<span class="text-[11px] text-[#555558] font-mono">TypeScript</span>
+</div>
+<pre class="font-mono text-[12px] leading-relaxed overflow-x-auto text-[#a48c7b]"><span class="text-[#ffb77d]">interface</span> <span class="text-[#c2c7d0]">NodeState</span> {
+  <span class="text-[#8a8f98]">id</span>: <span class="text-[#ffb77d]">string</span>;
+  <span class="text-[#8a8f98]">version</span>: <span class="text-[#ffb77d]">number</span>;
+  <span class="text-[#8a8f98]">vectorClock</span>: <span class="text-[#c2c7d0]">Record</span>&lt;<span class="text-[#ffb77d]">string</span>, <span class="text-[#ffb77d]">number</span>&gt;;
+}
+
+<span class="text-[#ffb77d]">export const</span> <span class="text-[#c2c7d0]">reconcile</span> = (local: <span class="text-[#c2c7d0]">NodeState</span>, remote: <span class="text-[#c2c7d0]">NodeState</span>) =&gt; {
+  <span class="text-[#555558]">// Implementation of Hybrid Logical Clock (HLC) reconciliation logic</span>
+  <span class="text-[#ffb77d]">return</span> local.version &gt; remote.version ? local : remote;
+};</pre>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Status Bar -->
+<footer class="h-8 border-t border-[#333333] flex items-center justify-between px-4 bg-[#131313] flex-shrink-0 z-40">
+<div class="text-[11px] font-normal text-[#555558] uppercase tracking-wider">
+        547 words · Saved just now
+      </div>
+<div class="flex gap-4">
+<span class="text-[11px] font-normal text-[#555558] uppercase tracking-wider hover:text-[#8a8f98] cursor-pointer">Markdown Guide</span>
+<span class="text-[11px] font-normal text-[#555558] uppercase tracking-wider hover:text-[#8a8f98] cursor-pointer">Support</span>
+</div>
+</footer>
+<!-- FAB -->
+<button class="absolute bottom-12 right-6 w-12 h-12 bg-[#f28500] flex items-center justify-center text-white z-50 hover:bg-[#d97700] transition-none">
+<span class="material-symbols-outlined" data-icon="edit">edit</span>
+</button>
+</main>
+</div>
+<script>
+  const sidebar = document.getElementById('sidebar-container');
+  const toggleBtn = document.getElementById('sidebar-toggle');
+
+  toggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth < 1024) {
+      sidebar.classList.add('collapsed');
+    } else {
+      sidebar.classList.remove('collapsed');
+    }
+  });
+</script>
+</body></html>

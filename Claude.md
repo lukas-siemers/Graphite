@@ -142,38 +142,38 @@ Sync is the paywall. Supabase client is never initialized for free users.
 
 ### Deliverables
 
-- [ ] Expo SDK 54 project scaffold with Expo Router v3 and TypeScript
-- [ ] Root monorepo `package.json` with yarn workspaces
-- [ ] SQLite schema + migration runner (`expo-sqlite`)
-- [ ] Zustand stores: `useNotebookStore`, `useNoteStore`, `useFolderStore`
-- [ ] Three-column iPad layout (sidebar 220px + note list 280px + editor fills rest)
-- [ ] Phone layout: tab-based navigation (sidebar → list → editor)
+- [x] Expo SDK 54 project scaffold with Expo Router v3 and TypeScript
+- [x] Root monorepo `package.json` with yarn workspaces
+- [x] SQLite schema + migration runner (`expo-sqlite`)
+- [x] Zustand stores: `useNotebookStore`, `useNoteStore`, `useFolderStore`
+- [x] Three-column iPad layout (sidebar 220px + note list 280px + editor fills rest)
+- [x] Phone layout: tab-based navigation (sidebar → list → editor)
 - [ ] Sidebar component:
-  - [ ] App logo + "Graphite" wordmark
-  - [ ] Notebook list with expand/collapse
-  - [ ] Folder tree with active state (tangerine accent)
-  - [ ] "New Note" pill button
-  - [ ] User avatar + settings icon at bottom
+  - [x] App logo + "Graphite" wordmark
+  - [x] Notebook list with expand/collapse
+  - [x] Folder tree with active state (tangerine accent)
+  - [x] "New Note" pill button
+  - [x] User avatar + settings icon at bottom
 - [ ] Note list component:
-  - [ ] Search bar (SQLite FTS5)
-  - [ ] Note cards with title, preview, timestamp
-  - [ ] Active card left-border accent
-  - [ ] Sort: last edited
+  - [x] Search bar (SQLite FTS5)
+  - [x] Note cards with title, preview, timestamp
+  - [x] Active card left-border accent
+  - [x] Sort: last edited
 - [ ] Markdown editor component:
-  - [ ] Title input (28px, no border)
-  - [ ] Breadcrumb below title
-  - [ ] Toolbar: Bold, Italic, H1, Code, Link, Draw toggle
+  - [x] Title input (28px, no border)
+  - [x] Breadcrumb below title
+  - [x] Toolbar: Bold, Italic, H1, Code, Link, Draw toggle
   - [ ] Live markdown rendering
   - [ ] Syntax-highlighted code blocks
-  - [ ] Word count + save status in bottom bar
+  - [x] Word count + save status in bottom bar
 - [ ] Apple Pencil drawing canvas (`react-native-skia`):
-  - [ ] Pressure + tilt sensitivity
-  - [ ] Pen / eraser / selection tools
-  - [ ] Stroke serialized as compact JSON array
+  - [x] Pressure + tilt sensitivity
+  - [x] Pen / eraser / selection tools
+  - [x] Stroke serialized as compact JSON array
   - [ ] Linked to note via `drawing_asset_id`
-  - [ ] Floating FAB button (tangerine circle, pencil icon) to toggle canvas
-- [ ] Full-text search with SQLite FTS5
-- [ ] Offline-first: zero network calls in Phase 1
+  - [x] Floating FAB button (tangerine circle, pencil icon) to toggle canvas
+- [x] Full-text search with SQLite FTS5
+- [x] Offline-first: zero network calls in Phase 1
 - [ ] App icon, splash screen (`#1E1E1E` background)
 - [ ] iPad-optimized layout (landscape + portrait)
 - [ ] TestFlight build + App Store submission

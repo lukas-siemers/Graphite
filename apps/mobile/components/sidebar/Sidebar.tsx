@@ -59,22 +59,43 @@ export default function Sidebar() {
       {/* Header */}
       <View
         style={{
+          height: 48,
+          flexDirection: 'row',
+          alignItems: 'center',
           paddingHorizontal: 16,
-          paddingTop: 20,
-          paddingBottom: 12,
+          borderBottomWidth: 1,
+          borderBottomColor: tokens.border,
         }}
       >
+        <Text style={{ fontSize: 14, color: tokens.accentLight, marginRight: 6 }}>
+          {'\u25C6'}
+        </Text>
         <Text
           style={{
-            fontSize: 18,
-            fontWeight: '700',
+            fontSize: 15,
+            fontWeight: '600',
             color: tokens.textPrimary,
-            letterSpacing: -0.5,
           }}
         >
           Graphite
         </Text>
       </View>
+
+      {/* NOTEBOOKS section label */}
+      <Text
+        style={{
+          fontSize: 11,
+          fontWeight: '500',
+          color: tokens.textMuted,
+          letterSpacing: 1.5,
+          paddingHorizontal: 8,
+          paddingTop: 16,
+          paddingBottom: 8,
+          textTransform: 'uppercase',
+        }}
+      >
+        NOTEBOOKS
+      </Text>
 
       {/* Notebook list */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
@@ -91,9 +112,9 @@ export default function Sidebar() {
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  paddingVertical: 8,
-                  paddingRight: 16,
-                  paddingLeft: isActive ? 14 : 16,
+                  paddingVertical: 6,
+                  paddingRight: 8,
+                  paddingLeft: isActive ? 6 : 8,
                   borderLeftWidth: isActive ? 2 : 0,
                   borderLeftColor: tokens.accent,
                   backgroundColor: isActive ? tokens.bgActive : 'transparent',
@@ -111,9 +132,9 @@ export default function Sidebar() {
                 </Text>
                 <Text
                   style={{
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: '500',
-                    color: tokens.textBody,
+                    color: isActive ? tokens.textBody : tokens.textMuted,
                     flex: 1,
                   }}
                   numberOfLines={1}
@@ -134,20 +155,22 @@ export default function Sidebar() {
           onPressIn={() => setNewNotePressed(true)}
           onPressOut={() => setNewNotePressed(false)}
           style={{
-            backgroundColor: newNotePressed ? tokens.accentPressed : tokens.accent,
-            paddingVertical: 10,
+            backgroundColor: newNotePressed ? tokens.accentPressed : tokens.accentTint,
+            paddingVertical: 8,
             borderRadius: 0,
+            borderWidth: 1,
+            borderColor: tokens.accent,
             alignItems: 'center',
           }}
         >
           <Text
             style={{
-              color: '#4D2600',
-              fontWeight: '600',
-              fontSize: 14,
+              color: tokens.accentLight,
+              fontWeight: '500',
+              fontSize: 13,
             }}
           >
-            + New Note
+            New Note
           </Text>
         </Pressable>
       </View>
@@ -164,14 +187,17 @@ export default function Sidebar() {
           justifyContent: 'space-between',
         }}
       >
-        <View
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
-            backgroundColor: tokens.bgHover,
-          }}
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 0,
+              backgroundColor: tokens.bgHover,
+            }}
+          />
+          <Text style={{ fontSize: 12, color: tokens.textBody }}>Lukas S.</Text>
+        </View>
         <Text style={{ fontSize: 18, color: tokens.textMuted }}>{'\u2699'}</Text>
       </View>
     </View>
