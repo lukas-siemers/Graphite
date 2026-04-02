@@ -6,6 +6,9 @@
   "scripts": {
     "test": "vitest run"
   },
+  "dependencies": {
+    "nanoid": "^5.0.0"
+  },
   "peerDependencies": {
     "expo-sqlite": ">=14.0.0"
   },

@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import type { Folder } from '@graphite/db';
+import type { SQLiteDatabase } from 'expo-sqlite';
+import {
+  type Folder,
+  getFolders,
+  createFolder,
+  deleteFolder,
+} from '@graphite/db';
 
 interface FolderState {
   folders: Folder[];
@@ -9,6 +15,14 @@ interface FolderState {
   addFolder: (folder: Folder) => void;
   updateFolder: (id: string, patch: Partial<Folder>) => void;
   removeFolder: (id: string) => void;
+  loadFolders: (db: SQLiteDatabase, notebookId: string) => Promise<void>;
+  createNewFolder: (
+    db: SQLiteDatabase,
+    notebookId: string,
+    name: string,
+    parentId?: string,
+  ) => Promise<Folder>;
+  deleteFolder: (db: SQLiteDatabase, id: string) => Promise<void>;
 }
 
 export const useFolderStore = create<FolderState>((set) => ({
@@ -24,4 +38,28 @@ export const useFolderStore = create<FolderState>((set) => ({
     })),
   removeFolder: (id) =>
     set((state) => ({ folders: state.folders.filter((f) => f.id !== id) })),
+
+  loadFolders: async (db: SQLiteDatabase, notebookId: string) => {
+    const folders = await getFolders(db, notebookId);
+    set({ folders });
+  },
+
+  createNewFolder: async (
+    db: SQLiteDatabase,
+    notebookId: string,
+    name: string,
+    parentId?: string,
+  ) => {
+    const folder = await createFolder(db, notebookId, name, parentId);
+    set((state) => ({ folders: [...state.folders, folder] }));
+    return folder;
+  },
+
+  deleteFolder: async (db: SQLiteDatabase, id: string) => {
+    await deleteFolder(db, id);
+    set((state) => ({
+      folders: state.folders.filter((f) => f.id !== id),
+      activeFolderId: state.activeFolderId === id ? null : state.activeFolderId,
+    }));
+  },
 }));

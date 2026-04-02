@@ -16,3 +16,30 @@ export function createTestDb(): Database.Database {
 
   return db;
 }
+
+/**
+ * Wraps a better-sqlite3 instance to match expo-sqlite's async API surface
+ * (runAsync, getAllAsync, getFirstAsync, execAsync) so operation functions
+ * written against expo-sqlite can run in the Node/Vitest test environment.
+ */
+export function createExpoCompatibleDb(): any {
+  const db = createTestDb();
+  return {
+    execAsync: async (sql: string) => {
+      db.exec(sql);
+    },
+    runAsync: async (sql: string, params: any[] = []) => {
+      const stmt = db.prepare(sql);
+      const result = stmt.run(...params);
+      return { lastInsertRowId: result.lastInsertRowid, changes: result.changes };
+    },
+    getAllAsync: async <T = any>(sql: string, params: any[] = []): Promise<T[]> => {
+      const stmt = db.prepare(sql);
+      return stmt.all(...params) as T[];
+    },
+    getFirstAsync: async <T = any>(sql: string, params: any[] = []): Promise<T | null> => {
+      const stmt = db.prepare(sql);
+      return (stmt.get(...params) as T) ?? null;
+    },
+  };
+}
