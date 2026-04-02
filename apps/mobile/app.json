@@ -23,7 +23,6 @@
       "expo-router",
       "expo-sqlite"
     ],
-    "newArchEnabled": false,
     "experiments": {
       "typedRoutes": true
     }

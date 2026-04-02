@@ -6,11 +6,21 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Canvas,
-  Path,
-  Skia,
-} from '@shopify/react-native-skia';
+// Skia requires a native build — not available in Expo Go.
+// Wrap in try/catch so the module loads safely in Expo Go.
+let Canvas: any = null;
+let Path: any = null;
+let Skia: any = null;
+let skiaAvailable = false;
+try {
+  const skia = require('@shopify/react-native-skia');
+  Canvas = skia.Canvas;
+  Path = skia.Path;
+  Skia = skia.Skia;
+  skiaAvailable = true;
+} catch {
+  // Running in Expo Go — drawing canvas will show a placeholder
+}
 import {
   Gesture,
   GestureDetector,
@@ -118,6 +128,18 @@ export default function DrawingCanvas({
   onSave,
   onClose,
 }: DrawingCanvasProps) {
+  if (!skiaAvailable) {
+    return (
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(19,19,19,0.97)', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: tokens.textMuted, fontSize: 14, textAlign: 'center', paddingHorizontal: 32 }}>
+          Drawing canvas requires a native build.{'\n'}Use expo run:ios to enable Apple Pencil support.
+        </Text>
+        <Pressable onPress={onClose} style={{ marginTop: 24, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: tokens.bgHover }}>
+          <Text style={{ color: tokens.accent, fontWeight: '600', fontSize: 14 }}>Close</Text>
+        </Pressable>
+      </View>
+    );
+  }
   const insets = useSafeAreaInsets();
 
   // ---- drawing state ----
