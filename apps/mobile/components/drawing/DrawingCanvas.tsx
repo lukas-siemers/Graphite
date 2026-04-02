@@ -157,6 +157,7 @@ export default function DrawingCanvas({
     .runOnJS(true)
     .minDistance(0)
     .onBegin((event) => {
+      const _pressure = (event as any).pressure;
       const newStroke: Stroke = {
         id: nanoid(),
         tool: activeTool,
@@ -167,8 +168,8 @@ export default function DrawingCanvas({
             x: event.x,
             y: event.y,
             pressure:
-              typeof event.pressure === 'number' && event.pressure > 0
-                ? event.pressure
+              typeof _pressure === 'number' && _pressure > 0
+                ? _pressure
                 : 0.5,
             tilt: 0,
           },
@@ -179,12 +180,13 @@ export default function DrawingCanvas({
     })
     .onUpdate((event) => {
       if (!currentStrokeRef.current) return;
+      const _pressure = (event as any).pressure;
       const point: Point = {
         x: event.x,
         y: event.y,
         pressure:
-          typeof event.pressure === 'number' && event.pressure > 0
-            ? event.pressure
+          typeof _pressure === 'number' && _pressure > 0
+            ? _pressure
             : 0.5,
         tilt: 0,
       };

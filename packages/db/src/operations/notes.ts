@@ -44,6 +44,16 @@ export async function createNote(
      VALUES (?, ?, ?, 'Untitled', '', NULL, 0, ?, ?, NULL)`,
     [id, folder, notebookId, now, now],
   );
+  const inserted = await db.getFirstAsync<{ rowid: number }>(
+    'SELECT rowid FROM notes WHERE id = ?',
+    [id],
+  );
+  if (inserted) {
+    await db.runAsync(
+      `INSERT INTO notes_fts(rowid, title, body) VALUES (?, 'Untitled', '')`,
+      [inserted.rowid],
+    );
+  }
   return {
     id,
     folderId: folder,
@@ -96,6 +106,13 @@ export async function updateNote(
   patch: { title?: string; body?: string },
 ): Promise<void> {
   const now = Date.now();
+  // Read the current row (including rowid) before mutating so we can issue the
+  // FTS5 'delete' command with the old title/body values.
+  const before = await db.getFirstAsync<{ rowid: number; title: string; body: string }>(
+    'SELECT rowid, title, body FROM notes WHERE id = ?',
+    [id],
+  );
+
   if (patch.title !== undefined && patch.body !== undefined) {
     await db.runAsync(
       'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
@@ -111,6 +128,25 @@ export async function updateNote(
       'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
       [patch.body, now, id],
     );
+  }
+
+  if (before) {
+    // Remove the old FTS entry using the FTS5 'delete' command.
+    await db.runAsync(
+      `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)`,
+      [before.rowid, before.title, before.body],
+    );
+    // Read updated title/body then insert the new FTS entry.
+    const after = await db.getFirstAsync<{ title: string; body: string }>(
+      'SELECT title, body FROM notes WHERE id = ?',
+      [id],
+    );
+    if (after) {
+      await db.runAsync(
+        `INSERT INTO notes_fts(rowid, title, body) VALUES(?, ?, ?)`,
+        [before.rowid, after.title, after.body],
+      );
+    }
   }
 }
 
