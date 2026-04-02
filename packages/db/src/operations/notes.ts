@@ -1,5 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid/non-secure';
 import type { Note } from '../types';
 
 interface RawNote {
