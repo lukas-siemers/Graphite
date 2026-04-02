@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { useState, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, TextInput } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase } from '@graphite/db';
+import { getDatabase, updateNotebook } from '@graphite/db';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -11,8 +12,11 @@ export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
+  const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
+  const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const loadFolders = useFolderStore((s) => s.loadFolders);
+  const createNewFolder = useFolderStore((s) => s.createNewFolder);
   const createNewNote = useNoteStore((s) => s.createNewNote);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
@@ -20,6 +24,9 @@ export default function Sidebar() {
     new Set(notebooks.map((n) => n.id)),
   );
   const [newNotePressed, setNewNotePressed] = useState(false);
+  const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<TextInput>(null);
 
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
@@ -54,6 +61,47 @@ export default function Sidebar() {
     }
   }
 
+  function startRename(notebookId: string, currentName: string) {
+    setRenamingNotebookId(notebookId);
+    setRenameValue(currentName);
+    // Focus happens via autoFocus on the TextInput
+  }
+
+  async function commitRename(notebookId: string, originalName: string) {
+    const trimmed = renameValue.trim();
+    const finalName = trimmed.length > 0 ? trimmed : originalName;
+    setRenamingNotebookId(null);
+    setRenameValue('');
+    if (finalName === originalName) return;
+    try {
+      const db = getDatabase();
+      await updateNotebook(db, notebookId, finalName);
+      storeUpdateNotebook(notebookId, { name: finalName });
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
+  async function handleCreateNewNotebook() {
+    try {
+      const db = getDatabase();
+      const notebook = await createNewNotebook(db, 'New Notebook');
+      setExpandedIds((prev) => new Set([...prev, notebook.id]));
+      startRename(notebook.id, notebook.name);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
+  async function handleCreateNewFolder(notebookId: string) {
+    try {
+      const db = getDatabase();
+      await createNewFolder(db, notebookId, 'New Folder');
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
   return (
     <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgSidebar }}>
       {/* Header */}
@@ -81,33 +129,56 @@ export default function Sidebar() {
         </Text>
       </View>
 
-      {/* NOTEBOOKS section label */}
-      <Text
+      {/* NOTEBOOKS section label row */}
+      <View
         style={{
-          fontSize: 11,
-          fontWeight: '500',
-          color: tokens.textMuted,
-          letterSpacing: 1.5,
+          flexDirection: 'row',
+          alignItems: 'center',
           paddingHorizontal: 8,
           paddingTop: 16,
           paddingBottom: 8,
-          textTransform: 'uppercase',
         }}
       >
-        NOTEBOOKS
-      </Text>
+        <Text
+          style={{
+            flex: 1,
+            fontSize: 11,
+            fontWeight: '500',
+            color: tokens.textMuted,
+            letterSpacing: 1.5,
+            textTransform: 'uppercase',
+          }}
+        >
+          NOTEBOOKS
+        </Text>
+        <Pressable
+          onPress={handleCreateNewNotebook}
+          hitSlop={8}
+          style={{ paddingHorizontal: 4 }}
+        >
+          <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 18 }}>
+            +
+          </Text>
+        </Pressable>
+      </View>
 
       {/* Notebook list */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         {notebooks.map((notebook) => {
           const isActive = notebook.id === activeNotebookId;
           const isExpanded = expandedIds.has(notebook.id);
+          const isRenaming = renamingNotebookId === notebook.id;
+
           return (
             <View key={notebook.id}>
               <Pressable
                 onPress={() => {
+                  if (isRenaming) return;
                   handleNotebookPress(notebook.id);
                   toggleExpand(notebook.id);
+                }}
+                onLongPress={() => {
+                  if (!isRenaming) startRename(notebook.id, notebook.name);
                 }}
                 style={{
                   flexDirection: 'row',
@@ -120,6 +191,7 @@ export default function Sidebar() {
                   backgroundColor: isActive ? tokens.bgActive : 'transparent',
                 }}
               >
+                {/* Expand/collapse arrow */}
                 <Text
                   style={{
                     fontSize: 10,
@@ -130,18 +202,63 @@ export default function Sidebar() {
                 >
                   {isExpanded ? '\u25BC' : '\u25B6'}
                 </Text>
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: '500',
-                    color: isActive ? tokens.textBody : tokens.textMuted,
-                    flex: 1,
-                  }}
-                  numberOfLines={1}
-                >
-                  {notebook.name}
-                </Text>
+
+                {/* Folder icon */}
+                <MaterialCommunityIcons
+                  name="folder"
+                  size={15}
+                  color={isActive ? tokens.accentLight : tokens.textMuted}
+                  style={{ marginRight: 6 }}
+                />
+
+                {/* Name or rename input */}
+                {isRenaming ? (
+                  <TextInput
+                    ref={renameInputRef}
+                    autoFocus
+                    value={renameValue}
+                    onChangeText={setRenameValue}
+                    onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
+                    onBlur={() => commitRename(notebook.id, notebook.name)}
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      fontWeight: '500',
+                      color: tokens.textBody,
+                      padding: 0,
+                      margin: 0,
+                    }}
+                    selectTextOnFocus
+                    returnKeyType="done"
+                  />
+                ) : (
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: '500',
+                      color: isActive ? tokens.textBody : tokens.textMuted,
+                      flex: 1,
+                    }}
+                    numberOfLines={1}
+                  >
+                    {notebook.name}
+                  </Text>
+                )}
+
+                {/* New folder "+" button */}
+                {isExpanded && !isRenaming && (
+                  <Pressable
+                    onPress={() => handleCreateNewFolder(notebook.id)}
+                    hitSlop={8}
+                    style={{ paddingHorizontal: 4 }}
+                  >
+                    <Text style={{ fontSize: 14, color: tokens.textMuted, lineHeight: 18 }}>
+                      +
+                    </Text>
+                  </Pressable>
+                )}
               </Pressable>
+
               {isExpanded && <FolderTree notebookId={notebook.id} />}
             </View>
           );

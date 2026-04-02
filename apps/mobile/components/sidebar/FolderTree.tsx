@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, TextInput } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
+import { getDatabase, updateFolder } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
-import { getDatabase } from '@graphite/db';
 
 interface FolderTreeProps {
   notebookId: string;
@@ -13,16 +14,20 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const folders = useFolderStore((s) => s.folders);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
+  const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
+  const createNewNote = useNoteStore((s) => s.createNewNote);
 
   const notebookFolders = folders.filter((f) => f.notebookId === notebookId);
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set(notebookFolders.map((f) => f.id)),
   );
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   function handleFolderPress(folderId: string) {
     setActiveFolder(folderId);
@@ -43,17 +48,53 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
     }
   }
 
+  function startFolderRename(folderId: string, currentName: string) {
+    setRenamingFolderId(folderId);
+    setRenameValue(currentName);
+  }
+
+  async function commitFolderRename(folderId: string, originalName: string) {
+    const trimmed = renameValue.trim();
+    const finalName = trimmed.length > 0 ? trimmed : originalName;
+    setRenamingFolderId(null);
+    setRenameValue('');
+    if (finalName === originalName) return;
+    try {
+      const db = getDatabase();
+      await updateFolder(db, folderId, finalName);
+      storeUpdateFolder(folderId, { name: finalName });
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
+  async function handleCreateNewNote(folderId: string) {
+    try {
+      const db = getDatabase();
+      await createNewNote(db, notebookId, folderId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
   return (
     <View>
       {notebookFolders.map((folder) => {
         const isActiveFolder = folder.id === activeFolderId;
         const isExpanded = expandedFolders.has(folder.id);
+        const isRenaming = renamingFolderId === folder.id;
         const folderNotes = notes.filter((n) => n.folderId === folder.id);
 
         return (
           <View key={folder.id}>
             <Pressable
-              onPress={() => handleFolderPress(folder.id)}
+              onPress={() => {
+                if (isRenaming) return;
+                handleFolderPress(folder.id);
+              }}
+              onLongPress={() => {
+                if (!isRenaming) startFolderRename(folder.id, folder.name);
+              }}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -65,6 +106,7 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
                 backgroundColor: isActiveFolder ? tokens.bgActive : 'transparent',
               }}
             >
+              {/* Expand/collapse arrow */}
               <Text
                 style={{
                   fontSize: 11,
@@ -74,47 +116,100 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
               >
                 {isExpanded ? '▼' : '▶'}
               </Text>
-              <Text
-                style={{
-                  fontSize: 13,
-                  color: isActiveFolder ? tokens.textBody : tokens.textMuted,
-                  fontWeight: isActiveFolder ? '500' : '400',
-                  flex: 1,
-                }}
-                numberOfLines={1}
-              >
-                {folder.name}
-              </Text>
+
+              {/* Name or rename input */}
+              {isRenaming ? (
+                <TextInput
+                  autoFocus
+                  value={renameValue}
+                  onChangeText={setRenameValue}
+                  onSubmitEditing={() => commitFolderRename(folder.id, folder.name)}
+                  onBlur={() => commitFolderRename(folder.id, folder.name)}
+                  style={{
+                    flex: 1,
+                    fontSize: 13,
+                    color: tokens.textBody,
+                    fontWeight: '500',
+                    padding: 0,
+                    margin: 0,
+                  }}
+                  selectTextOnFocus
+                  returnKeyType="done"
+                />
+              ) : (
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: isActiveFolder ? tokens.textBody : tokens.textMuted,
+                    fontWeight: isActiveFolder ? '500' : '400',
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {folder.name}
+                </Text>
+              )}
             </Pressable>
 
-            {isExpanded && folderNotes.map((note) => {
-              const isActiveNote = note.id === activeNoteId;
-              return (
+            {isExpanded && (
+              <View>
+                {folderNotes.map((note) => {
+                  const isActiveNote = note.id === activeNoteId;
+                  return (
+                    <Pressable
+                      key={note.id}
+                      onPress={() => setActiveNote(note.id)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingLeft: isActiveNote ? 42 : 44,
+                        paddingRight: 16,
+                        paddingVertical: 5,
+                        borderLeftWidth: isActiveNote ? 2 : 0,
+                        borderLeftColor: tokens.accent,
+                        backgroundColor: isActiveNote ? tokens.bgActive : 'transparent',
+                      }}
+                    >
+                      <MaterialCommunityIcons
+                        name="file-document-outline"
+                        size={13}
+                        color={isActiveNote ? tokens.accentLight : tokens.textMuted}
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isActiveNote ? tokens.accentLight : tokens.textMuted,
+                          fontWeight: isActiveNote ? '500' : '400',
+                          flex: 1,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {note.title || 'Untitled'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+
+                {/* New Note row at the bottom of each folder */}
                 <Pressable
-                  key={note.id}
-                  onPress={() => setActiveNote(note.id)}
+                  onPress={() => handleCreateNewNote(folder.id)}
                   style={{
-                    paddingLeft: isActiveNote ? 42 : 44,
-                    paddingRight: 16,
-                    paddingVertical: 5,
-                    borderLeftWidth: isActiveNote ? 2 : 0,
-                    borderLeftColor: tokens.accent,
-                    backgroundColor: isActiveNote ? tokens.bgActive : 'transparent',
+                    paddingLeft: 44,
+                    paddingVertical: 4,
                   }}
                 >
                   <Text
                     style={{
-                      fontSize: 12,
-                      color: isActiveNote ? tokens.accentLight : tokens.textMuted,
-                      fontWeight: isActiveNote ? '500' : '400',
+                      fontSize: 11,
+                      color: tokens.textHint,
                     }}
-                    numberOfLines={1}
                   >
-                    {note.title || 'Untitled'}
+                    + New Note
                   </Text>
                 </Pressable>
-              );
-            })}
+              </View>
+            )}
           </View>
         );
       })}
