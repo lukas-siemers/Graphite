@@ -1,0 +1,20 @@
+{
+  "name": "@graphite/desktop",
+  "version": "0.1.0",
+  "description": "Graphite desktop app (Electron) — Phase 3",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "echo 'Build pipeline coming in Phase 3'"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.0",
+    "electron-updater": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "electron": "^30.0.0",
+    "typescript": "^5.4.0"
+  }
+}

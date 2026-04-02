@@ -1,0 +1,94 @@
+# Graphite Design Specification (DESIGN.md)
+
+## 1. Vision & Core Aesthetic
+Graphite is a high-performance, developer-centric markdown note-taking application. The aesthetic is "The Digital Monolith":
+*   **Visual Philosophy:** Functional, flat, and hyper-precise. No shadows, no gradients, no rounded corners (except for specific inputs/buttons). 
+*   **Inspiration:** VS Code, Linear, and Obsidian (Power User mode).
+*   **Key Principle:** Every pixel must earn its place. If it doesn't serve a functional purpose, it is removed.
+
+---
+
+## 2. Color System (Obsidian/Linear Hybrid)
+
+### Surface Colors
+| Layer | HEX | Usage |
+| :--- | :--- | :--- |
+| **Base Background** | `#1E1E1E` | Main editor and list background. |
+| **Sidebar Background** | `#252525` | Navigation and drawer backgrounds. |
+| **Hover State** | `#2C2C2C` | List item and button hover effects. |
+| **Panel Borders** | `#333333` | 1px solid separators between all panels. |
+
+### Typography Colors
+| Layer | HEX | Usage |
+| :--- | :--- | :--- |
+| **Primary Text** | `#FFFFFF` | Titles, headings, and active UI elements. |
+| **Body Text** | `#DCDDDE` | Paragraphs and primary list content. |
+| **Muted Text** | `#8A8F98` | Labels, placeholders, and inactive icons. |
+| **Subtle Metadata** | `#555558` | Timestamps and status bar info. |
+
+### Accent System (Tangerine)
+| Tone | HEX | Usage |
+| :--- | :--- | :--- |
+| **Primary Accent** | `#F28500` | Primary CTA, active icons, selected borders. |
+| **Light Accent** | `#FFB347` | Text within accent backgrounds. |
+| **Pressed/Dark** | `#D4730A` | Active click states. |
+| **Accent Tint BG** | `#2C1800` | Background for active list/sidebar items. |
+
+---
+
+## 3. Layout & Structure
+
+### Three-Column Shell
+1.  **Sidebar (Column A - 220px):**
+    *   `bg: #252525`, `border-right: 1px solid #333`.
+    *   **Header:** "Graphite" wordmark (15px, Semi-Bold) + Diamond Icon.
+    *   **Navigation:** Vertical list with 12px vertical spacing.
+    *   **Active State:** `bg: #2C1800`, `border-left: 2px solid #F28500`, `text: #F28500`.
+    *   **Footer:** "New Note" Button (Pill shape, outlined with #F28500).
+
+2.  **Note List (Column B - 280px):**
+    *   `bg: #1E1E1E`, `border-right: 1px solid #333`.
+    *   **Search:** Input with 8px border-radius, `#252525` background.
+    *   **Cards:** No borders. 14px titles, 12px truncated previews.
+    *   **Selected Card:** `#252525` background + 2px left border in tangerine.
+
+3.  **Editor (Column C - Fluid):**
+    *   `bg: #1E1E1E`.
+    *   **Toolbar:** 16px icons in `#8A8F98`. 
+    *   **Breadcrumbs:** `Dev Notes / Architecture` in 12px muted text.
+    *   **Typography:**
+        *   H1: 28px, Semi-Bold, White.
+        *   H2: 20px, Semi-Bold, White.
+        *   Body: 15px, Line-height 1.7, `#DCDDDE`.
+    *   **Code Block:** Background `#141414`, border `#333`, 12px Monospace (Inter/Fira).
+
+---
+
+## 4. Components & Interactive States
+
+### Buttons
+*   **Primary (New Note):** Pill-shaped, `#2C1800` background, 1px `#F28500` border.
+*   **FAB (Mobile/Tablet):** 48px circle, `#F28500` background, White icon.
+
+### Syntax Highlighting (TypeScript)
+*   **Keywords:** `#569CD6` (Blue)
+*   **Strings:** `#6A9955` (Green)
+*   **Functions:** `#DCDCAA` (Yellow/Tan)
+*   **Numbers/Constants:** `#B5CEA8` (Pale Green)
+
+---
+
+## 5. Spacing & Grid
+*   **Base Unit:** 4px.
+*   **Panel Padding:** 16px.
+*   **List Item Gap:** 12px.
+*   **Section Gaps:** 24px.
+*   **Typography Tracking:** `tight` (-0.02em) for UI elements, `normal` for body text.
+
+---
+
+## 6. Implementation Notes for Claude
+*   **Framework:** Tailwind CSS preferred for utility classes.
+*   **Icons:** Lucide-react or Phosphor Icons (Regular weight).
+*   **Fonts:** `Inter` for UI, `JetBrains Mono` or `Fira Code` for editor snippets.
+*   **Transitions:** Instant (0ms) or extremely fast (100ms) to maintain "mechanical" feel. Avoid bouncy animations.

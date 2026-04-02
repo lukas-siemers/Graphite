@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Lock files — project uses yarn, ignore npm lockfile
+package-lock.json
+
+# Expo
+.expo/
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# iOS
+ios/Pods/
+
+# Android
+android/.gradle/
+android/build/
+
+# Misc
+*.orig.*
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Turborepo
+.turbo/

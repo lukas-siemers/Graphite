@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Graphite",
+    "slug": "graphite",
+    "scheme": "graphite",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#131313",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.graphite.app",
+      "requiresFullScreen": false
+    },
+    "android": {
+      "package": "com.graphite.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite"
+    ],
+    "newArchEnabled": false,
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
