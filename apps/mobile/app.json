@@ -7,6 +7,12 @@
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#131313",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#131313"
+    },
     "platforms": [
       "ios",
       "android"
