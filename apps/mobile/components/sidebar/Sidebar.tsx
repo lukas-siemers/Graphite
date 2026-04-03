@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Image } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateNotebook } from '@graphite/db';
@@ -115,18 +115,11 @@ export default function Sidebar() {
           borderBottomColor: tokens.border,
         }}
       >
-        <Text style={{ fontSize: 14, color: tokens.accentLight, marginRight: 6 }}>
-          {'\u25C6'}
-        </Text>
-        <Text
-          style={{
-            fontSize: 15,
-            fontWeight: '600',
-            color: tokens.textPrimary,
-          }}
-        >
-          Graphite
-        </Text>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={{ width: 22, height: 22, marginRight: 8 }}
+          resizeMode="contain"
+        />
       </View>
 
       {/* NOTEBOOKS section label row */}
