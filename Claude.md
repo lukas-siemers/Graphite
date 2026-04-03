@@ -159,22 +159,22 @@ Sync is the paywall. Supabase client is never initialized for free users.
   - [x] Note cards with title, preview, timestamp
   - [x] Active card left-border accent
   - [x] Sort: last edited
-- [ ] Markdown editor component:
+- [x] Markdown editor component:
   - [x] Title input (28px, no border)
   - [x] Breadcrumb below title
   - [x] Toolbar: Bold, Italic, H1, Code, Link, Draw toggle
-  - [ ] Live markdown rendering
-  - [ ] Syntax-highlighted code blocks
+  - [x] Live markdown rendering
+  - [x] Syntax-highlighted code blocks
   - [x] Word count + save status in bottom bar
-- [ ] Apple Pencil drawing canvas (`react-native-skia`):
+- [x] Apple Pencil drawing canvas (`react-native-skia`):
   - [x] Pressure + tilt sensitivity
   - [x] Pen / eraser / selection tools
   - [x] Stroke serialized as compact JSON array
-  - [ ] Linked to note via `drawing_asset_id`
+  - [x] Linked to note via `drawing_asset_id`
   - [x] Floating FAB button (tangerine circle, pencil icon) to toggle canvas
 - [x] Full-text search with SQLite FTS5
 - [x] Offline-first: zero network calls in Phase 1
-- [ ] App icon, splash screen (`#1E1E1E` background)
+- [x] App icon, splash screen (`#1E1E1E` background)
 - [ ] iPad-optimized layout (landscape + portrait)
 - [ ] TestFlight build + App Store submission
 
