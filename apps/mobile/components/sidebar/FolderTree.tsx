@@ -23,9 +23,11 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
 
   const notebookFolders = folders.filter((f) => f.notebookId === notebookId);
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-    new Set(notebookFolders.map((f) => f.id)),
-  );
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    notebookFolders.forEach((f) => s.add(f.id));
+    return s;
+  });
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 

@@ -20,9 +20,11 @@ export default function Sidebar() {
   const createNewNote = useNoteStore((s) => s.createNewNote);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(
-    new Set(notebooks.map((n) => n.id)),
-  );
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    notebooks.forEach((n) => s.add(n.id));
+    return s;
+  });
   const [newNotePressed, setNewNotePressed] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
