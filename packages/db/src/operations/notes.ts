@@ -103,7 +103,7 @@ export async function getNote(
 export async function updateNote(
   db: SQLiteDatabase,
   id: string,
-  patch: { title?: string; body?: string },
+  patch: { title?: string; body?: string; drawingAssetId?: string | null },
 ): Promise<void> {
   const now = Date.now();
   // Read the current row (including rowid) before mutating so we can issue the
@@ -127,6 +127,13 @@ export async function updateNote(
     await db.runAsync(
       'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
       [patch.body, now, id],
+    );
+  }
+
+  if (patch.drawingAssetId !== undefined) {
+    await db.runAsync(
+      'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
+      [patch.drawingAssetId, now, id],
     );
   }
 

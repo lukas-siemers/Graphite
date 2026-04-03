@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, useWindowDimensions } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   initDatabase,
+  getDatabase,
   getNotebooks,
   getFolders,
   getNotes,
@@ -20,14 +22,48 @@ import Editor from '../../components/editor/Editor';
 import { DrawingCanvas } from '../../components/drawing';
 import type { Stroke } from '../../components/drawing';
 
-/** In-memory store for drawing strokes keyed by noteId (Phase 1 — no backend). */
-const drawingStore = new Map<string, Stroke[]>();
+// ---------------------------------------------------------------------------
+// Drawing persistence helpers (Phase 1 — local filesystem via expo-file-system)
+// ---------------------------------------------------------------------------
+
+const DRAWINGS_DIR = `${FileSystem.documentDirectory}drawings/`;
+
+async function ensureDrawingsDir(): Promise<void> {
+  const info = await FileSystem.getInfoAsync(DRAWINGS_DIR);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(DRAWINGS_DIR, { intermediates: true });
+  }
+}
+
+function drawingPath(noteId: string): string {
+  return `${DRAWINGS_DIR}${noteId}.json`;
+}
+
+async function loadStrokes(noteId: string): Promise<Stroke[]> {
+  try {
+    const path = drawingPath(noteId);
+    const info = await FileSystem.getInfoAsync(path);
+    if (!info.exists) return [];
+    const json = await FileSystem.readAsStringAsync(path);
+    return JSON.parse(json) as Stroke[];
+  } catch {
+    return [];
+  }
+}
+
+async function saveStrokes(noteId: string, strokes: Stroke[]): Promise<string> {
+  await ensureDrawingsDir();
+  const path = drawingPath(noteId);
+  await FileSystem.writeAsStringAsync(path, JSON.stringify(strokes));
+  return path;
+}
 
 type PhoneScreen = 'sidebar' | 'list' | 'editor';
 
 function PhoneLayout() {
   const [screen, setScreen] = useState<PhoneScreen>('sidebar');
   const [drawingOpen, setDrawingOpen] = useState(false);
+  const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
 
@@ -104,7 +140,13 @@ function PhoneLayout() {
             />
             {/* FAB — square tangerine, draws over the editor */}
             <Pressable
-              onPress={() => setDrawingOpen((v) => !v)}
+              onPress={async () => {
+                if (!drawingOpen && activeNoteId) {
+                  const strokes = await loadStrokes(activeNoteId);
+                  setInitialStrokes(strokes);
+                }
+                setDrawingOpen((v) => !v);
+              }}
               style={({ pressed }) => ({
                 position: 'absolute',
                 bottom: 24,
@@ -122,10 +164,12 @@ function PhoneLayout() {
             {drawingOpen && activeNoteId && (
               <DrawingCanvas
                 noteId={activeNoteId}
-                initialStrokes={drawingStore.get(activeNoteId) ?? []}
+                initialStrokes={initialStrokes}
                 onClose={() => setDrawingOpen(false)}
-                onSave={(strokes) => {
-                  drawingStore.set(activeNoteId, strokes);
+                onSave={async (strokes) => {
+                  const path = await saveStrokes(activeNoteId, strokes);
+                  const db = getDatabase();
+                  await updateNote(db, activeNoteId, { drawingAssetId: path });
                   setDrawingOpen(false);
                 }}
               />
@@ -146,6 +190,7 @@ interface IPadLayoutProps {
 function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutProps) {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
 
   const TOOLBAR_ITEMS = ['B', 'I', 'T', '<>', 'Link', '\u2014'] as const;
   const RIGHT_ICONS = ['\u21BB', '\u2197', '\u2699', '\u22EE'] as const;
@@ -271,7 +316,13 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
           />
           {/* FAB — square tangerine */}
           <Pressable
-            onPress={() => setDrawingOpen((v) => !v)}
+            onPress={async () => {
+              if (!drawingOpen && activeNoteId) {
+                const strokes = await loadStrokes(activeNoteId);
+                setInitialStrokes(strokes);
+              }
+              setDrawingOpen((v) => !v);
+            }}
             style={({ pressed }) => ({
               position: 'absolute',
               bottom: 24,
@@ -289,10 +340,12 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
           {drawingOpen && activeNoteId && (
             <DrawingCanvas
               noteId={activeNoteId}
-              initialStrokes={drawingStore.get(activeNoteId) ?? []}
+              initialStrokes={initialStrokes}
               onClose={() => setDrawingOpen(false)}
-              onSave={(strokes) => {
-                drawingStore.set(activeNoteId, strokes);
+              onSave={async (strokes) => {
+                const path = await saveStrokes(activeNoteId, strokes);
+                const db = getDatabase();
+                await updateNote(db, activeNoteId, { drawingAssetId: path });
                 setDrawingOpen(false);
               }}
             />
