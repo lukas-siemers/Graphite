@@ -8,7 +8,9 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
-const DOUBLE_TAP_MS = 300;
+// Delay before a single tap fires expand/collapse. A second tap within this
+// window is treated as a double-tap and triggers rename instead.
+const DOUBLE_TAP_MS = 500;
 
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
@@ -34,51 +36,57 @@ export default function Sidebar() {
   const [reorderMode, setReorderMode] = useState(false);
   const renameInputRef = useRef<TextInput>(null);
 
-  // Map of notebookId → timestamp of last tap (for double-tap detection).
-  // Stored as a ref to avoid triggering re-renders.
-  const lastTapRef = useRef<Map<string, number>>(new Map());
+  // Double-tap implementation:
+  //   - First tap: schedule the expand/collapse (and active-notebook switch) after
+  //     DOUBLE_TAP_MS. Store the timer ID keyed by notebookId.
+  //   - Second tap within DOUBLE_TAP_MS: cancel the scheduled action, fire rename.
+  // This prevents expand/collapse from firing at all when a double-tap follows.
+  const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  function toggleExpand(id: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  async function handleNotebookPress(notebookId: string, notebookName: string) {
+  function handleNotebookPress(notebookId: string, notebookName: string) {
     if (renamingNotebookId === notebookId) return;
 
-    // Double-tap detection
-    const now = Date.now();
-    const last = lastTapRef.current.get(notebookId) ?? 0;
-    lastTapRef.current.set(notebookId, now);
-    if (now - last < DOUBLE_TAP_MS) {
-      lastTapRef.current.delete(notebookId);
+    const pending = pendingTapRef.current.get(notebookId);
+    if (pending !== undefined) {
+      // Second tap within window — cancel single-tap action and rename instead.
+      clearTimeout(pending);
+      pendingTapRef.current.delete(notebookId);
       startRename(notebookId, notebookName);
       return;
     }
 
-    toggleExpand(notebookId);
-    // Only reload data when switching to a different notebook.
-    // Toggling expand/collapse on the active notebook must not wipe the note
-    // list (especially on web where loadNotes returns empty).
-    if (notebookId === activeNotebookId) return;
-    setActiveNotebook(notebookId);
-    // Do NOT call loadFolders here — each FolderTree loads its own folders on
-    // mount.  Calling loadFolders with the new notebook's ID replaces the
-    // entire folder store, which makes the previously-expanded notebook's
-    // FolderTree render empty while it is still visible.
-    try {
-      const db = getDatabase();
-      await loadNotes(db, notebookId, null);
-    } catch (_) {
-      // db not ready yet
-    }
+    // First tap — schedule the expand/collapse + active-notebook switch.
+    const timer = setTimeout(() => {
+      pendingTapRef.current.delete(notebookId);
+
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(notebookId)) {
+          next.delete(notebookId);
+        } else {
+          next.add(notebookId);
+        }
+        return next;
+      });
+
+      // Only reload data when switching to a different notebook.
+      // Toggling expand/collapse on the active notebook must not wipe the note
+      // list (especially on web where loadNotes returns empty).
+      if (notebookId === activeNotebookId) return;
+      setActiveNotebook(notebookId);
+      // Do NOT call loadFolders here — each FolderTree loads its own folders on
+      // mount. Calling loadFolders with the new notebook's ID replaces the
+      // entire folder store, which makes the previously-expanded notebook's
+      // FolderTree render empty while it is still visible.
+      try {
+        const db = getDatabase();
+        loadNotes(db, notebookId, null);
+      } catch (_) {
+        // db not ready yet
+      }
+    }, DOUBLE_TAP_MS);
+
+    pendingTapRef.current.set(notebookId, timer);
   }
 
   async function handleNewNote() {
@@ -132,6 +140,33 @@ export default function Sidebar() {
     }
   }
 
+  // Extracted so both the long-press handler and the × button can invoke it.
+  function handleDeleteNotebook(notebookId: string, notebookName: string) {
+    Alert.alert(
+      'Delete Notebook',
+      `Delete "${notebookName}" and all its contents? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = getDatabase();
+              await useNotebookStore.getState().deleteNotebook(db, notebookId);
+              useFolderStore.getState().setFolders([]);
+              useFolderStore.getState().setActiveFolder(null);
+              useNoteStore.getState().setNotes([]);
+              useNoteStore.getState().setActiveNote(null);
+            } catch (_) {
+              // db not ready yet
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function handleNotebookLongPress(notebookId: string, notebookName: string) {
     Alert.alert(
       notebookName,
@@ -145,31 +180,7 @@ export default function Sidebar() {
         {
           text: 'Delete Notebook',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Delete Notebook',
-              `Delete ${notebookName} and all its contents? This cannot be undone.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      const db = getDatabase();
-                      await useNotebookStore.getState().deleteNotebook(db, notebookId);
-                      useFolderStore.getState().setFolders([]);
-                      useFolderStore.getState().setActiveFolder(null);
-                      useNoteStore.getState().setNotes([]);
-                      useNoteStore.getState().setActiveNote(null);
-                    } catch (_) {
-                      // db not ready yet
-                    }
-                  },
-                },
-              ],
-            );
-          },
+          onPress: () => handleDeleteNotebook(notebookId, notebookName),
         },
       ],
     );
@@ -394,6 +405,28 @@ export default function Sidebar() {
                     <Text style={{ fontSize: 14, color: tokens.textMuted, lineHeight: 18 }}>
                       +
                     </Text>
+                  </Pressable>
+                )}
+
+                {/* Delete × button — shown next to "+" when expanded, or always
+                    visible when collapsed, so the user can delete a closed notebook */}
+                {!isRenaming && !reorderMode && (
+                  <Pressable
+                    onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
+                    hitSlop={8}
+                    style={{ paddingHorizontal: 4 }}
+                  >
+                    {({ pressed }: { pressed: boolean }) => (
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          color: pressed ? tokens.accent : tokens.textMuted,
+                          lineHeight: 18,
+                        }}
+                      >
+                        ×
+                      </Text>
+                    )}
                   </Pressable>
                 )}
               </Pressable>
