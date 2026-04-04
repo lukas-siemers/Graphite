@@ -39,9 +39,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   content_rowid='rowid'
 );`;
 
+// Migration 5 — v1.5 canvas model
+// Adds canvas_json (nullable) to notes. Legacy body and drawing_asset_id columns
+// are kept as fallback. The FTS index continues to use the title and body columns;
+// updateNote() merges canvas textContent.body into the FTS body field at write time.
+export const ADD_CANVAS_JSON = `ALTER TABLE notes ADD COLUMN canvas_json TEXT;`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
   CREATE_NOTES,
   CREATE_NOTES_FTS,
+  ADD_CANVAS_JSON,
 ] as const;
