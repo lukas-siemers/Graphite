@@ -136,6 +136,88 @@ Sync is the paywall. Supabase client is never initialized for free users.
 
 ---
 
+## Target Product Vision
+
+### Finalized product decisions (v1.5 canvas model)
+
+| Decision | Finalized |
+|---|---|
+| Input switching | Automatic — Apple Pencil detected = draw mode, finger = scroll/pan. No manual toggle needed. Palm rejection enabled. |
+| Text model | Flowing — one continuous text column from top, reflowing within fixed width |
+| Canvas geometry | Fixed-width column, infinite vertical scroll. Ink may extend into margins. |
+| Existing notes | Silent auto-convert on first open — wrap body string in canvas text object |
+| Finger drawing | Off by default. Future settings toggle. |
+| File import (.md etc) | Phase 4 |
+| Canvas width | Fixed page width with margins (exact value TBD at implementation time) |
+
+---
+
+The goal is a note-taking app that feels like **one endless piece of paper** — you type, you draw with Apple Pencil, you scroll down forever. No switching between "text mode" and "drawing mode". No separate files.
+
+### Endless note (infinite vertical scroll)
+Notes scroll infinitely downward. There is no bottom. The user always has more space below — for more text, more sketches, more thoughts. This is the "roll of paper" metaphor. The note renderer has no fixed height; the scroll view grows dynamically as content is added.
+
+### Canvas-first architecture
+The note surface is a **unified coordinate-space canvas**, not an ordered array of blocks. Typed text and Apple Pencil ink coexist on the same surface at the same time — you can type a word and draw next to it on the same line. This is the Notability/GoodNotes model, not a block editor.
+
+The previous block-based `NoteDocument` schema (ordered `markdown` + `drawing` block array) is **superseded** by this canvas-first model.
+
+### Two layers on the canvas
+
+Every note canvas has two layers rendered on top of each other:
+
+1. **Ink layer** — Apple Pencil strokes. Implemented with `react-native-skia` on iPad and `tldraw` on desktop/web. Strokes carry pressure and tilt data.
+2. **Content layer** — positioned content objects, each with an `(x, y)` coordinate and a size on the canvas. Content types:
+   - Typed text objects
+   - Code blocks (syntax-highlighted, with a copy button)
+   - Images — future feature (Phase 4)
+   - Wikilinks — future feature (Phase 5, see below)
+
+Both layers share the same coordinate space. The ink layer renders below the content layer so ink can flow around or behind typed text.
+
+### Content types
+
+| Type | Status | Notes |
+|---|---|---|
+| Typed text | Core | Free-positioned text objects on the canvas |
+| Apple Pencil ink | Core | Pressure + tilt strokes, skia / tldraw |
+| Code blocks | Core | Syntax-highlighted, copy button, positioned as content object |
+| Images | Future (Phase 4) | Inline on canvas; stored as separate asset files |
+| Wikilinks | Future (Phase 5) | `[[note name]]` or highlight-to-link; bidirectional; stored as link objects referencing note IDs |
+
+### Storage model
+
+`notes.body` (plain markdown string) and `notes.drawing_asset_id` are both **superseded**. The note row stores a `canvas_json` blob containing the full canvas document: ink strokes and all positioned content objects.
+
+```
+notes.canvas_json  — replaces both notes.body and notes.drawing_asset_id
+```
+
+Large assets (images, future) are stored as separate asset files and referenced by ID from within `canvas_json`. Ink strokes and text objects are stored inline in the blob.
+
+**Markdown is no longer the primary format.** The canvas document is the source of truth. Markdown export remains a planned feature in Phase 4.
+
+**Migration path (v1.5):**
+1. Add `canvas_json TEXT` column (nullable) alongside existing `body` and `drawing_asset_id`
+2. On first open of a legacy note, convert `body` text → a single positioned text object at the canvas origin; preserve `drawing_asset_id` strokes in the ink layer
+3. After full migration, drop `body` and `drawing_asset_id` in a later migration
+
+**Why this matters for sync:** ink layer changes and content layer changes are independent deltas within `canvas_json`. The sync engine (Phase 2) is built on this model — do not build sync against the old `body` + `drawing_asset_id` schema.
+
+### Platform implementations
+
+| Platform | Ink layer | Content layer |
+|---|---|---|
+| iPad (mobile) | `react-native-skia` | React Native positioned views |
+| Desktop / Web | `tldraw` | Web DOM positioned elements |
+
+The `<DrawingCanvas>` abstraction component already performs the platform check. The canvas-first model extends this: the abstraction must expose both layers uniformly.
+
+### Timing
+Implement the canvas-first data model and `canvas_json` migration before Phase 2 sync is built. Sync must be designed against the final `canvas_json` schema, not the legacy `body` field.
+
+---
+
 ## Phase 1 — iPad MVP (weeks 1–8)
 
 **Goal:** A fully functional local note-taking app on iPad. No backend. App Store ready.
@@ -148,17 +230,21 @@ Sync is the paywall. Supabase client is never initialized for free users.
 - [x] Zustand stores: `useNotebookStore`, `useNoteStore`, `useFolderStore`
 - [x] Three-column iPad layout (sidebar 220px + note list 280px + editor fills rest)
 - [x] Phone layout: tab-based navigation (sidebar → list → editor)
-- [ ] Sidebar component:
+- [x] Sidebar component:
   - [x] App logo + "Graphite" wordmark
   - [x] Notebook list with expand/collapse
   - [x] Folder tree with active state (tangerine accent)
   - [x] "New Note" pill button
   - [x] User avatar + settings icon at bottom
-- [ ] Note list component:
+- [x] Note list component:
   - [x] Search bar (SQLite FTS5)
   - [x] Note cards with title, preview, timestamp
   - [x] Active card left-border accent
   - [x] Sort: last edited
+  - [ ] Delete note — swipe or long-press to delete, confirmation prompt
+  - [ ] Delete folder — long-press in sidebar, only allowed when folder is empty or with confirmation to also delete contents
+  - [ ] Delete notebook — long-press in sidebar, confirmation required, deletes all contained notes and folders
+  - [ ] New note UX — investigate and fix odd behavior when creating a new note (reported by user)
 - [x] Markdown editor component:
   - [x] Title input (28px, no border)
   - [x] Breadcrumb below title
@@ -175,7 +261,7 @@ Sync is the paywall. Supabase client is never initialized for free users.
 - [x] Full-text search with SQLite FTS5
 - [x] Offline-first: zero network calls in Phase 1
 - [x] App icon, splash screen (`#1E1E1E` background)
-- [ ] iPad-optimized layout (landscape + portrait)
+- [ ] iPad-optimized layout (landscape + portrait) — deferred; current layout is a temporary implementation, full UI redesign pass planned before TestFlight submission
 - [ ] TestFlight build + App Store submission
 
 ### Key rules for Phase 1
@@ -228,20 +314,29 @@ Sync is the paywall. Supabase client is never initialized for free users.
 
 ### Deliverables
 
-- [ ] `apps/desktop` Electron project
-- [ ] Expo Web build pipeline (`expo export --platform web`) feeding Electron's `BrowserWindow`
-- [ ] `better-sqlite3` local DB in Electron main process, mirroring mobile schema
-- [ ] `contextBridge` IPC layer — renderer never imports Node APIs directly
+- [x] `apps/desktop` Electron project
+- [x] Expo Web dev pipeline (Metro dev server feeding Electron `BrowserWindow` — dev mode working)
+- [ ] Expo Web production build pipeline (`expo export --platform web`) feeding Electron's `BrowserWindow` in prod
+- [x] `better-sqlite3` local DB in Electron main process, mirroring mobile schema
+- [x] `contextBridge` IPC layer — renderer never imports Node APIs directly (10 IPC handlers via `wrap<T>()` helper)
 - [ ] Auto-updater (`electron-updater`) with GitHub Releases as update server
-- [ ] Deep link handler: `graphite://auth/callback` for OAuth redirect
-- [ ] Drawing canvas: `tldraw` (web-compatible) replacing `react-native-skia`
-- [ ] `<DrawingCanvas>` abstraction component — platform check swaps implementation
+- [x] Deep link handler: `graphite://auth/callback` for both macOS (`open-url`) and Windows (`second-instance`)
+- [x] Drawing canvas: `tldraw` (web-compatible) replacing `react-native-skia`
+- [x] `<DrawingCanvas>` abstraction component — platform check swaps implementation
 - [ ] macOS code signing + notarization (Apple Developer account required)
 - [ ] Windows NSIS installer
 - [ ] GitHub Actions CI/CD:
   - [ ] On push to `main`: build macOS `.dmg` + Windows `.exe`, attach to GitHub Release
   - [ ] Run Vitest on every PR
 - [ ] Sync parity: desktop participates in exact same sync engine as iPad
+
+### Expo Web pipeline notes (as of 2026-04-03)
+Dev mode is working: Metro bundles the Expo app and Electron loads it via `http://localhost:8081`. Key infrastructure in place:
+- `apps/mobile/metro.config.js` — web stubs via `extraNodeModules` for native-only packages; `unstable_enablePackageExports = false` (critical for CJS resolution)
+- `apps/mobile/stubs/` — stubs for react-native-skia, react-native-worklets-core, expo-file-system, expo-sqlite, tldraw, nanoid
+- `apps/mobile/babel.config.js` — `babel-plugin-transform-import-meta`
+- `packages/db/src/migrations.ts` — platform guard skips expo-sqlite on web, returns `noopDb`
+- Production export (`expo export --platform web`) is not yet wired to Electron's prod load path
 
 ### Key rules for Phase 3
 - All Node.js APIs (fs, sqlite, shell) live exclusively in `electron/main.ts`
@@ -268,6 +363,11 @@ Sync is the paywall. Supabase client is never initialized for free users.
 - [ ] Analytics: PostHog (self-hosted or cloud, privacy-respecting)
 - [ ] In-app feedback widget
 - [ ] Referral / word-of-mouth mechanism
+- [ ] Inline rename for folders and notebooks — double-click on the title in the sidebar to edit it in place
+- [ ] Move notes between folders within a notebook (drag or context menu)
+- [ ] Move notes between notebooks
+- [ ] Reorder notebooks in the sidebar
+- [ ] Auto-delete empty notes — notes with no title and no content are silently deleted when the user navigates away
 
 ---
 

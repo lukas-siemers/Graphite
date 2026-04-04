@@ -30,32 +30,47 @@ jobs:
         with:
           node-version: '20'
           cache: 'yarn'
+          cache-dependency-path: yarn.lock
 
       - name: Configure git to use HTTPS instead of SSH for package fetches
         run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: yarn install --frozen-lockfile
 
-      # Rebuild native modules (better-sqlite3) for the target Electron version
+      # Rebuild better-sqlite3 native module against the target Electron version.
+      # @electron/rebuild is installed as a devDependency in apps/desktop and
+      # exposes the `electron-rebuild` CLI binary.
       - name: Rebuild native modules
-        run: yarn workspace @graphite/desktop rebuild-native
+        working-directory: apps/desktop
+        run: yarn rebuild-native
 
-      # Compile TypeScript, export Expo Web, and package with electron-builder.
-      # The `dist` script in apps/desktop/package.json chains all three steps
-      # with --publish never so no upload credentials are required.
-      #
-      # TODO: add macOS code signing when Apple Developer certificates are available:
-      #   - Set CSC_LINK / CSC_KEY_PASSWORD secrets for the .p12 certificate
-      #   - Set APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID secrets for notarization
-      #   - Set `notarize: true` in the mac section of apps/desktop/package.json build config
-      # TODO: add Windows code signing when an EV certificate is available:
-      #   - Set WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD secrets
-      - name: Compile, build web, and package
-        run: yarn workspace @graphite/desktop dist
+      # Export the Expo web bundle into apps/desktop/dist.
+      # Must run from apps/mobile so that Metro / @expo/cli can resolve all
+      # Expo and React Native packages that live in that workspace.
+      - name: Export Expo web bundle
+        working-directory: apps/mobile
+        run: yarn expo export --platform web --output-dir ../desktop/dist
+
+      # Compile the Electron main-process TypeScript (electron/ → dist/electron/).
+      - name: Compile Electron TypeScript
+        working-directory: apps/desktop
+        run: yarn tsc --project tsconfig.json
+
+      # Package with electron-builder.
+      # CSC_IDENTITY_AUTO_DISCOVERY=false prevents macOS from attempting to
+      # find a code-signing identity that is not present on CI runners.
+      # USE_HARD_LINKS=false avoids DMG creation failures on GitHub-hosted
+      # macOS runners whose temp directories do not support hard links.
+      # GH_TOKEN is passed so electron-updater (a runtime dep) does not throw
+      # on startup even though we publish nothing here (--publish never).
+      - name: Package with electron-builder
+        working-directory: apps/desktop
+        run: yarn electron-builder --publish never
         env:
-          # Prevents electron-builder from attempting notarization on CI
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          USE_HARD_LINKS: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -40,7 +40,7 @@ describe('schema migrations', () => {
     expect(names).toHaveLength(6);
   });
 
-  it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at', () => {
+  it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json', () => {
     const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
@@ -53,7 +53,8 @@ describe('schema migrations', () => {
     expect(names).toContain('created_at');
     expect(names).toContain('updated_at');
     expect(names).toContain('synced_at');
-    expect(names).toHaveLength(10);
+    expect(names).toContain('canvas_json');
+    expect(names).toHaveLength(11);
   });
 
   it('notes_fts virtual table exists', () => {
