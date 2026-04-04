@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Image, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
@@ -8,7 +8,9 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
-const DOUBLE_TAP_MS = 300;
+// Delay before a single tap fires expand/collapse. A second tap within this
+// window is treated as a double-tap and triggers rename instead.
+const DOUBLE_TAP_MS = 500;
 
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
@@ -23,62 +25,73 @@ export default function Sidebar() {
   const createNewNote = useNoteStore((s) => s.createNewNote);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    notebooks.forEach((n) => s.add(n.id));
-    return s;
-  });
+  // Start empty — notebooks may not be loaded yet at mount time (Zustand store
+  // is populated asynchronously from SQLite). The effect below expands all
+  // notebooks once the first non-empty load arrives, then stops running.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const didAutoExpandRef = useRef(false);
+  useEffect(() => {
+    if (didAutoExpandRef.current || notebooks.length === 0) return;
+    didAutoExpandRef.current = true;
+    setExpandedIds(new Set(notebooks.map((n) => n.id)));
+  }, [notebooks]);
   const [newNotePressed, setNewNotePressed] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [reorderMode, setReorderMode] = useState(false);
   const renameInputRef = useRef<TextInput>(null);
 
-  // Map of notebookId → timestamp of last tap (for double-tap detection).
-  // Stored as a ref to avoid triggering re-renders.
-  const lastTapRef = useRef<Map<string, number>>(new Map());
+  // Double-tap implementation:
+  //   - First tap: schedule the expand/collapse (and active-notebook switch) after
+  //     DOUBLE_TAP_MS. Store the timer ID keyed by notebookId.
+  //   - Second tap within DOUBLE_TAP_MS: cancel the scheduled action, fire rename.
+  // This prevents expand/collapse from firing at all when a double-tap follows.
+  const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  function toggleExpand(id: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  async function handleNotebookPress(notebookId: string, notebookName: string) {
+  function handleNotebookPress(notebookId: string, notebookName: string) {
     if (renamingNotebookId === notebookId) return;
 
-    // Double-tap detection
-    const now = Date.now();
-    const last = lastTapRef.current.get(notebookId) ?? 0;
-    lastTapRef.current.set(notebookId, now);
-    if (now - last < DOUBLE_TAP_MS) {
-      lastTapRef.current.delete(notebookId);
+    const pending = pendingTapRef.current.get(notebookId);
+    if (pending !== undefined) {
+      // Second tap within window — cancel single-tap action and rename instead.
+      clearTimeout(pending);
+      pendingTapRef.current.delete(notebookId);
       startRename(notebookId, notebookName);
       return;
     }
 
-    toggleExpand(notebookId);
-    // Only reload data when switching to a different notebook.
-    // Toggling expand/collapse on the active notebook must not wipe the note
-    // list (especially on web where loadNotes returns empty).
-    if (notebookId === activeNotebookId) return;
-    setActiveNotebook(notebookId);
-    // Do NOT call loadFolders here — each FolderTree loads its own folders on
-    // mount.  Calling loadFolders with the new notebook's ID replaces the
-    // entire folder store, which makes the previously-expanded notebook's
-    // FolderTree render empty while it is still visible.
-    try {
-      const db = getDatabase();
-      await loadNotes(db, notebookId, null);
-    } catch (_) {
-      // db not ready yet
-    }
+    // First tap — schedule the expand/collapse + active-notebook switch.
+    const timer = setTimeout(() => {
+      pendingTapRef.current.delete(notebookId);
+
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(notebookId)) {
+          next.delete(notebookId);
+        } else {
+          next.add(notebookId);
+        }
+        return next;
+      });
+
+      // Only reload data when switching to a different notebook.
+      // Toggling expand/collapse on the active notebook must not wipe the note
+      // list (especially on web where loadNotes returns empty).
+      if (notebookId === activeNotebookId) return;
+      setActiveNotebook(notebookId);
+      // Do NOT call loadFolders here — each FolderTree loads its own folders on
+      // mount. Calling loadFolders with the new notebook's ID replaces the
+      // entire folder store, which makes the previously-expanded notebook's
+      // FolderTree render empty while it is still visible.
+      try {
+        const db = getDatabase();
+        loadNotes(db, notebookId, null);
+      } catch (_) {
+        // db not ready yet
+      }
+    }, DOUBLE_TAP_MS);
+
+    pendingTapRef.current.set(notebookId, timer);
   }
 
   async function handleNewNote() {
@@ -132,6 +145,33 @@ export default function Sidebar() {
     }
   }
 
+  // Extracted so both the long-press handler and the × button can invoke it.
+  function handleDeleteNotebook(notebookId: string, notebookName: string) {
+    Alert.alert(
+      'Delete Notebook',
+      `Delete "${notebookName}" and all its contents? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = getDatabase();
+              await useNotebookStore.getState().deleteNotebook(db, notebookId);
+              useFolderStore.getState().setFolders([]);
+              useFolderStore.getState().setActiveFolder(null);
+              useNoteStore.getState().setNotes([]);
+              useNoteStore.getState().setActiveNote(null);
+            } catch (_) {
+              // db not ready yet
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function handleNotebookLongPress(notebookId: string, notebookName: string) {
     Alert.alert(
       notebookName,
@@ -145,31 +185,7 @@ export default function Sidebar() {
         {
           text: 'Delete Notebook',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Delete Notebook',
-              `Delete ${notebookName} and all its contents? This cannot be undone.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      const db = getDatabase();
-                      await useNotebookStore.getState().deleteNotebook(db, notebookId);
-                      useFolderStore.getState().setFolders([]);
-                      useFolderStore.getState().setActiveFolder(null);
-                      useNoteStore.getState().setNotes([]);
-                      useNoteStore.getState().setActiveNote(null);
-                    } catch (_) {
-                      // db not ready yet
-                    }
-                  },
-                },
-              ],
-            );
-          },
+          onPress: () => handleDeleteNotebook(notebookId, notebookName),
         },
       ],
     );
@@ -273,6 +289,8 @@ export default function Sidebar() {
 
           return (
             <View key={notebook.id}>
+              {/* Outer row: flex-row so × lives outside the main Pressable tap area */}
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Pressable
                 onPress={() => {
                   if (reorderMode) return;
@@ -284,14 +302,15 @@ export default function Sidebar() {
                   }
                 }}
                 style={{
+                  flex: 1,
                   flexDirection: 'row',
                   alignItems: 'center',
                   paddingVertical: 6,
-                  paddingRight: 8,
+                  paddingRight: 4,
                   paddingLeft: isActive ? 6 : 8,
                   borderLeftWidth: isActive ? 2 : 0,
                   borderLeftColor: tokens.accent,
-                  backgroundColor: isActive ? tokens.bgActive : 'transparent',
+                  backgroundColor: isActive ? tokens.bgHover : 'transparent',
                 }}
               >
                 {/* Expand/collapse arrow — hidden in reorder mode */}
@@ -396,7 +415,31 @@ export default function Sidebar() {
                     </Text>
                   </Pressable>
                 )}
+
               </Pressable>
+
+                {/* × delete button — outside the expand/collapse Pressable so
+                    tapping the notebook name/row never accidentally triggers delete */}
+                {!isRenaming && !reorderMode && (
+                  <Pressable
+                    onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
+                    hitSlop={8}
+                    style={{ paddingHorizontal: 6, paddingVertical: 6 }}
+                  >
+                    {({ pressed }: { pressed: boolean }) => (
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          color: pressed ? tokens.accent : tokens.textMuted,
+                          lineHeight: 18,
+                        }}
+                      >
+                        ×
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
+              </View>
 
               {isExpanded && !reorderMode && (
                 <FolderTree notebookId={notebook.id} reorderMode={false} />

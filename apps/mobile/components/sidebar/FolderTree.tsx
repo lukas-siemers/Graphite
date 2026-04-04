@@ -6,7 +6,9 @@ import { getDatabase, updateFolder } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
-const DOUBLE_TAP_MS = 300;
+// Delay before a single tap fires expand/collapse. A second tap within this
+// window is treated as a double-tap and triggers rename instead.
+const DOUBLE_TAP_MS = 500;
 
 interface FolderTreeProps {
   notebookId: string;
@@ -32,65 +34,89 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   // Load this notebook's folders when the tree mounts (i.e. when the notebook
-  // row is expanded).  loadFolders merges by notebook so calling it here never
+  // row is expanded). loadFolders merges by notebook so calling it here never
   // wipes folders belonging to other expanded notebooks.
+  //
+  // BUG FIX: expandedFolders is initialised synchronously before loadFolders
+  // resolves, so the initial set is empty. After the async load completes, merge
+  // the freshly loaded folder IDs into expandedFolders so they appear expanded
+  // rather than collapsed.
   useEffect(() => {
-    try {
-      const db = getDatabase();
-      loadFolders(db, notebookId);
-    } catch (_) {
-      // db not ready yet — folders will remain as initialised
+    async function loadAndExpand() {
+      try {
+        const db = getDatabase();
+        await loadFolders(db, notebookId);
+        // After load resolves the store has updated; read the fresh slice directly.
+        const fresh = useFolderStore
+          .getState()
+          .folders.filter((f) => f.notebookId === notebookId);
+        setExpandedFolders((prev) => {
+          const next = new Set(prev);
+          fresh.forEach((f) => next.add(f.id));
+          return next;
+        });
+      } catch (_) {
+        // db not ready yet — folders will remain as initialised
+      }
     }
+    loadAndExpand();
   // loadFolders identity is stable (Zustand); notebookId never changes per mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notebookId]);
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    notebookFolders.forEach((f) => s.add(f.id));
-    return s;
-  });
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
+    () => new Set<string>(),
+  );
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  // Map of folderId → timestamp of last tap (for double-tap detection).
-  // Stored as a ref to avoid triggering re-renders.
-  const lastTapRef = useRef<Map<string, number>>(new Map());
+  // Double-tap implementation:
+  //   - First tap: schedule the expand/collapse action after DOUBLE_TAP_MS.
+  //   - Second tap within DOUBLE_TAP_MS: cancel the scheduled action, fire rename.
+  // This prevents expand/collapse from firing at all when a double-tap follows,
+  // eliminating the flicker that previously triggered FolderTree remounts.
+  const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   function handleFolderPress(folderId: string, folderName: string) {
     if (renamingFolderId === folderId) return;
 
-    // Double-tap detection
-    const now = Date.now();
-    const last = lastTapRef.current.get(folderId) ?? 0;
-    lastTapRef.current.set(folderId, now);
-    if (now - last < DOUBLE_TAP_MS) {
-      lastTapRef.current.delete(folderId);
+    const pending = pendingTapRef.current.get(folderId);
+    if (pending !== undefined) {
+      // Second tap within window — cancel single-tap action and rename instead.
+      clearTimeout(pending);
+      pendingTapRef.current.delete(folderId);
       startFolderRename(folderId, folderName);
       return;
     }
 
-    const isAlreadyActive = folderId === activeFolderId;
-    // Always toggle expand/collapse
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) {
-        next.delete(folderId);
-      } else {
-        next.add(folderId);
+    // First tap — schedule the expand/collapse + active-folder action.
+    const timer = setTimeout(() => {
+      pendingTapRef.current.delete(folderId);
+
+      const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
+      // Always toggle expand/collapse
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        if (next.has(folderId)) {
+          next.delete(folderId);
+        } else {
+          next.add(folderId);
+        }
+        return next;
+      });
+      // Only reload notes when switching to a different folder —
+      // collapsing the active folder must not wipe the note list
+      if (isAlreadyActive) return;
+      setActiveFolder(folderId);
+      try {
+        const db = getDatabase();
+        loadNotes(db, notebookId, folderId);
+      } catch (_) {
+        // db not ready yet
       }
-      return next;
-    });
-    // Only reload notes when switching to a different folder —
-    // collapsing the active folder must not wipe the note list
-    if (isAlreadyActive) return;
-    setActiveFolder(folderId);
-    try {
-      const db = getDatabase();
-      loadNotes(db, notebookId, folderId);
-    } catch (_) {
-      // db not ready yet
-    }
+    }, DOUBLE_TAP_MS);
+
+    pendingTapRef.current.set(folderId, timer);
   }
 
   function startFolderRename(folderId: string, currentName: string) {
@@ -122,6 +148,44 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
     }
   }
 
+  // Extracted so both the long-press handler and the × button can invoke it.
+  function handleDeleteFolder(folderId: string, folderName: string) {
+    Alert.alert(
+      'Delete Folder',
+      `Delete "${folderName}" and all its notes? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = getDatabase();
+              await useFolderStore.getState().deleteFolder(db, folderId);
+              if (useFolderStore.getState().activeFolderId === folderId) {
+                useFolderStore.getState().setActiveFolder(null);
+              }
+              const noteStore = useNoteStore.getState();
+              const activeNoteInFolder = noteStore.notes.find(
+                (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
+              );
+              if (activeNoteInFolder) {
+                noteStore.setNotes([]);
+                noteStore.setActiveNote(null);
+              } else {
+                noteStore.setNotes(
+                  noteStore.notes.filter((n) => n.folderId !== folderId),
+                );
+              }
+            } catch (_) {
+              // db not ready yet
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function handleFolderLongPress(folderId: string, folderName: string) {
     Alert.alert(
       folderName,
@@ -135,42 +199,7 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
         {
           text: 'Delete Folder',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Delete Folder',
-              `Delete ${folderName} and all its notes? This cannot be undone.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      const db = getDatabase();
-                      await useFolderStore.getState().deleteFolder(db, folderId);
-                      if (useFolderStore.getState().activeFolderId === folderId) {
-                        useFolderStore.getState().setActiveFolder(null);
-                      }
-                      const noteStore = useNoteStore.getState();
-                      const activeNoteInFolder = noteStore.notes.find(
-                        (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
-                      );
-                      if (activeNoteInFolder) {
-                        noteStore.setNotes([]);
-                        noteStore.setActiveNote(null);
-                      } else {
-                        noteStore.setNotes(
-                          noteStore.notes.filter((n) => n.folderId !== folderId),
-                        );
-                      }
-                    } catch (_) {
-                      // db not ready yet
-                    }
-                  },
-                },
-              ],
-            );
-          },
+          onPress: () => handleDeleteFolder(folderId, folderName),
         },
       ],
     );
@@ -305,6 +334,28 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
                     </Text>
                   </Pressable>
                 </View>
+              )}
+
+              {/* Delete × button — shown alongside the folder row when not
+                  renaming and not in reorder mode */}
+              {!reorderMode && !isRenaming && (
+                <Pressable
+                  onPress={() => handleDeleteFolder(folder.id, folder.name)}
+                  hitSlop={8}
+                  style={{ paddingHorizontal: 4 }}
+                >
+                  {({ pressed }: { pressed: boolean }) => (
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        color: pressed ? tokens.accent : tokens.textMuted,
+                        lineHeight: 18,
+                      }}
+                    >
+                      ×
+                    </Text>
+                  )}
+                </Pressable>
               )}
             </Pressable>
 
