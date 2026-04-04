@@ -22,6 +22,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
       "requiresFullScreen": true,
+      "jsEngine": "jsc",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
