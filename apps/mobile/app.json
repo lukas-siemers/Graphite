@@ -34,8 +34,13 @@
       "expo-sqlite"
     ],
     "newArchEnabled": true,
+    "web": {
+      "output": "static",
+      "bundler": "metro"
+    },
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "baseUrl": "./"
     },
     "extra": {
       "router": {},
