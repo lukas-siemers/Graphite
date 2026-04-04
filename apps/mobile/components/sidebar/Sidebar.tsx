@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, TextInput, Image, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
@@ -25,11 +25,16 @@ export default function Sidebar() {
   const createNewNote = useNoteStore((s) => s.createNewNote);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    notebooks.forEach((n) => s.add(n.id));
-    return s;
-  });
+  // Start empty — notebooks may not be loaded yet at mount time (Zustand store
+  // is populated asynchronously from SQLite). The effect below expands all
+  // notebooks once the first non-empty load arrives, then stops running.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const didAutoExpandRef = useRef(false);
+  useEffect(() => {
+    if (didAutoExpandRef.current || notebooks.length === 0) return;
+    didAutoExpandRef.current = true;
+    setExpandedIds(new Set(notebooks.map((n) => n.id)));
+  }, [notebooks]);
   const [newNotePressed, setNewNotePressed] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -284,6 +289,8 @@ export default function Sidebar() {
 
           return (
             <View key={notebook.id}>
+              {/* Outer row: flex-row so × lives outside the main Pressable tap area */}
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Pressable
                 onPress={() => {
                   if (reorderMode) return;
@@ -295,14 +302,15 @@ export default function Sidebar() {
                   }
                 }}
                 style={{
+                  flex: 1,
                   flexDirection: 'row',
                   alignItems: 'center',
                   paddingVertical: 6,
-                  paddingRight: 8,
+                  paddingRight: 4,
                   paddingLeft: isActive ? 6 : 8,
                   borderLeftWidth: isActive ? 2 : 0,
                   borderLeftColor: tokens.accent,
-                  backgroundColor: isActive ? tokens.bgActive : 'transparent',
+                  backgroundColor: isActive ? tokens.bgHover : 'transparent',
                 }}
               >
                 {/* Expand/collapse arrow — hidden in reorder mode */}
@@ -408,13 +416,15 @@ export default function Sidebar() {
                   </Pressable>
                 )}
 
-                {/* Delete × button — shown next to "+" when expanded, or always
-                    visible when collapsed, so the user can delete a closed notebook */}
+              </Pressable>
+
+                {/* × delete button — outside the expand/collapse Pressable so
+                    tapping the notebook name/row never accidentally triggers delete */}
                 {!isRenaming && !reorderMode && (
                   <Pressable
                     onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
                     hitSlop={8}
-                    style={{ paddingHorizontal: 4 }}
+                    style={{ paddingHorizontal: 6, paddingVertical: 6 }}
                   >
                     {({ pressed }: { pressed: boolean }) => (
                       <Text
@@ -429,7 +439,7 @@ export default function Sidebar() {
                     )}
                   </Pressable>
                 )}
-              </Pressable>
+              </View>
 
               {isExpanded && !reorderMode && (
                 <FolderTree notebookId={notebook.id} reorderMode={false} />
