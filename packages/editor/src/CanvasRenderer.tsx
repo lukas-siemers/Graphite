@@ -239,17 +239,17 @@ export function CanvasRenderer({
         tilt: 0,
         timestamp: Date.now(),
       };
-      activeStrokeRef.current = {
-        ...activeStrokeRef.current,
-        points: [...activeStrokeRef.current.points, point],
-      };
+      // Mutate ref directly — avoids object/array spread in the hot gesture path
+      // which can trigger HadesGC race on iOS 26 with Hermes.
+      activeStrokeRef.current.points.push(point);
     })
     .onEnd(() => {
       if (!activeStrokeRef.current || !onInkChange) return;
       const completed = activeStrokeRef.current;
       activeStrokeRef.current = null;
+      // Use concat to avoid spread initializer (Hermes GC safety)
       const updatedLayer: InkLayer = {
-        strokes: [...canvasDoc.inkLayer.strokes, completed],
+        strokes: canvasDoc.inkLayer.strokes.concat(completed),
       };
       onInkChange(updatedLayer);
     });

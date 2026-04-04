@@ -374,7 +374,8 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
             onTextChange={handleCanvasTextChange}
             onInkChange={(inkLayer) => {
               if (!activeNote) return;
-              const updated: CanvasDocument = { ...activeCanvasDoc, inkLayer };
+              // Object.assign instead of spread — avoids Hermes GC crash on iOS 26
+              const updated: CanvasDocument = Object.assign({}, activeCanvasDoc, { inkLayer });
               const db = getDatabase();
               updateNoteCanvas(db, activeNote.id, updated);
             }}
