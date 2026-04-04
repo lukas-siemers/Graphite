@@ -9,7 +9,7 @@
     "electron:dev": "cross-env NODE_ENV=development electron .",
     "dev": "concurrently \"cd ../mobile && npx expo start --web\" \"npm run electron:dev\"",
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/dist",
-    "build": "npm run compile && npm run build:web && electron-builder",
+    "build": "npm run compile && npm run build:web",
     "dist": "npm run build && electron-builder --publish never"
   },
   "dependencies": {

@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_pattern: 'apps/desktop/release/*.dmg'
+            artifact_name: graphite-macos
+          - os: windows-latest
+            artifact_pattern: 'apps/desktop/release/*.exe'
+            artifact_name: graphite-windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # Rebuild native modules (better-sqlite3) for the target Electron version
+      - name: Rebuild native modules
+        run: yarn workspace @graphite/desktop rebuild-native
+
+      # Compile TypeScript, export Expo Web, and package with electron-builder.
+      # The `dist` script in apps/desktop/package.json chains all three steps
+      # with --publish never so no upload credentials are required.
+      #
+      # TODO: add macOS code signing when Apple Developer certificates are available:
+      #   - Set CSC_LINK / CSC_KEY_PASSWORD secrets for the .p12 certificate
+      #   - Set APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID secrets for notarization
+      #   - Set `notarize: true` in the mac section of apps/desktop/package.json build config
+      # TODO: add Windows code signing when an EV certificate is available:
+      #   - Set WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD secrets
+      - name: Compile, build web, and package
+        run: yarn workspace @graphite/desktop dist
+        env:
+          # Prevents electron-builder from attempting notarization on CI
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_pattern }}
+          if-no-files-found: error
+          retention-days: 30
