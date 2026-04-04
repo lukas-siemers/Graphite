@@ -19,9 +19,18 @@ jobs:
         with:
           node-version: '20'
           cache: 'yarn'
+          cache-dependency-path: yarn.lock
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      # Recompile better-sqlite3 against the system Node version used by Vitest.
+      # electron-rebuild targets Electron's bundled Node ABI, which differs from
+      # the system Node ABI — tests run under the system Node, so a plain
+      # npm rebuild is required here (not electron-rebuild).
+      - name: Rebuild native modules for Node
+        run: npm rebuild better-sqlite3
+        working-directory: .
+
       - name: Run Vitest
-        run: yarn vitest run
+        run: yarn test

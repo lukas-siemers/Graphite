@@ -54,16 +54,34 @@ config.resolver.extraNodeModules = {
 };
 
 // ---------------------------------------------------------------------------
-// resolveRequest — intercept expo-sqlite for files outside the project root
-// (e.g. packages/db workspace). extraNodeModules only applies to files inside
-// the Metro project root; cross-workspace imports bypass it and resolve the
-// real expo-sqlite package, which pulls in an unresolvable WASM web worker.
-// This hook ensures any expo-sqlite import from any caller on web goes to the
-// stub. It also blocks follow-on internal expo-sqlite web paths.
+// resolveRequest — handles two cross-workspace resolution problems.
+// extraNodeModules only applies to files inside the Metro project root;
+// imports from packages/* bypass it entirely and resolve against root
+// node_modules, which causes duplicate module instances.
+//
+// 1. React deduplication: packages/editor imports react → resolves to
+//    root/node_modules/react (a second copy) → ReactCurrentDispatcher is
+//    a different object → useRef throws "Cannot read properties of null".
+//    Force ALL react imports to the app's single copy regardless of origin.
+//
+// 2. expo-sqlite stub: packages/db imports expo-sqlite → resolves the real
+//    package → pulls in an unresolvable WASM web worker on web.
 // ---------------------------------------------------------------------------
 const expoSqliteStub = path.join(stubDir, 'expo-sqlite-stub.js');
 
+// Absolute paths for the app's canonical React copies.
+const reactPaths = {
+  'react':               path.resolve(projectRoot, 'node_modules/react/index.js'),
+  'react/jsx-runtime':   path.resolve(projectRoot, 'node_modules/react/jsx-runtime.js'),
+  'react/jsx-dev-runtime': path.resolve(projectRoot, 'node_modules/react/jsx-dev-runtime.js'),
+};
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Deduplicate react — intercept from any caller on any platform.
+  if (reactPaths[moduleName]) {
+    return { type: 'sourceFile', filePath: reactPaths[moduleName] };
+  }
+
   if (platform === 'web') {
     // Intercept top-level and sub-path imports from any caller
     if (moduleName === 'expo-sqlite' || moduleName.startsWith('expo-sqlite/')) {

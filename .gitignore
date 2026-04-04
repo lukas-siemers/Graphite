@@ -9,6 +9,10 @@ package-lock.json
 dist/
 build/
 
+# Electron build output
+apps/desktop/release/
+apps/desktop/dist/
+
 # TypeScript
 *.tsbuildinfo
 
