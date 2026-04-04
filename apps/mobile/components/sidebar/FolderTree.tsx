@@ -32,7 +32,8 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const [renameValue, setRenameValue] = useState('');
 
   function handleFolderPress(folderId: string) {
-    setActiveFolder(folderId);
+    const isAlreadyActive = folderId === activeFolderId;
+    // Always toggle expand/collapse
     setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(folderId)) {
@@ -42,6 +43,10 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
       }
       return next;
     });
+    // Only reload notes when switching to a different folder —
+    // collapsing the active folder must not wipe the note list
+    if (isAlreadyActive) return;
+    setActiveFolder(folderId);
     try {
       const db = getDatabase();
       loadNotes(db, notebookId, folderId);
