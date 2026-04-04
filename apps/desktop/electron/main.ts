@@ -7,9 +7,10 @@
  * - Expose functionality to the renderer ONLY via contextBridge IPC.
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { autoUpdater } from 'electron-updater';
 
 // ---------------------------------------------------------------------------
 // Database
@@ -199,6 +200,41 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-updater
+// ---------------------------------------------------------------------------
+
+function initAutoUpdater() {
+  if (process.env.NODE_ENV === 'development') return;
+
+  autoUpdater.on('update-available', (info) => {
+    void info; // suppress unused-variable warning
+    // Update metadata is logged by electron-updater internally
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog
+      .showMessageBox({
+        type: 'info',
+        title: 'Update ready',
+        message: 'A new version of Graphite has been downloaded. Restart to apply the update.',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      })
+      .catch(() => {
+        // Dialog dismissed by OS (e.g. window destroyed) — safe to ignore
+      });
+  });
+
+  autoUpdater.checkForUpdatesAndNotify();
+}
+
+// ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 
@@ -223,6 +259,7 @@ app.whenReady().then(() => {
   initDatabase();
   registerIpcHandlers();
   createWindow();
+  initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

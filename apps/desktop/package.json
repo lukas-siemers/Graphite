@@ -9,7 +9,8 @@
     "electron:dev": "cross-env NODE_ENV=development electron .",
     "dev": "concurrently \"cd ../mobile && npx expo start --web\" \"npm run electron:dev\"",
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/dist",
-    "build": "npm run build:web && electron-builder"
+    "build": "npm run compile && npm run build:web && electron-builder",
+    "dist": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
@@ -25,5 +26,43 @@
     "electron": "^30.0.0",
     "electron-builder": "^24.0.0",
     "typescript": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.graphite.app",
+    "productName": "Graphite",
+    "copyright": "Copyright © 2026 Graphite",
+    "asar": true,
+    "asarUnpack": [
+      "**/better-sqlite3/**/*",
+      "**/*.node"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build-assets"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
   }
 }

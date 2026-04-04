@@ -53,6 +53,35 @@ config.resolver.extraNodeModules = {
 };
 
 // ---------------------------------------------------------------------------
+// resolveRequest — intercept expo-sqlite for files outside the project root
+// (e.g. packages/db workspace). extraNodeModules only applies to files inside
+// the Metro project root; cross-workspace imports bypass it and resolve the
+// real expo-sqlite package, which pulls in an unresolvable WASM web worker.
+// This hook ensures any expo-sqlite import from any caller on web goes to the
+// stub. It also blocks follow-on internal expo-sqlite web paths.
+// ---------------------------------------------------------------------------
+const expoSqliteStub = path.join(stubDir, 'expo-sqlite-stub.js');
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === 'web') {
+    // Intercept top-level and sub-path imports from any caller
+    if (moduleName === 'expo-sqlite' || moduleName.startsWith('expo-sqlite/')) {
+      return { type: 'sourceFile', filePath: expoSqliteStub };
+    }
+    // Block internal expo-sqlite web files that Metro follows when processing
+    // imports inside the real expo-sqlite package (ExpoSQLite.web.js, worker.ts)
+    if (
+      context.originModulePath &&
+      context.originModulePath.replace(/\\/g, '/').includes('/expo-sqlite/')
+    ) {
+      return { type: 'sourceFile', filePath: expoSqliteStub };
+    }
+  }
+  // Fall through to default resolution for everything else
+  return context.resolveRequest(context, moduleName, platform);
+};
+
+// ---------------------------------------------------------------------------
 // Transform ESM-only packages in node_modules through Babel so Metro's
 // CommonJS output mode can handle bare `export` / `import` syntax.
 // nanoid v5 and its sub-paths use ESM exports that Metro cannot parse
