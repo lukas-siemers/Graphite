@@ -47,6 +47,7 @@ function initDatabase() {
       title TEXT NOT NULL DEFAULT 'Untitled',
       body TEXT NOT NULL DEFAULT '',
       drawing_asset_id TEXT,
+      canvas_json TEXT,
       is_dirty INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -121,13 +122,14 @@ function registerIpcHandlers() {
     })
   );
 
-  ipcMain.handle('db:updateNote', (_e, id: string, fields: { title?: string; body?: string; drawing_asset_id?: string; updated_at: number }) =>
+  ipcMain.handle('db:updateNote', (_e, id: string, fields: { title?: string; body?: string; drawing_asset_id?: string; canvas_json?: string | null; updated_at: number }) =>
     wrap(() => {
       const sets: string[] = [];
       const values: unknown[] = [];
       if (fields.title !== undefined)            { sets.push('title = ?');            values.push(fields.title); }
       if (fields.body !== undefined)             { sets.push('body = ?');             values.push(fields.body); }
       if (fields.drawing_asset_id !== undefined) { sets.push('drawing_asset_id = ?'); values.push(fields.drawing_asset_id); }
+      if (fields.canvas_json !== undefined)       { sets.push('canvas_json = ?');       values.push(fields.canvas_json); }
       sets.push('updated_at = ?');
       values.push(fields.updated_at);
       if (sets.length === 1) {
@@ -135,9 +137,11 @@ function registerIpcHandlers() {
       }
       values.push(id);
       db.prepare(`UPDATE notes SET ${sets.join(', ')} WHERE id = ?`).run(...values);
-      // Keep FTS in sync
+      // Keep FTS in sync — prefer extracted text from canvas_json when present
       db.prepare(
-        'INSERT OR REPLACE INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+        `INSERT OR REPLACE INTO notes_fts(rowid, title, body)
+         SELECT rowid, title, COALESCE(json_extract(canvas_json, '$.textContent.body'), body)
+         FROM notes WHERE id = ?`
       ).run(id);
       return db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
     })

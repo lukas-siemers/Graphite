@@ -9,6 +9,7 @@ interface RawNote {
   title: string;
   body: string;
   drawing_asset_id: string | null;
+  canvas_json: string | null;
   is_dirty: number;
   created_at: number;
   updated_at: number;
@@ -23,6 +24,7 @@ function mapNote(row: RawNote): Note {
     title: row.title,
     body: row.body,
     drawingAssetId: row.drawing_asset_id,
+    canvasJson: row.canvas_json,
     isDirty: row.is_dirty,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -61,6 +63,7 @@ export async function createNote(
     title: 'Untitled',
     body: '',
     drawingAssetId: null,
+    canvasJson: null,
     isDirty: 0,
     createdAt: now,
     updatedAt: now,
@@ -103,9 +106,16 @@ export async function getNote(
 export async function updateNote(
   db: SQLiteDatabase,
   id: string,
-  patch: { title?: string; body?: string; drawingAssetId?: string | null },
+  patch: {
+    title?: string;
+    body?: string;
+    drawingAssetId?: string | null;
+    canvasJson?: string | null;
+    skipTimestamp?: boolean;
+  },
 ): Promise<void> {
   const now = Date.now();
+  const skipTs = patch.skipTimestamp === true;
   // Read the current row (including rowid) before mutating so we can issue the
   // FTS5 'delete' command with the old title/body values.
   const before = await db.getFirstAsync<{ rowid: number; title: string; body: string }>(
@@ -114,27 +124,69 @@ export async function updateNote(
   );
 
   if (patch.title !== undefined && patch.body !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
-      [patch.title, patch.body, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, body = ? WHERE id = ?',
+        [patch.title, patch.body, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
+        [patch.title, patch.body, now, id],
+      );
+    }
   } else if (patch.title !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET title = ?, updated_at = ? WHERE id = ?',
-      [patch.title, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET title = ? WHERE id = ?',
+        [patch.title, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, updated_at = ? WHERE id = ?',
+        [patch.title, now, id],
+      );
+    }
   } else if (patch.body !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
-      [patch.body, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET body = ? WHERE id = ?',
+        [patch.body, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
+        [patch.body, now, id],
+      );
+    }
   }
 
   if (patch.drawingAssetId !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
-      [patch.drawingAssetId, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET drawing_asset_id = ? WHERE id = ?',
+        [patch.drawingAssetId, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
+        [patch.drawingAssetId, now, id],
+      );
+    }
+  }
+
+  if (patch.canvasJson !== undefined) {
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET canvas_json = ? WHERE id = ?',
+        [patch.canvasJson, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET canvas_json = ?, updated_at = ? WHERE id = ?',
+        [patch.canvasJson, now, id],
+      );
+    }
   }
 
   if (before) {
@@ -143,15 +195,28 @@ export async function updateNote(
       `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)`,
       [before.rowid, before.title, before.body],
     );
-    // Read updated title/body then insert the new FTS entry.
-    const after = await db.getFirstAsync<{ title: string; body: string }>(
-      'SELECT title, body FROM notes WHERE id = ?',
+    // Read updated title and body for the new FTS entry.
+    // When canvas_json is present, merge its textContent.body into the indexed
+    // body text so that canvas prose is searchable via the existing FTS table.
+    const after = await db.getFirstAsync<{ title: string; body: string; canvas_json: string | null }>(
+      'SELECT title, body, canvas_json FROM notes WHERE id = ?',
       [id],
     );
     if (after) {
+      // Extract canvas text body; fall back to empty string when absent.
+      let canvasText = '';
+      if (after.canvas_json) {
+        const extracted = await db.getFirstAsync<{ canvas_body: string | null }>(
+          `SELECT json_extract(canvas_json, '$.textContent.body') AS canvas_body FROM notes WHERE id = ?`,
+          [id],
+        );
+        canvasText = extracted?.canvas_body ?? '';
+      }
+      // Combine legacy body with canvas text so both are searchable.
+      const ftsBody = canvasText ? `${after.body}\n${canvasText}`.trim() : after.body;
       await db.runAsync(
         `INSERT INTO notes_fts(rowid, title, body) VALUES(?, ?, ?)`,
-        [before.rowid, after.title, after.body],
+        [before.rowid, after.title, ftsBody],
       );
     }
   }

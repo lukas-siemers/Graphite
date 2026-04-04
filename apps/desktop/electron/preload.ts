@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('graphite', {
       ipcRenderer.invoke('db:getNote', id),
     createNote: (note: { id: string; notebook_id: string; folder_id?: string; title: string; body: string; created_at: number; updated_at: number }) =>
       ipcRenderer.invoke('db:createNote', note),
-    updateNote: (id: string, fields: { title?: string; body?: string; drawing_asset_id?: string; updated_at: number }) =>
+    updateNote: (id: string, fields: { title?: string; body?: string; drawing_asset_id?: string; canvas_json?: string | null; updated_at: number }) =>
       ipcRenderer.invoke('db:updateNote', id, fields),
     deleteNote: (id: string) =>
       ipcRenderer.invoke('db:deleteNote', id),
