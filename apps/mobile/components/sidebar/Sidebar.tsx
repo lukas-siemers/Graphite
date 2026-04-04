@@ -43,6 +43,11 @@ export default function Sidebar() {
   }
 
   async function handleNotebookPress(notebookId: string) {
+    toggleExpand(notebookId);
+    // Only reload data when switching to a different notebook.
+    // Toggling expand/collapse on the active notebook should not wipe
+    // the note list (especially on web where loadNotes returns empty).
+    if (notebookId === activeNotebookId) return;
     setActiveNotebook(notebookId);
     try {
       const db = getDatabase();
@@ -170,7 +175,6 @@ export default function Sidebar() {
                 onPress={() => {
                   if (isRenaming) return;
                   handleNotebookPress(notebook.id);
-                  toggleExpand(notebook.id);
                 }}
                 onLongPress={() => {
                   if (!isRenaming) startRename(notebook.id, notebook.name);
