@@ -185,7 +185,12 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const canvasDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
+  const activeNoteIdRef = useRef<string | null>(activeNoteId ?? null);
+  useEffect(() => { activeNoteIdRef.current = activeNoteId ?? null; }, [activeNoteId]);
+  // Ref keeps the latest canvasJson current inside debounce callbacks
+  const canvasJsonRef = useRef<string | null>(activeNote?.canvasJson ?? null);
+  useEffect(() => { canvasJsonRef.current = activeNote?.canvasJson ?? null; }, [activeNote?.canvasJson]);
 
   // Task 6 — auto-migrate legacy notes to CanvasDocument on open
   useNoteCanvasMigration(activeNote);
@@ -236,40 +241,33 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   }
 
   /**
-   * Called when the CanvasRenderer text layer emits a new full body string.
-   * Debounces writes to both legacy `body` column and `canvas_json`.
+   * Called when the CanvasRenderer text layer emits a new body string.
+   * CanvasTextInput already debounces — this fires at most once per 500ms.
+   * Reads note ID and canvasJson from refs so the closure is never stale.
    */
-  function handleCanvasTextChange(text: string) {
+  async function handleCanvasTextChange(text: string) {
+    const noteId = activeNoteIdRef.current;
+    if (!noteId) return;
     setLocalBody(text);
     setSaveStatus('Saving...');
-
-    if (canvasDebounce.current) clearTimeout(canvasDebounce.current);
-    canvasDebounce.current = setTimeout(async () => {
-      if (!activeNoteId || !activeNote) return;
-      try {
-        const db = getDatabase();
-        // Update legacy body column (keeps FTS and note list preview in sync)
-        await saveNote(db, activeNoteId, { body: text });
-        // Update canvas_json with new text body
-        let currentDoc: CanvasDocument;
-        if (activeNote.canvasJson) {
-          try {
-            currentDoc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
-          } catch {
-            const { createEmptyCanvas } = await import('@graphite/db');
-            currentDoc = createEmptyCanvas();
-          }
-        } else {
-          const { createEmptyCanvas } = await import('@graphite/db');
-          currentDoc = createEmptyCanvas();
-        }
-        currentDoc.textContent.body = text;
-        await updateNoteCanvas(db, activeNoteId, currentDoc);
-        setSaveStatus('Saved');
-      } catch (_) {
-        setSaveStatus('Saved');
+    try {
+      const db = getDatabase();
+      await saveNote(db, noteId, { body: text });
+      let currentDoc: CanvasDocument;
+      const currentJson = canvasJsonRef.current;
+      if (currentJson) {
+        try { currentDoc = JSON.parse(currentJson) as CanvasDocument; }
+        catch { const { createEmptyCanvas } = await import('@graphite/db'); currentDoc = createEmptyCanvas(); }
+      } else {
+        const { createEmptyCanvas } = await import('@graphite/db');
+        currentDoc = createEmptyCanvas();
       }
-    }, 500);
+      currentDoc.textContent.body = text;
+      await updateNoteCanvas(db, noteId, currentDoc);
+      setSaveStatus('Saved');
+    } catch (_) {
+      setSaveStatus('Saved');
+    }
   }
 
   function handleBodyChange(text: string) {

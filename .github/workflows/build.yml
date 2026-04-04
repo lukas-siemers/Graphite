@@ -31,6 +31,9 @@ jobs:
           node-version: '20'
           cache: 'yarn'
 
+      - name: Configure git to use HTTPS instead of SSH for package fetches
+        run: git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 

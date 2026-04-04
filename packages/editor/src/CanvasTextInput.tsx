@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TextInput, StyleSheet } from 'react-native';
 import { tokens } from '@graphite/ui';
 
@@ -10,11 +10,14 @@ interface CanvasTextInputProps {
   placeholder?: string;
 }
 
+const DEBOUNCE_MS = 500;
+
 /**
  * Plain text input segment within the canvas content layer.
- * Transparent background, no border — visually part of the canvas surface.
- * Becomes non-editable when inputMode === 'ink' so pencil taps do not open
- * the software keyboard.
+ *
+ * Keeps local state so every keystroke feels instant — the onChange callback
+ * (which triggers a SQLite write) is debounced to 500ms after the last change.
+ * This prevents per-keystroke re-renders of the whole canvas.
  */
 export function CanvasTextInput({
   value,
@@ -22,10 +25,39 @@ export function CanvasTextInput({
   inputMode = 'scroll',
   placeholder = 'Start writing...',
 }: CanvasTextInputProps) {
+  const [localValue, setLocalValue] = useState(value);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True while the user has unsaved keystrokes — blocks external value sync
+  const isDirtyRef = useRef(false);
+
+  // Only sync external value (e.g. note switch) when user is not actively typing
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setLocalValue(value);
+    }
+  }, [value]);
+
+  function handleChange(text: string) {
+    setLocalValue(text);
+    isDirtyRef.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      isDirtyRef.current = false;
+      onChange(text);
+    }, DEBOUNCE_MS);
+  }
+
+  // Flush on unmount so no changes are lost
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
   return (
     <TextInput
-      value={value}
-      onChangeText={onChange}
+      value={localValue}
+      onChangeText={handleChange}
       multiline
       editable={inputMode !== 'ink'}
       placeholder={placeholder}

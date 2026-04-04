@@ -39,6 +39,7 @@ config.resolver.extraNodeModules = {
   'expo-sqlite':                  path.join(stubDir, 'expo-sqlite-stub.js'),
   'tldraw':                       path.join(stubDir, 'tldraw-stub.js'),
   'tldraw/tldraw.css':            path.join(stubDir, 'empty.js'),
+  'expo-clipboard':               path.join(stubDir, 'expo-clipboard-stub.js'),
   'nanoid':                       path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/non-secure':            path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/async':                 path.join(stubDir, 'nanoid-stub.js'),

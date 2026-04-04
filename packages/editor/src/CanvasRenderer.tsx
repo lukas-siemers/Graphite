@@ -1,10 +1,20 @@
-import React, { useRef } from 'react';
-import { View, ScrollView, StyleSheet } from 'react-native';
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from 'react-native-gesture-handler';
+import React, { useRef, useMemo } from 'react';
+import { View, ScrollView, StyleSheet, Platform } from 'react-native';
+
+// Gesture handler is native-only — on web the ink layer is a no-op anyway
+// (Skia is stubbed) so we skip it entirely to avoid DOM style errors.
+let Gesture: any = { Pan: () => ({ runOnJS: () => ({ enabled: () => ({ onStart: () => ({ onUpdate: () => ({ onEnd: () => ({}) }) }) }) }) }) };
+let GestureDetector: any = ({ children }: { children: React.ReactNode }) => <>{children}</>;
+let GestureHandlerRootView: any = ({ children, style }: { children: React.ReactNode; style?: any }) => (
+  <View style={style}>{children}</View>
+);
+
+if (Platform.OS !== 'web') {
+  const gh = require('react-native-gesture-handler');
+  Gesture = gh.Gesture;
+  GestureDetector = gh.GestureDetector;
+  GestureHandlerRootView = gh.GestureHandlerRootView;
+}
 import Constants from 'expo-constants';
 import { nanoid } from 'nanoid';
 import { tokens } from '@graphite/ui';
@@ -19,7 +29,7 @@ const isExpoGo = Constants.appOwnership === 'expo';
 let SkiaCanvas: any = null;
 let Path: any = null;
 let Skia: any = null;
-if (!isExpoGo) {
+if (Platform.OS !== 'web' && !isExpoGo) {
   const skia = require('@shopify/react-native-skia');
   SkiaCanvas = skia.Canvas;
   Path = skia.Path;
@@ -111,8 +121,8 @@ interface InkLayerViewProps {
 }
 
 function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
-  if (isExpoGo || !SkiaCanvas || !Path || !Skia) {
-    // In Expo Go there is no Skia — render nothing (ink invisible but app works)
+  if (Platform.OS === 'web' || isExpoGo || !SkiaCanvas || !Path || !Skia) {
+    // Skia is native-only — no ink layer on web or Expo Go
     return null;
   }
 
@@ -244,7 +254,10 @@ export function CanvasRenderer({
       onInkChange(updatedLayer);
     });
 
-  const segments = parseBodySegments(canvasDoc.textContent.body);
+  const segments = useMemo(
+    () => parseBodySegments(canvasDoc.textContent.body),
+    [canvasDoc.textContent.body],
+  );
 
   // Current string value for each segment position (text segments only).
   // Rebuilt each render from the segments so it always reflects the latest doc.

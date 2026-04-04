@@ -7,6 +7,7 @@ import {
   createNote,
   updateNote,
   deleteNote,
+  createEmptyCanvas,
 } from '@graphite/db';
 
 interface NoteState {
@@ -70,11 +71,17 @@ export const useNoteStore = create<NoteState>((set) => ({
     folderId?: string,
   ) => {
     const note = await createNote(db, notebookId, folderId);
+    // Pre-populate canvas_json so new notes go straight to CanvasRenderer
+    // without waiting for the migration hook to run.
+    const canvasDoc = createEmptyCanvas();
+    const canvasJson = JSON.stringify(canvasDoc);
+    await updateNote(db, note.id, { canvasJson, skipTimestamp: true });
+    const noteWithCanvas = { ...note, canvasJson };
     set((state) => ({
-      notes: [note, ...state.notes],
+      notes: [noteWithCanvas, ...state.notes],
       activeNoteId: note.id,
     }));
-    return note;
+    return noteWithCanvas;
   },
 
   saveNote: async (
