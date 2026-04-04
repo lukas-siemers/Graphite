@@ -1,28 +1,35 @@
-import { useState, useEffect } from 'react';
-import { View, Text, Pressable, TextInput } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, Pressable, TextInput, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateFolder } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
+const DOUBLE_TAP_MS = 300;
+
 interface FolderTreeProps {
   notebookId: string;
+  reorderMode: boolean;
 }
 
-export default function FolderTree({ notebookId }: FolderTreeProps) {
+export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps) {
   const folders = useFolderStore((s) => s.folders);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
   const loadFolders = useFolderStore((s) => s.loadFolders);
+  const moveFolderUp = useFolderStore((s) => s.moveFolderUp);
+  const moveFolderDown = useFolderStore((s) => s.moveFolderDown);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const createNewNote = useNoteStore((s) => s.createNewNote);
 
-  const notebookFolders = folders.filter((f) => f.notebookId === notebookId);
+  const notebookFolders = folders
+    .filter((f) => f.notebookId === notebookId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   // Load this notebook's folders when the tree mounts (i.e. when the notebook
   // row is expanded).  loadFolders merges by notebook so calling it here never
@@ -46,7 +53,23 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  function handleFolderPress(folderId: string) {
+  // Map of folderId → timestamp of last tap (for double-tap detection).
+  // Stored as a ref to avoid triggering re-renders.
+  const lastTapRef = useRef<Map<string, number>>(new Map());
+
+  function handleFolderPress(folderId: string, folderName: string) {
+    if (renamingFolderId === folderId) return;
+
+    // Double-tap detection
+    const now = Date.now();
+    const last = lastTapRef.current.get(folderId) ?? 0;
+    lastTapRef.current.set(folderId, now);
+    if (now - last < DOUBLE_TAP_MS) {
+      lastTapRef.current.delete(folderId);
+      startFolderRename(folderId, folderName);
+      return;
+    }
+
     const isAlreadyActive = folderId === activeFolderId;
     // Always toggle expand/collapse
     setExpandedFolders((prev) => {
@@ -99,45 +122,123 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
     }
   }
 
+  function handleFolderLongPress(folderId: string, folderName: string) {
+    Alert.alert(
+      folderName,
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rename',
+          onPress: () => startFolderRename(folderId, folderName),
+        },
+        {
+          text: 'Delete Folder',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Delete Folder',
+              `Delete ${folderName} and all its notes? This cannot be undone.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      const db = getDatabase();
+                      await useFolderStore.getState().deleteFolder(db, folderId);
+                      if (useFolderStore.getState().activeFolderId === folderId) {
+                        useFolderStore.getState().setActiveFolder(null);
+                      }
+                      const noteStore = useNoteStore.getState();
+                      const activeNoteInFolder = noteStore.notes.find(
+                        (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
+                      );
+                      if (activeNoteInFolder) {
+                        noteStore.setNotes([]);
+                        noteStore.setActiveNote(null);
+                      } else {
+                        noteStore.setNotes(
+                          noteStore.notes.filter((n) => n.folderId !== folderId),
+                        );
+                      }
+                    } catch (_) {
+                      // db not ready yet
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleMoveFolderUp(folderId: string) {
+    try {
+      const db = getDatabase();
+      await moveFolderUp(db, folderId, notebookId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
+  async function handleMoveFolderDown(folderId: string) {
+    try {
+      const db = getDatabase();
+      await moveFolderDown(db, folderId, notebookId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
   return (
     <View>
-      {notebookFolders.map((folder) => {
+      {notebookFolders.map((folder, index) => {
         const isActiveFolder = folder.id === activeFolderId;
         const isExpanded = expandedFolders.has(folder.id);
         const isRenaming = renamingFolderId === folder.id;
         const folderNotes = notes.filter((n) => n.folderId === folder.id);
+        const isFirst = index === 0;
+        const isLast = index === notebookFolders.length - 1;
 
         return (
           <View key={folder.id}>
             <Pressable
               onPress={() => {
-                if (isRenaming) return;
-                handleFolderPress(folder.id);
+                if (reorderMode) return;
+                handleFolderPress(folder.id, folder.name);
               }}
               onLongPress={() => {
-                if (!isRenaming) startFolderRename(folder.id, folder.name);
+                if (!isRenaming && !reorderMode) {
+                  handleFolderLongPress(folder.id, folder.name);
+                }
               }}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 paddingLeft: isActiveFolder ? 26 : 28,
-                paddingRight: 16,
+                paddingRight: 8,
                 paddingVertical: 6,
                 borderLeftWidth: isActiveFolder ? 2 : 0,
                 borderLeftColor: tokens.accent,
                 backgroundColor: isActiveFolder ? tokens.bgActive : 'transparent',
               }}
             >
-              {/* Expand/collapse arrow */}
-              <Text
-                style={{
-                  fontSize: 11,
-                  color: tokens.textMuted,
-                  marginRight: 4,
-                }}
-              >
-                {isExpanded ? '▼' : '▶'}
-              </Text>
+              {/* Expand/collapse arrow — hidden in reorder mode */}
+              {!reorderMode && (
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: tokens.textMuted,
+                    marginRight: 4,
+                  }}
+                >
+                  {isExpanded ? '▼' : '▶'}
+                </Text>
+              )}
 
               {/* Name or rename input */}
               {isRenaming ? (
@@ -171,9 +272,43 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
                   {folder.name}
                 </Text>
               )}
+
+              {/* Reorder ▲▼ buttons — shown only in reorder mode */}
+              {reorderMode && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                  <Pressable
+                    onPress={() => !isFirst && handleMoveFolderUp(folder.id)}
+                    hitSlop={6}
+                    style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isFirst ? tokens.textHint : tokens.textMuted,
+                      }}
+                    >
+                      ▲
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => !isLast && handleMoveFolderDown(folder.id)}
+                    hitSlop={6}
+                    style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isLast ? tokens.textHint : tokens.textMuted,
+                      }}
+                    >
+                      ▼
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </Pressable>
 
-            {isExpanded && (
+            {isExpanded && !reorderMode && (
               <View>
                 {folderNotes.map((note) => {
                   const isActiveNote = note.id === activeNoteId;

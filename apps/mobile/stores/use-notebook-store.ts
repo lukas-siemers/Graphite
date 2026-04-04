@@ -5,6 +5,7 @@ import {
   getNotebooks,
   createNotebook,
   deleteNotebook,
+  updateNotebookSortOrder,
 } from '@graphite/db';
 
 interface NotebookState {
@@ -18,9 +19,11 @@ interface NotebookState {
   loadNotebooks: (db: SQLiteDatabase) => Promise<void>;
   createNewNotebook: (db: SQLiteDatabase, name: string) => Promise<Notebook>;
   deleteNotebook: (db: SQLiteDatabase, id: string) => Promise<void>;
+  moveNotebookUp: (db: SQLiteDatabase, id: string) => Promise<void>;
+  moveNotebookDown: (db: SQLiteDatabase, id: string) => Promise<void>;
 }
 
-export const useNotebookStore = create<NotebookState>((set) => ({
+export const useNotebookStore = create<NotebookState>((set, get) => ({
   notebooks: [],
   activeNotebookId: null,
   setNotebooks: (notebooks) => set({ notebooks }),
@@ -51,5 +54,37 @@ export const useNotebookStore = create<NotebookState>((set) => ({
       notebooks: state.notebooks.filter((n) => n.id !== id),
       activeNotebookId: state.activeNotebookId === id ? null : state.activeNotebookId,
     }));
+  },
+
+  moveNotebookUp: async (db: SQLiteDatabase, id: string) => {
+    const { notebooks } = get();
+    const idx = notebooks.findIndex((n) => n.id === id);
+    if (idx <= 0) return;
+    const prev = notebooks[idx - 1];
+    const curr = notebooks[idx];
+    // Swap sort_order values
+    await updateNotebookSortOrder(db, curr.id, prev.sortOrder);
+    await updateNotebookSortOrder(db, prev.id, curr.sortOrder);
+    const updated = [...notebooks];
+    updated[idx - 1] = { ...prev, sortOrder: curr.sortOrder };
+    updated[idx] = { ...curr, sortOrder: prev.sortOrder };
+    updated.sort((a, b) => a.sortOrder - b.sortOrder);
+    set({ notebooks: updated });
+  },
+
+  moveNotebookDown: async (db: SQLiteDatabase, id: string) => {
+    const { notebooks } = get();
+    const idx = notebooks.findIndex((n) => n.id === id);
+    if (idx < 0 || idx >= notebooks.length - 1) return;
+    const next = notebooks[idx + 1];
+    const curr = notebooks[idx];
+    // Swap sort_order values
+    await updateNotebookSortOrder(db, curr.id, next.sortOrder);
+    await updateNotebookSortOrder(db, next.id, curr.sortOrder);
+    const updated = [...notebooks];
+    updated[idx + 1] = { ...next, sortOrder: curr.sortOrder };
+    updated[idx] = { ...curr, sortOrder: next.sortOrder };
+    updated.sort((a, b) => a.sortOrder - b.sortOrder);
+    set({ notebooks: updated });
   },
 }));

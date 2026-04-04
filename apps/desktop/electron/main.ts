@@ -158,6 +158,35 @@ function registerIpcHandlers() {
     })
   );
 
+  ipcMain.handle('db:deleteFolder', (_e, id: string) =>
+    wrap(() => {
+      // Clean up FTS entries for all notes in this folder before deleting them
+      const notes = db.prepare('SELECT rowid, title, body FROM notes WHERE folder_id = ?').all(id) as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare("INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)");
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE folder_id = ?').run(id);
+      db.prepare('DELETE FROM folders WHERE id = ?').run(id);
+      return { id };
+    })
+  );
+
+  ipcMain.handle('db:deleteNotebook', (_e, id: string) =>
+    wrap(() => {
+      // Clean up FTS entries for all notes in this notebook before deleting them
+      const notes = db.prepare('SELECT rowid, title, body FROM notes WHERE notebook_id = ?').all(id) as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare("INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)");
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE notebook_id = ?').run(id);
+      db.prepare('DELETE FROM folders WHERE notebook_id = ?').run(id);
+      db.prepare('DELETE FROM notebooks WHERE id = ?').run(id);
+      return { id };
+    })
+  );
+
   ipcMain.handle('db:searchNotes', (_e, query: string) =>
     wrap(() =>
       db.prepare(

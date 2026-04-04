@@ -45,10 +45,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
 // updateNote() merges canvas textContent.body into the FTS body field at write time.
 export const ADD_CANVAS_JSON = `ALTER TABLE notes ADD COLUMN canvas_json TEXT;`;
 
+// Migration 6 — sort_order for sidebar reordering
+// Adds sort_order INTEGER DEFAULT 0 to notebooks and folders so the user can
+// reorder items in the sidebar. Existing rows default to 0 and will be assigned
+// stable order values on first load via initSortOrder helpers.
+export const ADD_NOTEBOOK_SORT_ORDER = `ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0;`;
+export const ADD_FOLDER_SORT_ORDER = `ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0;`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
   CREATE_NOTES,
   CREATE_NOTES_FTS,
   ADD_CANVAS_JSON,
+  ADD_NOTEBOOK_SORT_ORDER,
+  ADD_FOLDER_SORT_ORDER,
 ] as const;

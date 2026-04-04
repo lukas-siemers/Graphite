@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('graphite', {
       ipcRenderer.invoke('db:updateNote', id, fields),
     deleteNote: (id: string) =>
       ipcRenderer.invoke('db:deleteNote', id),
+    deleteFolder: (id: string) =>
+      ipcRenderer.invoke('db:deleteFolder', id),
+    deleteNotebook: (id: string) =>
+      ipcRenderer.invoke('db:deleteNotebook', id),
     searchNotes: (query: string) =>
       ipcRenderer.invoke('db:searchNotes', query),
   },

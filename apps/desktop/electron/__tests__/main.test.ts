@@ -101,6 +101,19 @@ function seedNote(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: insert a folder (required for folder delete tests).
+// ---------------------------------------------------------------------------
+
+function seedFolder(
+  db: Database.Database,
+  folder: { id: string; notebook_id: string }
+): void {
+  db.prepare(
+    'INSERT INTO folders (id, notebook_id, parent_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(folder.id, folder.notebook_id, null, 'Test Folder', 1000, 1000);
+}
+
+// ---------------------------------------------------------------------------
 // Bug 1 — IPC wrap() catches handler errors and returns { error: string }
 // ---------------------------------------------------------------------------
 
@@ -546,5 +559,202 @@ describe('db:updateNote — partial update with only updated_at', () => {
     expect(row.updated_at).toBe(123456789);
     expect(row.updated_at).not.toBe(0);
     expect(row.updated_at).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// db:deleteFolder — deletes folder, its notes, and FTS entries
+// ---------------------------------------------------------------------------
+
+describe('db:deleteFolder — cascading delete and FTS cleanup', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createInMemoryDb();
+    seedNotebook(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('deletes the folder and its notes from the database', () => {
+    seedFolder(db, { id: 'folder-1', notebook_id: 'nb-1' });
+    // Insert a note belonging to this folder.
+    db.prepare(
+      'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run('note-f1', 'nb-1', 'folder-1', 'Folder Note', 'Content', 1000, 1000);
+    db.prepare(
+      'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+    ).run('note-f1');
+
+    // Run the exact db:deleteFolder handler logic from main.ts.
+    wrap(() => {
+      const notes = db
+        .prepare('SELECT rowid, title, body FROM notes WHERE folder_id = ?')
+        .all('folder-1') as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare(
+        "INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)"
+      );
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE folder_id = ?').run('folder-1');
+      db.prepare('DELETE FROM folders WHERE id = ?').run('folder-1');
+      return { id: 'folder-1' };
+    });
+
+    const folderRow = db.prepare('SELECT * FROM folders WHERE id = ?').get('folder-1');
+    expect(folderRow).toBeUndefined();
+
+    const noteRow = db.prepare('SELECT * FROM notes WHERE id = ?').get('note-f1');
+    expect(noteRow).toBeUndefined();
+  });
+
+  it('removes deleted notes from the FTS index', () => {
+    seedFolder(db, { id: 'folder-2', notebook_id: 'nb-1' });
+    db.prepare(
+      'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run('note-f2', 'nb-1', 'folder-2', 'Mango Tango Note', 'Sweet tropical content', 1000, 1000);
+    db.prepare(
+      'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+    ).run('note-f2');
+
+    // Run the delete handler.
+    wrap(() => {
+      const notes = db
+        .prepare('SELECT rowid, title, body FROM notes WHERE folder_id = ?')
+        .all('folder-2') as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare(
+        "INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)"
+      );
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE folder_id = ?').run('folder-2');
+      db.prepare('DELETE FROM folders WHERE id = ?').run('folder-2');
+      return { id: 'folder-2' };
+    });
+
+    const ftsResults = db
+      .prepare(
+        `SELECT notes.* FROM notes
+         INNER JOIN notes_fts ON notes.rowid = notes_fts.rowid
+         WHERE notes_fts MATCH ?
+         ORDER BY rank`
+      )
+      .all('Mango');
+    expect(ftsResults).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// db:deleteNotebook — deletes notebook, all folders, all notes, and FTS entries
+// ---------------------------------------------------------------------------
+
+describe('db:deleteNotebook — cascading delete and FTS cleanup', () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createInMemoryDb();
+    seedNotebook(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('deletes the notebook, its folders, and its notes', () => {
+    seedFolder(db, { id: 'folder-nb', notebook_id: 'nb-1' });
+    db.prepare(
+      'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run('note-nb1', 'nb-1', 'folder-nb', 'Notebook Note', 'Some body', 1000, 1000);
+    db.prepare(
+      'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+    ).run('note-nb1');
+
+    // Run the exact db:deleteNotebook handler logic from main.ts.
+    wrap(() => {
+      const notes = db
+        .prepare('SELECT rowid, title, body FROM notes WHERE notebook_id = ?')
+        .all('nb-1') as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare(
+        "INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)"
+      );
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE notebook_id = ?').run('nb-1');
+      db.prepare('DELETE FROM folders WHERE notebook_id = ?').run('nb-1');
+      db.prepare('DELETE FROM notebooks WHERE id = ?').run('nb-1');
+      return { id: 'nb-1' };
+    });
+
+    const notebookRow = db.prepare('SELECT * FROM notebooks WHERE id = ?').get('nb-1');
+    expect(notebookRow).toBeUndefined();
+
+    const folderRow = db.prepare('SELECT * FROM folders WHERE id = ?').get('folder-nb');
+    expect(folderRow).toBeUndefined();
+
+    const noteRow = db.prepare('SELECT * FROM notes WHERE id = ?').get('note-nb1');
+    expect(noteRow).toBeUndefined();
+  });
+
+  it('removes deleted notes from the FTS index', () => {
+    // Seed a second notebook so we can verify only the target notebook's notes are removed from FTS.
+    seedNotebook(db, 'nb-2');
+    db.prepare(
+      'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run('note-fts-del', 'nb-1', null, 'Kiwi Strawberry Smoothie', 'Blend well', 1000, 1000);
+    db.prepare(
+      'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+    ).run('note-fts-del');
+    // Note in nb-2 must survive.
+    db.prepare(
+      'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run('note-fts-keep', 'nb-2', null, 'Kiwi Bird Facts', 'Flightless bird', 2000, 2000);
+    db.prepare(
+      'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
+    ).run('note-fts-keep');
+
+    // Delete nb-1.
+    wrap(() => {
+      const notes = db
+        .prepare('SELECT rowid, title, body FROM notes WHERE notebook_id = ?')
+        .all('nb-1') as Array<{ rowid: number; title: string; body: string }>;
+      const deleteFts = db.prepare(
+        "INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)"
+      );
+      for (const note of notes) {
+        deleteFts.run(note.rowid, note.title, note.body);
+      }
+      db.prepare('DELETE FROM notes WHERE notebook_id = ?').run('nb-1');
+      db.prepare('DELETE FROM folders WHERE notebook_id = ?').run('nb-1');
+      db.prepare('DELETE FROM notebooks WHERE id = ?').run('nb-1');
+      return { id: 'nb-1' };
+    });
+
+    // The deleted note's content must not appear in FTS.
+    const deletedResults = db
+      .prepare(
+        `SELECT notes.* FROM notes
+         INNER JOIN notes_fts ON notes.rowid = notes_fts.rowid
+         WHERE notes_fts MATCH ?
+         ORDER BY rank`
+      )
+      .all('Smoothie');
+    expect(deletedResults).toHaveLength(0);
+
+    // The surviving note in nb-2 must still be findable via FTS.
+    const survivingResults = db
+      .prepare(
+        `SELECT notes.* FROM notes
+         INNER JOIN notes_fts ON notes.rowid = notes_fts.rowid
+         WHERE notes_fts MATCH ?
+         ORDER BY rank`
+      )
+      .all('Kiwi') as Array<{ id: string }>;
+    expect(survivingResults).toHaveLength(1);
+    expect(survivingResults[0].id).toBe('note-fts-keep');
   });
 });
