@@ -34,7 +34,7 @@
       "expo-router",
       "expo-sqlite"
     ],
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "web": {
       "output": "static",
       "bundler": "metro"
