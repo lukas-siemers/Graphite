@@ -5,6 +5,7 @@ import {
   TextInput,
   FlatList,
   Pressable,
+  Alert,
 } from 'react-native';
 import { tokens } from '@graphite/ui';
 import { getDatabase, searchNotes } from '@graphite/db';
@@ -46,13 +47,15 @@ interface NoteCardProps {
   note: Note;
   isActive: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 }
 
-function NoteCard({ note, isActive, onPress }: NoteCardProps) {
+function NoteCard({ note, isActive, onPress, onLongPress }: NoteCardProps) {
   const preview = stripMarkdown(note.body);
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       style={{
         borderLeftWidth: 2,
         borderLeftColor: isActive ? tokens.accent : 'transparent',
@@ -143,6 +146,28 @@ export default function NoteList() {
     setActiveNote(noteId);
   }
 
+  function handleDeleteNote(note: Note) {
+    Alert.alert(
+      'Delete Note',
+      'This note will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const db = getDatabase();
+              await useNoteStore.getState().deleteNote(db, note.id);
+            } catch (_) {
+              // db not ready yet
+            }
+          },
+        },
+      ],
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       {/* Header bar */}
@@ -200,6 +225,7 @@ export default function NoteList() {
             note={item}
             isActive={item.id === activeNoteId}
             onPress={() => handleNotePress(item.id)}
+            onLongPress={() => handleDeleteNote(item)}
           />
         )}
         ItemSeparatorComponent={null}

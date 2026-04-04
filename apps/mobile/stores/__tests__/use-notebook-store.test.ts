@@ -1,6 +1,24 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Notebook } from '../../../../packages/db/src/types';
 import { useNotebookStore } from '../use-notebook-store';
+
+// ---------------------------------------------------------------------------
+// Mock @graphite/db so async actions never touch expo-sqlite.
+// ---------------------------------------------------------------------------
+
+vi.mock('@graphite/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@graphite/db')>();
+  return {
+    ...actual,
+    getNotebooks: vi.fn(() => Promise.resolve([])),
+    createNotebook: vi.fn(),
+    deleteNotebook: vi.fn(() => Promise.resolve()),
+    updateNotebookSortOrder: vi.fn(),
+  };
+});
+
+// Minimal fake DB object — all DB calls are intercepted by the mock above.
+const fakeDb = {} as any;
 
 // Fixed test fixtures
 const nb1: Notebook = {
@@ -9,6 +27,7 @@ const nb1: Notebook = {
   createdAt: 1700000000000,
   updatedAt: 1700000000000,
   syncedAt: null,
+  sortOrder: 0,
 };
 
 const nb2: Notebook = {
@@ -17,6 +36,7 @@ const nb2: Notebook = {
   createdAt: 1700000000001,
   updatedAt: 1700000000001,
   syncedAt: null,
+  sortOrder: 1,
 };
 
 describe('useNotebookStore', () => {
@@ -84,5 +104,74 @@ describe('useNotebookStore', () => {
     const { notebooks } = useNotebookStore.getState();
     expect(notebooks).toHaveLength(1);
     expect(notebooks[0]).toEqual(nb2);
+  });
+
+  // -------------------------------------------------------------------------
+  // deleteNotebook — async action that calls the DB and updates store state
+  // -------------------------------------------------------------------------
+
+  it('deleteNotebook removes the notebook from the notebooks array', async () => {
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().deleteNotebook(fakeDb, 'nb-1');
+    const { notebooks } = useNotebookStore.getState();
+    expect(notebooks.find((n) => n.id === 'nb-1')).toBeUndefined();
+    expect(notebooks).toHaveLength(1);
+    expect(notebooks[0]).toEqual(nb2);
+  });
+
+  it('deleteNotebook clears activeNotebookId when the deleted notebook was active', async () => {
+    useNotebookStore.setState({ notebooks: [nb1, nb2], activeNotebookId: 'nb-1' });
+    await useNotebookStore.getState().deleteNotebook(fakeDb, 'nb-1');
+    expect(useNotebookStore.getState().activeNotebookId).toBeNull();
+  });
+
+  it('deleteNotebook does NOT clear activeNotebookId when a different notebook is active', async () => {
+    useNotebookStore.setState({ notebooks: [nb1, nb2], activeNotebookId: 'nb-2' });
+    await useNotebookStore.getState().deleteNotebook(fakeDb, 'nb-1');
+    expect(useNotebookStore.getState().activeNotebookId).toBe('nb-2');
+  });
+
+  // -------------------------------------------------------------------------
+  // moveNotebookUp / moveNotebookDown
+  // -------------------------------------------------------------------------
+
+  it('moveNotebookUp swaps sort_order with the previous notebook', async () => {
+    // nb1 has sortOrder 0, nb2 has sortOrder 1 — moving nb2 up should swap them.
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().moveNotebookUp(fakeDb, 'nb-2');
+    const { notebooks } = useNotebookStore.getState();
+    const movedUp = notebooks.find((n) => n.id === 'nb-2');
+    const movedDown = notebooks.find((n) => n.id === 'nb-1');
+    expect(movedUp?.sortOrder).toBe(0);
+    expect(movedDown?.sortOrder).toBe(1);
+  });
+
+  it('moveNotebookDown swaps sort_order with the next notebook', async () => {
+    // nb1 has sortOrder 0, nb2 has sortOrder 1 — moving nb1 down should swap them.
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().moveNotebookDown(fakeDb, 'nb-1');
+    const { notebooks } = useNotebookStore.getState();
+    const movedDown = notebooks.find((n) => n.id === 'nb-1');
+    const movedUp = notebooks.find((n) => n.id === 'nb-2');
+    expect(movedDown?.sortOrder).toBe(1);
+    expect(movedUp?.sortOrder).toBe(0);
+  });
+
+  it('moveNotebookUp does nothing when notebook is already first', async () => {
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().moveNotebookUp(fakeDb, 'nb-1');
+    const { notebooks } = useNotebookStore.getState();
+    // Sort orders must be unchanged.
+    expect(notebooks.find((n) => n.id === 'nb-1')?.sortOrder).toBe(0);
+    expect(notebooks.find((n) => n.id === 'nb-2')?.sortOrder).toBe(1);
+  });
+
+  it('moveNotebookDown does nothing when notebook is already last', async () => {
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().moveNotebookDown(fakeDb, 'nb-2');
+    const { notebooks } = useNotebookStore.getState();
+    // Sort orders must be unchanged.
+    expect(notebooks.find((n) => n.id === 'nb-1')?.sortOrder).toBe(0);
+    expect(notebooks.find((n) => n.id === 'nb-2')?.sortOrder).toBe(1);
   });
 });

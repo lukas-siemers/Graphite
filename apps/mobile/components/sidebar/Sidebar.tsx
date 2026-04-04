@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Image } from 'react-native';
+import { View, Text, ScrollView, Pressable, TextInput, Image, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateNotebook } from '@graphite/db';
@@ -8,12 +8,16 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
+const DOUBLE_TAP_MS = 300;
+
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
   const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
+  const moveNotebookUp = useNotebookStore((s) => s.moveNotebookUp);
+  const moveNotebookDown = useNotebookStore((s) => s.moveNotebookDown);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
   const createNewNote = useNoteStore((s) => s.createNewNote);
@@ -27,7 +31,12 @@ export default function Sidebar() {
   const [newNotePressed, setNewNotePressed] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [reorderMode, setReorderMode] = useState(false);
   const renameInputRef = useRef<TextInput>(null);
+
+  // Map of notebookId → timestamp of last tap (for double-tap detection).
+  // Stored as a ref to avoid triggering re-renders.
+  const lastTapRef = useRef<Map<string, number>>(new Map());
 
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
@@ -41,7 +50,19 @@ export default function Sidebar() {
     });
   }
 
-  async function handleNotebookPress(notebookId: string) {
+  async function handleNotebookPress(notebookId: string, notebookName: string) {
+    if (renamingNotebookId === notebookId) return;
+
+    // Double-tap detection
+    const now = Date.now();
+    const last = lastTapRef.current.get(notebookId) ?? 0;
+    lastTapRef.current.set(notebookId, now);
+    if (now - last < DOUBLE_TAP_MS) {
+      lastTapRef.current.delete(notebookId);
+      startRename(notebookId, notebookName);
+      return;
+    }
+
     toggleExpand(notebookId);
     // Only reload data when switching to a different notebook.
     // Toggling expand/collapse on the active notebook must not wipe the note
@@ -111,6 +132,67 @@ export default function Sidebar() {
     }
   }
 
+  function handleNotebookLongPress(notebookId: string, notebookName: string) {
+    Alert.alert(
+      notebookName,
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rename',
+          onPress: () => startRename(notebookId, notebookName),
+        },
+        {
+          text: 'Delete Notebook',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Delete Notebook',
+              `Delete ${notebookName} and all its contents? This cannot be undone.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      const db = getDatabase();
+                      await useNotebookStore.getState().deleteNotebook(db, notebookId);
+                      useFolderStore.getState().setFolders([]);
+                      useFolderStore.getState().setActiveFolder(null);
+                      useNoteStore.getState().setNotes([]);
+                      useNoteStore.getState().setActiveNote(null);
+                    } catch (_) {
+                      // db not ready yet
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleMoveUp(notebookId: string) {
+    try {
+      const db = getDatabase();
+      await moveNotebookUp(db, notebookId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
+  async function handleMoveDown(notebookId: string) {
+    try {
+      const db = getDatabase();
+      await moveNotebookDown(db, notebookId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
   return (
     <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgSidebar }}>
       {/* Header */}
@@ -153,6 +235,22 @@ export default function Sidebar() {
         >
           NOTEBOOKS
         </Text>
+        {/* Reorder toggle button */}
+        <Pressable
+          onPress={() => setReorderMode((v) => !v)}
+          hitSlop={8}
+          style={{ paddingHorizontal: 6 }}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              color: reorderMode ? tokens.accent : tokens.textHint,
+              fontWeight: '500',
+            }}
+          >
+            Reorder
+          </Text>
+        </Pressable>
         <Pressable
           onPress={handleCreateNewNotebook}
           hitSlop={8}
@@ -166,20 +264,24 @@ export default function Sidebar() {
 
       {/* Notebook list */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {notebooks.map((notebook) => {
+        {notebooks.map((notebook, index) => {
           const isActive = notebook.id === activeNotebookId;
           const isExpanded = expandedIds.has(notebook.id);
           const isRenaming = renamingNotebookId === notebook.id;
+          const isFirst = index === 0;
+          const isLast = index === notebooks.length - 1;
 
           return (
             <View key={notebook.id}>
               <Pressable
                 onPress={() => {
-                  if (isRenaming) return;
-                  handleNotebookPress(notebook.id);
+                  if (reorderMode) return;
+                  handleNotebookPress(notebook.id, notebook.name);
                 }}
                 onLongPress={() => {
-                  if (!isRenaming) startRename(notebook.id, notebook.name);
+                  if (!isRenaming && !reorderMode) {
+                    handleNotebookLongPress(notebook.id, notebook.name);
+                  }
                 }}
                 style={{
                   flexDirection: 'row',
@@ -192,17 +294,19 @@ export default function Sidebar() {
                   backgroundColor: isActive ? tokens.bgActive : 'transparent',
                 }}
               >
-                {/* Expand/collapse arrow */}
-                <Text
-                  style={{
-                    fontSize: 10,
-                    color: tokens.textMuted,
-                    marginRight: 6,
-                    width: 10,
-                  }}
-                >
-                  {isExpanded ? '\u25BC' : '\u25B6'}
-                </Text>
+                {/* Expand/collapse arrow — hidden in reorder mode */}
+                {!reorderMode && (
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      color: tokens.textMuted,
+                      marginRight: 6,
+                      width: 10,
+                    }}
+                  >
+                    {isExpanded ? '\u25BC' : '\u25B6'}
+                  </Text>
+                )}
 
                 {/* Folder icon */}
                 <MaterialCommunityIcons
@@ -246,8 +350,42 @@ export default function Sidebar() {
                   </Text>
                 )}
 
-                {/* New folder "+" button */}
-                {isExpanded && !isRenaming && (
+                {/* Reorder ▲▼ buttons — shown only in reorder mode */}
+                {reorderMode && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                    <Pressable
+                      onPress={() => !isFirst && handleMoveUp(notebook.id)}
+                      hitSlop={6}
+                      style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isFirst ? tokens.textHint : tokens.textMuted,
+                        }}
+                      >
+                        ▲
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => !isLast && handleMoveDown(notebook.id)}
+                      hitSlop={6}
+                      style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isLast ? tokens.textHint : tokens.textMuted,
+                        }}
+                      >
+                        ▼
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* New folder "+" button — hidden in reorder mode */}
+                {isExpanded && !isRenaming && !reorderMode && (
                   <Pressable
                     onPress={() => handleCreateNewFolder(notebook.id)}
                     hitSlop={8}
@@ -260,7 +398,12 @@ export default function Sidebar() {
                 )}
               </Pressable>
 
-              {isExpanded && <FolderTree notebookId={notebook.id} />}
+              {isExpanded && !reorderMode && (
+                <FolderTree notebookId={notebook.id} reorderMode={false} />
+              )}
+              {isExpanded && reorderMode && (
+                <FolderTree notebookId={notebook.id} reorderMode={true} />
+              )}
             </View>
           );
         })}

@@ -4,6 +4,7 @@ export interface Notebook {
   createdAt: number;
   updatedAt: number;
   syncedAt: number | null;
+  sortOrder: number;
 }
 
 export interface Folder {
@@ -13,6 +14,7 @@ export interface Folder {
   name: string;
   createdAt: number;
   updatedAt: number;
+  sortOrder: number;
 }
 
 export interface Note {

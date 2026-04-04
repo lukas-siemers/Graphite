@@ -5,6 +5,7 @@ import {
   getFolders,
   createFolder,
   deleteFolder,
+  updateFolderSortOrder,
 } from '@graphite/db';
 
 interface FolderState {
@@ -23,9 +24,11 @@ interface FolderState {
     parentId?: string,
   ) => Promise<Folder>;
   deleteFolder: (db: SQLiteDatabase, id: string) => Promise<void>;
+  moveFolderUp: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
+  moveFolderDown: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
 }
 
-export const useFolderStore = create<FolderState>((set) => ({
+export const useFolderStore = create<FolderState>((set, get) => ({
   folders: [],
   activeFolderId: null,
   setFolders: (folders) => set({ folders }),
@@ -67,6 +70,47 @@ export const useFolderStore = create<FolderState>((set) => ({
     set((state) => ({
       folders: state.folders.filter((f) => f.id !== id),
       activeFolderId: state.activeFolderId === id ? null : state.activeFolderId,
+    }));
+  },
+
+  moveFolderUp: async (db: SQLiteDatabase, id: string, notebookId: string) => {
+    const { folders } = get();
+    // Work only within the same notebook, sorted by sort_order
+    const notebookFolders = folders
+      .filter((f) => f.notebookId === notebookId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const idx = notebookFolders.findIndex((f) => f.id === id);
+    if (idx <= 0) return;
+    const prev = notebookFolders[idx - 1];
+    const curr = notebookFolders[idx];
+    await updateFolderSortOrder(db, curr.id, prev.sortOrder);
+    await updateFolderSortOrder(db, prev.id, curr.sortOrder);
+    set((state) => ({
+      folders: state.folders.map((f) => {
+        if (f.id === curr.id) return { ...f, sortOrder: prev.sortOrder };
+        if (f.id === prev.id) return { ...f, sortOrder: curr.sortOrder };
+        return f;
+      }),
+    }));
+  },
+
+  moveFolderDown: async (db: SQLiteDatabase, id: string, notebookId: string) => {
+    const { folders } = get();
+    const notebookFolders = folders
+      .filter((f) => f.notebookId === notebookId)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const idx = notebookFolders.findIndex((f) => f.id === id);
+    if (idx < 0 || idx >= notebookFolders.length - 1) return;
+    const next = notebookFolders[idx + 1];
+    const curr = notebookFolders[idx];
+    await updateFolderSortOrder(db, curr.id, next.sortOrder);
+    await updateFolderSortOrder(db, next.id, curr.sortOrder);
+    set((state) => ({
+      folders: state.folders.map((f) => {
+        if (f.id === curr.id) return { ...f, sortOrder: next.sortOrder };
+        if (f.id === next.id) return { ...f, sortOrder: curr.sortOrder };
+        return f;
+      }),
     }));
   },
 }));

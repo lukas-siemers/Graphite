@@ -15,6 +15,7 @@ const folderA1: Folder = {
   name: 'Alpha',
   createdAt: 1700000000000,
   updatedAt: 1700000000000,
+  sortOrder: 0,
 };
 
 const folderA2: Folder = {
@@ -24,6 +25,7 @@ const folderA2: Folder = {
   name: 'Alpha Refresh',
   createdAt: 1700000000001,
   updatedAt: 1700000000001,
+  sortOrder: 1,
 };
 
 const folderB1: Folder = {
@@ -33,6 +35,7 @@ const folderB1: Folder = {
   name: 'Beta',
   createdAt: 1700000000002,
   updatedAt: 1700000000002,
+  sortOrder: 0,
 };
 
 // Each call to getFolders returns a different set per notebook id.
@@ -47,6 +50,7 @@ vi.mock('@graphite/db', async (importOriginal) => {
     }),
     createFolder: vi.fn(),
     deleteFolder: vi.fn(),
+    updateFolderSortOrder: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -185,5 +189,68 @@ describe('useFolderStore', () => {
     expect(folders.find((f) => f.id === 'f-a1')).toBeUndefined();
     expect(folders).toHaveLength(1);
     expect(folders[0]).toEqual(folderB1);
+  });
+
+  // -------------------------------------------------------------------------
+  // deleteFolder — async action that calls the DB and updates store state
+  // -------------------------------------------------------------------------
+
+  it('deleteFolder removes the folder from the folders array', async () => {
+    useFolderStore.getState().setFolders([folderA1, folderB1]);
+    await useFolderStore.getState().deleteFolder(fakeDb, 'f-a1');
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a1')).toBeUndefined();
+    expect(folders).toHaveLength(1);
+    expect(folders[0]).toEqual(folderB1);
+  });
+
+  it('deleteFolder clears activeFolderId when the deleted folder was active', async () => {
+    useFolderStore.setState({ folders: [folderA1, folderB1], activeFolderId: 'f-a1' });
+    await useFolderStore.getState().deleteFolder(fakeDb, 'f-a1');
+    expect(useFolderStore.getState().activeFolderId).toBeNull();
+  });
+
+  it('deleteFolder does NOT clear activeFolderId when a different folder is active', async () => {
+    useFolderStore.setState({ folders: [folderA1, folderB1], activeFolderId: 'f-b1' });
+    await useFolderStore.getState().deleteFolder(fakeDb, 'f-a1');
+    expect(useFolderStore.getState().activeFolderId).toBe('f-b1');
+  });
+
+  // -------------------------------------------------------------------------
+  // moveFolderUp / moveFolderDown — scoped to a single notebookId
+  // -------------------------------------------------------------------------
+
+  it('moveFolderUp swaps sort_order with the previous folder in the same notebook', async () => {
+    // folderA1 has sortOrder 0, folderA2 has sortOrder 1 — moving folderA2 up swaps them.
+    useFolderStore.getState().setFolders([folderA1, folderA2]);
+    await useFolderStore.getState().moveFolderUp(fakeDb, 'f-a2', 'nb-a');
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(0);
+    expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(1);
+  });
+
+  it('moveFolderDown swaps sort_order with the next folder in the same notebook', async () => {
+    // folderA1 has sortOrder 0, folderA2 has sortOrder 1 — moving folderA1 down swaps them.
+    useFolderStore.getState().setFolders([folderA1, folderA2]);
+    await useFolderStore.getState().moveFolderDown(fakeDb, 'f-a1', 'nb-a');
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(1);
+    expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(0);
+  });
+
+  it('moveFolderUp does nothing when folder is already first in its notebook', async () => {
+    useFolderStore.getState().setFolders([folderA1, folderA2]);
+    await useFolderStore.getState().moveFolderUp(fakeDb, 'f-a1', 'nb-a');
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(0);
+    expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(1);
+  });
+
+  it('moveFolderDown does nothing when folder is already last in its notebook', async () => {
+    useFolderStore.getState().setFolders([folderA1, folderA2]);
+    await useFolderStore.getState().moveFolderDown(fakeDb, 'f-a2', 'nb-a');
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(0);
+    expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(1);
   });
 });

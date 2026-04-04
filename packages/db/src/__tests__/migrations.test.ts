@@ -16,7 +16,7 @@ describe('schema migrations', () => {
     expect(result.count).toBeGreaterThan(0);
   });
 
-  it('notebooks table exists with correct columns: id, name, created_at, updated_at, synced_at', () => {
+  it('notebooks table exists with correct columns: id, name, created_at, updated_at, synced_at, sort_order', () => {
     const columns = db.prepare("PRAGMA table_info('notebooks')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
@@ -24,11 +24,11 @@ describe('schema migrations', () => {
     expect(names).toContain('created_at');
     expect(names).toContain('updated_at');
     expect(names).toContain('synced_at');
-    // Exactly these five columns — no extras
-    expect(names).toHaveLength(5);
+    expect(names).toContain('sort_order');
+    expect(names).toHaveLength(6);
   });
 
-  it('folders table exists with correct columns: id, notebook_id, parent_id, name, created_at, updated_at', () => {
+  it('folders table exists with correct columns: id, notebook_id, parent_id, name, created_at, updated_at, sort_order', () => {
     const columns = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
@@ -37,7 +37,8 @@ describe('schema migrations', () => {
     expect(names).toContain('name');
     expect(names).toContain('created_at');
     expect(names).toContain('updated_at');
-    expect(names).toHaveLength(6);
+    expect(names).toContain('sort_order');
+    expect(names).toHaveLength(7);
   });
 
   it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json', () => {
@@ -55,6 +56,20 @@ describe('schema migrations', () => {
     expect(names).toContain('synced_at');
     expect(names).toContain('canvas_json');
     expect(names).toHaveLength(11);
+  });
+
+  it('ADD_NOTEBOOK_SORT_ORDER migration adds sort_order column to notebooks', () => {
+    // The column must exist after all migrations have been applied on a fresh DB.
+    const columns = db.prepare("PRAGMA table_info('notebooks')").all() as Array<{ name: string }>;
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('sort_order');
+  });
+
+  it('ADD_FOLDER_SORT_ORDER migration adds sort_order column to folders', () => {
+    // The column must exist after all migrations have been applied on a fresh DB.
+    const columns = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('sort_order');
   });
 
   it('notes_fts virtual table exists', () => {

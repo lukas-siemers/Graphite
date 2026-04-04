@@ -42,20 +42,20 @@ describe('notebooks operations', () => {
     expect(notebook.updatedAt).toBe(expectedNow);
   });
 
-  it('getNotebooks returns all notebooks ordered by updated_at DESC', async () => {
+  it('getNotebooks returns all notebooks ordered by sort_order ASC, created_at ASC', async () => {
     // Create first notebook at T=0
     const nb1 = await createNotebook(db, 'Alpha');
 
-    // Advance time so the second notebook has a later updated_at
+    // Advance time so the second notebook has a later created_at
     vi.setSystemTime(new Date('2024-01-02'));
     const nb2 = await createNotebook(db, 'Beta');
 
     const notebooks = await getNotebooks(db);
 
     expect(notebooks).toHaveLength(2);
-    // Most recently updated first
-    expect(notebooks[0].id).toBe(nb2.id);
-    expect(notebooks[1].id).toBe(nb1.id);
+    // Both have sort_order=0, tiebreaker is created_at ASC → nb1 first
+    expect(notebooks[0].id).toBe(nb1.id);
+    expect(notebooks[1].id).toBe(nb2.id);
   });
 
   it('getNotebooks returns empty array when no notebooks exist', async () => {
