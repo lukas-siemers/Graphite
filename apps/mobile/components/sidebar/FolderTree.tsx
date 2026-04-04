@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, TextInput } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
@@ -15,6 +15,7 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
+  const loadFolders = useFolderStore((s) => s.loadFolders);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
@@ -22,6 +23,20 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const createNewNote = useNoteStore((s) => s.createNewNote);
 
   const notebookFolders = folders.filter((f) => f.notebookId === notebookId);
+
+  // Load this notebook's folders when the tree mounts (i.e. when the notebook
+  // row is expanded).  loadFolders merges by notebook so calling it here never
+  // wipes folders belonging to other expanded notebooks.
+  useEffect(() => {
+    try {
+      const db = getDatabase();
+      loadFolders(db, notebookId);
+    } catch (_) {
+      // db not ready yet — folders will remain as initialised
+    }
+  // loadFolders identity is stable (Zustand); notebookId never changes per mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notebookId]);
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
     const s = new Set<string>();

@@ -67,9 +67,11 @@ function PhoneLayout() {
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
 
-  // Navigate to editor when a note is selected
+  // Navigate to editor when a note is selected.
+  // Handles both the normal path (note picked from list → 'list' screen) and
+  // the new-note path (note created from sidebar → 'sidebar' screen).
   useEffect(() => {
-    if (activeNoteId && screen === 'list') {
+    if (activeNoteId && (screen === 'list' || screen === 'sidebar')) {
       setScreen('editor');
     }
   }, [activeNoteId]);

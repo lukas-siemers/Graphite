@@ -15,7 +15,6 @@ export default function Sidebar() {
   const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
   const loadNotes = useNoteStore((s) => s.loadNotes);
-  const loadFolders = useFolderStore((s) => s.loadFolders);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
   const createNewNote = useNoteStore((s) => s.createNewNote);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
@@ -45,13 +44,16 @@ export default function Sidebar() {
   async function handleNotebookPress(notebookId: string) {
     toggleExpand(notebookId);
     // Only reload data when switching to a different notebook.
-    // Toggling expand/collapse on the active notebook should not wipe
-    // the note list (especially on web where loadNotes returns empty).
+    // Toggling expand/collapse on the active notebook must not wipe the note
+    // list (especially on web where loadNotes returns empty).
     if (notebookId === activeNotebookId) return;
     setActiveNotebook(notebookId);
+    // Do NOT call loadFolders here — each FolderTree loads its own folders on
+    // mount.  Calling loadFolders with the new notebook's ID replaces the
+    // entire folder store, which makes the previously-expanded notebook's
+    // FolderTree render empty while it is still visible.
     try {
       const db = getDatabase();
-      await loadFolders(db, notebookId);
       await loadNotes(db, notebookId, null);
     } catch (_) {
       // db not ready yet

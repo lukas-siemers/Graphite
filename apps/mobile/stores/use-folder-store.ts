@@ -40,8 +40,15 @@ export const useFolderStore = create<FolderState>((set) => ({
     set((state) => ({ folders: state.folders.filter((f) => f.id !== id) })),
 
   loadFolders: async (db: SQLiteDatabase, notebookId: string) => {
-    const folders = await getFolders(db, notebookId);
-    set({ folders });
+    const freshFolders = await getFolders(db, notebookId);
+    // Merge: keep folders that belong to other notebooks so that multiple
+    // expanded FolderTree instances don't wipe each other's data.
+    set((state) => ({
+      folders: [
+        ...state.folders.filter((f) => f.notebookId !== notebookId),
+        ...freshFolders,
+      ],
+    }));
   },
 
   createNewFolder: async (
