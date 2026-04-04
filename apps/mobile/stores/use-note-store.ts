@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   type Note,
+  type CanvasDocument,
   getNotes,
   createNote,
   updateNote,
@@ -30,6 +31,12 @@ interface NoteState {
     db: SQLiteDatabase,
     id: string,
     patch: { title?: string; body?: string },
+  ) => Promise<void>;
+  updateNoteCanvas: (
+    db: SQLiteDatabase,
+    id: string,
+    canvasDoc: CanvasDocument,
+    silent?: boolean,
   ) => Promise<void>;
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
 }
@@ -80,6 +87,27 @@ export const useNoteStore = create<NoteState>((set) => ({
     set((state) => ({
       notes: state.notes.map((n) =>
         n.id === id ? { ...n, ...patch, updatedAt: now } : n,
+      ),
+    }));
+  },
+
+  updateNoteCanvas: async (
+    db: SQLiteDatabase,
+    id: string,
+    canvasDoc: CanvasDocument,
+    silent = false,
+  ) => {
+    const canvasJson = JSON.stringify(canvasDoc);
+    // Write to SQLite — pass skipTimestamp when silent so migration writes
+    // do not alter the note's updated_at in the DB.
+    await updateNote(db, id, { canvasJson, skipTimestamp: silent });
+    // Sync in-memory store; isDirty stays 0 (Phase 1 — no sync).
+    // When silent, do not update updatedAt so sort order is preserved.
+    set((state) => ({
+      notes: state.notes.map((n) =>
+        n.id === id
+          ? { ...n, canvasJson, ...(silent ? {} : { updatedAt: Date.now() }) }
+          : n,
       ),
     }));
   },

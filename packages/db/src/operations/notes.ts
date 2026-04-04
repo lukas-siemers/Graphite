@@ -111,9 +111,11 @@ export async function updateNote(
     body?: string;
     drawingAssetId?: string | null;
     canvasJson?: string | null;
+    skipTimestamp?: boolean;
   },
 ): Promise<void> {
   const now = Date.now();
+  const skipTs = patch.skipTimestamp === true;
   // Read the current row (including rowid) before mutating so we can issue the
   // FTS5 'delete' command with the old title/body values.
   const before = await db.getFirstAsync<{ rowid: number; title: string; body: string }>(
@@ -122,34 +124,69 @@ export async function updateNote(
   );
 
   if (patch.title !== undefined && patch.body !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
-      [patch.title, patch.body, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, body = ? WHERE id = ?',
+        [patch.title, patch.body, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
+        [patch.title, patch.body, now, id],
+      );
+    }
   } else if (patch.title !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET title = ?, updated_at = ? WHERE id = ?',
-      [patch.title, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET title = ? WHERE id = ?',
+        [patch.title, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET title = ?, updated_at = ? WHERE id = ?',
+        [patch.title, now, id],
+      );
+    }
   } else if (patch.body !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
-      [patch.body, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET body = ? WHERE id = ?',
+        [patch.body, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
+        [patch.body, now, id],
+      );
+    }
   }
 
   if (patch.drawingAssetId !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
-      [patch.drawingAssetId, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET drawing_asset_id = ? WHERE id = ?',
+        [patch.drawingAssetId, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
+        [patch.drawingAssetId, now, id],
+      );
+    }
   }
 
   if (patch.canvasJson !== undefined) {
-    await db.runAsync(
-      'UPDATE notes SET canvas_json = ?, updated_at = ? WHERE id = ?',
-      [patch.canvasJson, now, id],
-    );
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET canvas_json = ? WHERE id = ?',
+        [patch.canvasJson, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET canvas_json = ?, updated_at = ? WHERE id = ?',
+        [patch.canvasJson, now, id],
+      );
+    }
   }
 
   if (before) {

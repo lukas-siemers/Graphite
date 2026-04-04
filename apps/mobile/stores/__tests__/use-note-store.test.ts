@@ -1,6 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Note } from '../../../../packages/db/src/types';
+import type { CanvasDocument } from '../../../../packages/db/src/canvas-types';
 import { useNoteStore } from '../use-note-store';
+
+// Mock the @graphite/db module so updateNote never hits SQLite in unit tests.
+vi.mock('@graphite/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@graphite/db')>();
+  return {
+    ...actual,
+    updateNote: vi.fn().mockResolvedValue(undefined),
+    getNotes: vi.fn().mockResolvedValue([]),
+    createNote: vi.fn(),
+    deleteNote: vi.fn(),
+  };
+});
 
 // Fixed test fixture
 const note1: Note = {
@@ -10,6 +23,7 @@ const note1: Note = {
   title: 'Hello',
   body: '',
   drawingAssetId: null,
+  canvasJson: null,
   isDirty: 0,
   createdAt: 1700000000000,
   updatedAt: 1700000000000,
@@ -23,6 +37,7 @@ const note2: Note = {
   title: 'World',
   body: '# World',
   drawingAssetId: null,
+  canvasJson: null,
   isDirty: 0,
   createdAt: 1700000000001,
   updatedAt: 1700000000001,
@@ -84,5 +99,44 @@ describe('useNoteStore', () => {
     expect(notes.find((n) => n.id === 'n-1')).toBeUndefined();
     expect(notes).toHaveLength(1);
     expect(notes[0]).toEqual(note2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateNoteCanvas regression tests
+// ---------------------------------------------------------------------------
+
+const emptyCanvas: CanvasDocument = {
+  version: 1,
+  textContent: { body: 'test body' },
+  inkLayer: { strokes: [] },
+};
+
+// Minimal fake DB — updateNote is already mocked at module level above
+const fakeDb = {} as any;
+
+describe('updateNoteCanvas', () => {
+  beforeEach(() => {
+    useNoteStore.setState({ notes: [note1], activeNoteId: null });
+  });
+
+  it('silent=false: updatedAt changes after call', async () => {
+    const before = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!.updatedAt;
+    await useNoteStore.getState().updateNoteCanvas(fakeDb, 'n-1', emptyCanvas, false);
+    const after = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!.updatedAt;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('silent=true: updatedAt does NOT change after call', async () => {
+    const before = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!.updatedAt;
+    await useNoteStore.getState().updateNoteCanvas(fakeDb, 'n-1', emptyCanvas, true);
+    const after = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!.updatedAt;
+    expect(after).toBe(before);
+  });
+
+  it('updateNoteCanvas never sets isDirty to 1', async () => {
+    await useNoteStore.getState().updateNoteCanvas(fakeDb, 'n-1', emptyCanvas, false);
+    const note = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!;
+    expect(note.isDirty).toBe(0);
   });
 });

@@ -5,13 +5,18 @@ import {
   TextInput,
   ScrollView,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { tokens } from '@graphite/ui';
 import { getDatabase } from '@graphite/db';
+import type { CanvasDocument } from '@graphite/db';
+import { CanvasRenderer } from '@graphite/editor';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
+import { usePencilDetection } from '../../hooks/use-pencil-detection';
 
 type SaveStatus = 'Saved' | 'Saving...';
 
@@ -83,12 +88,12 @@ const markdownStyles = {
     fontFamily: 'Courier',
     fontSize: 14,
     color: tokens.accentLight,
-    backgroundColor: tokens.bgDeep,
+    backgroundColor: tokens.bgCode,
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
   fence: {
-    backgroundColor: tokens.bgDeep,
+    backgroundColor: tokens.bgCode,
     borderWidth: 1,
     borderColor: tokens.border,
     borderRadius: 0,
@@ -100,7 +105,7 @@ const markdownStyles = {
     fontSize: 13,
     lineHeight: 20,
     color: tokens.accentLight,
-    backgroundColor: tokens.bgDeep,
+    backgroundColor: tokens.bgCode,
   },
   bullet_list: {
     marginBottom: 8,
@@ -161,6 +166,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
+  const updateNoteCanvas = useNoteStore((s) => s.updateNoteCanvas);
 
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
@@ -169,6 +175,9 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
 
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
+  const { width: windowWidth } = useWindowDimensions();
+  const { inputMode, handleTouchStart } = usePencilDetection();
+
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
@@ -176,12 +185,27 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Task 6 — auto-migrate legacy notes to CanvasDocument on open
+  useNoteCanvasMigration(activeNote);
 
   // Sync local state when active note changes; exit preview when switching notes
   useEffect(() => {
     if (activeNote) {
       setLocalTitle(activeNote.title);
-      setLocalBody(activeNote.body);
+      // Prefer canvas body if migrated, fall back to legacy body
+      const displayBody = activeNote.canvasJson
+        ? (() => {
+            try {
+              const doc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
+              return doc.textContent.body;
+            } catch {
+              return activeNote.body;
+            }
+          })()
+        : activeNote.body;
+      setLocalBody(displayBody);
       setSaveStatus('Saved');
       setPreviewMode(false);
     }
@@ -211,6 +235,43 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
     }, 500);
   }
 
+  /**
+   * Called when the CanvasRenderer text layer emits a new full body string.
+   * Debounces writes to both legacy `body` column and `canvas_json`.
+   */
+  function handleCanvasTextChange(text: string) {
+    setLocalBody(text);
+    setSaveStatus('Saving...');
+
+    if (canvasDebounce.current) clearTimeout(canvasDebounce.current);
+    canvasDebounce.current = setTimeout(async () => {
+      if (!activeNoteId || !activeNote) return;
+      try {
+        const db = getDatabase();
+        // Update legacy body column (keeps FTS and note list preview in sync)
+        await saveNote(db, activeNoteId, { body: text });
+        // Update canvas_json with new text body
+        let currentDoc: CanvasDocument;
+        if (activeNote.canvasJson) {
+          try {
+            currentDoc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
+          } catch {
+            const { createEmptyCanvas } = await import('@graphite/db');
+            currentDoc = createEmptyCanvas();
+          }
+        } else {
+          const { createEmptyCanvas } = await import('@graphite/db');
+          currentDoc = createEmptyCanvas();
+        }
+        currentDoc.textContent.body = text;
+        await updateNoteCanvas(db, activeNoteId, currentDoc);
+        setSaveStatus('Saved');
+      } catch (_) {
+        setSaveStatus('Saved');
+      }
+    }, 500);
+  }
+
   function handleBodyChange(text: string) {
     setLocalBody(text);
     setSaveStatus('Saving...');
@@ -230,6 +291,19 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const wordCount = countWords(localBody);
   const markdownRules = buildMarkdownRules();
 
+  // Derive the CanvasDocument to pass to CanvasRenderer
+  let activeCanvasDoc: CanvasDocument | null = null;
+  if (activeNote?.canvasJson) {
+    try {
+      activeCanvasDoc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
+    } catch {
+      activeCanvasDoc = null;
+    }
+  }
+
+  // Canvas column width: full width minus sidebar/padding on iPad, full width on phone
+  const canvasWidth = Math.min(windowWidth, 680);
+
   if (!activeNote) {
     return (
       <View
@@ -248,7 +322,10 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <View
+      style={{ flex: 1, backgroundColor: tokens.bgBase }}
+      onStartShouldSetResponder={handleTouchStart}
+    >
       {/* Title area */}
       <View
         style={{
@@ -262,7 +339,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
           onChangeText={handleTitleChange}
           placeholder="Untitled"
           placeholderTextColor={tokens.textHint}
-          editable={!previewMode}
+          editable={!previewMode && inputMode !== 'ink'}
           style={{
             fontSize: 28,
             fontWeight: '700',
@@ -283,14 +360,31 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         </View>
       )}
 
-      {/* Content area — edit or preview */}
+      {/* Content area — CanvasRenderer (edit) or Markdown preview */}
       {previewMode ? (
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
           <Markdown style={markdownStyles} rules={markdownRules}>
             {localBody.length > 0 ? localBody : ' '}
           </Markdown>
         </ScrollView>
+      ) : activeCanvasDoc !== null ? (
+        /* Canvas-based editing — CanvasDocument exists (migrated or new) */
+        <View style={{ flex: 1 }}>
+          <CanvasRenderer
+            canvasDoc={activeCanvasDoc}
+            width={canvasWidth}
+            onTextChange={handleCanvasTextChange}
+            onInkChange={(inkLayer) => {
+              if (!activeNote) return;
+              const updated: CanvasDocument = { ...activeCanvasDoc, inkLayer };
+              const db = getDatabase();
+              updateNoteCanvas(db, activeNote.id, updated);
+            }}
+            inputMode={inputMode}
+          />
+        </View>
       ) : (
+        /* Fallback plain TextInput while migration hasn't run yet */
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
           <TextInput
             value={localBody}
