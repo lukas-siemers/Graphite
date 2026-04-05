@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, TextInput, Alert, Platform } from 'react-native';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
@@ -73,17 +73,24 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  // Tap already-active folder → rename (Finder pattern, no timer needed).
-  // Tap any other folder → immediate expand/collapse + switch.
+  // Track timestamp of last tap per folder for double-tap detection.
+  // First tap fires immediately. Second tap within 300ms triggers rename.
+  const lastTapRef = useRef<Map<string, number>>(new Map());
+
   function handleFolderPress(folderId: string, folderName: string) {
     if (renamingFolderId === folderId) return;
 
-    const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
-    if (isAlreadyActive) {
+    const now = Date.now();
+    const last = lastTapRef.current.get(folderId) ?? 0;
+    lastTapRef.current.set(folderId, now);
+
+    if (now - last < 300) {
+      lastTapRef.current.delete(folderId);
       startFolderRename(folderId, folderName);
       return;
     }
 
+    // Single tap — fire immediately, no delay.
     setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(folderId)) next.delete(folderId);
@@ -91,6 +98,8 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
       return next;
     });
 
+    const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
+    if (isAlreadyActive) return;
     setActiveFolder(folderId);
 
     if (Platform.OS === 'web') return;

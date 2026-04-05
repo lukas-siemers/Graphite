@@ -48,16 +48,25 @@ export default function Sidebar() {
   const renameInputRef = useRef<TextInput>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Tap already-active notebook → rename (Finder pattern, no timer needed).
-  // Tap any other notebook → immediate expand/collapse + switch.
+  // Track timestamp of last tap per notebook for double-tap detection.
+  // First tap fires immediately. Second tap within 300ms triggers rename.
+  // No timer deferral — zero delay on single tap.
+  const lastTapRef = useRef<Map<string, number>>(new Map());
+
   function handleNotebookPress(notebookId: string, notebookName: string) {
     if (renamingNotebookId === notebookId) return;
 
-    if (notebookId === activeNotebookId) {
+    const now = Date.now();
+    const last = lastTapRef.current.get(notebookId) ?? 0;
+    lastTapRef.current.set(notebookId, now);
+
+    if (now - last < 300) {
+      lastTapRef.current.delete(notebookId);
       startRename(notebookId, notebookName);
       return;
     }
 
+    // Single tap — fire immediately, no delay.
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(notebookId)) next.delete(notebookId);
@@ -65,6 +74,7 @@ export default function Sidebar() {
       return next;
     });
 
+    if (notebookId === activeNotebookId) return;
     setActiveNotebook(notebookId);
 
     if (Platform.OS === 'web') return;
