@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, TextInput, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, updateFolder, countFolderContents } from '@graphite/db';
+import { getDatabase, countFolderContents } from '@graphite/db';
 import type { Folder, Note } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
@@ -34,7 +34,7 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   const folders = useFolderStore((s) => s.folders);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
-  const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
+  const renameFolderAction = useFolderStore((s) => s.renameFolder);
   const loadFolders = useFolderStore((s) => s.loadFolders);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
@@ -117,9 +117,13 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     if (finalName === originalName) return;
     try {
       const db = getDatabase();
-      await updateFolder(db, folderId, finalName);
-      storeUpdateFolder(folderId, { name: finalName });
+      await renameFolderAction(db, folderId, finalName);
     } catch (_) {}
+  }
+
+  function cancelFolderRename() {
+    setRenamingFolderId(null);
+    setRenameValue('');
   }
 
   async function handleCreateNewNote(folderId: string) {
@@ -279,6 +283,12 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
                 onChangeText={setRenameValue}
                 onSubmitEditing={() => commitFolderRename(folder.id, folder.name)}
                 onBlur={() => commitFolderRename(folder.id, folder.name)}
+                onKeyPress={(e: any) => {
+                  if (e?.nativeEvent?.key === 'Escape') {
+                    e.preventDefault?.();
+                    cancelFolderRename();
+                  }
+                }}
                 style={{
                   flex: 1,
                   fontSize: 13,

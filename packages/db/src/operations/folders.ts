@@ -79,6 +79,23 @@ export async function updateFolder(
   );
 }
 
+/**
+ * Rename a folder. Dedicated entry point used by inline-rename UX in the
+ * sidebar. Updates `updated_at` to the current time. Parameterized - callers
+ * must validate / trim `name` upstream.
+ */
+export async function renameFolder(
+  db: SQLiteDatabase,
+  id: string,
+  name: string,
+): Promise<void> {
+  const now = Date.now();
+  await db.runAsync(
+    'UPDATE folders SET name = ?, updated_at = ? WHERE id = ?',
+    [name, now, id],
+  );
+}
+
 export async function updateFolderSortOrder(
   db: SQLiteDatabase,
   id: string,

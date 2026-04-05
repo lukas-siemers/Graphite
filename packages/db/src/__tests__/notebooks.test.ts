@@ -4,6 +4,7 @@ import {
   createNotebook,
   getNotebooks,
   updateNotebook,
+  renameNotebook,
   deleteNotebook,
 } from '../operations/notebooks';
 import { createNote } from '../operations/notes';
@@ -76,6 +77,18 @@ describe('notebooks operations', () => {
     const [updated] = await getNotebooks(db);
     expect(updated.name).toBe('New Name');
     expect(updated.updatedAt).toBe(updatedNow);
+  });
+
+  it('renameNotebook updates the name and updated_at', async () => {
+    const notebook = await createNotebook(db, 'Old');
+
+    vi.setSystemTime(new Date('2024-07-15'));
+    const expectedNow = new Date('2024-07-15').getTime();
+    await renameNotebook(db, notebook.id, 'Renamed');
+
+    const [updated] = await getNotebooks(db);
+    expect(updated.name).toBe('Renamed');
+    expect(updated.updatedAt).toBe(expectedNow);
   });
 
   it('deleteNotebook removes the notebook', async () => {

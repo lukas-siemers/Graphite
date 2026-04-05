@@ -5,6 +5,7 @@ import {
   getNotebooks,
   createNotebook,
   deleteNotebook,
+  renameNotebook as dbRenameNotebook,
   updateNotebookSortOrder,
 } from '@graphite/db';
 
@@ -22,6 +23,7 @@ interface NotebookState {
     db: SQLiteDatabase,
     id: string,
   ) => Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }>;
+  renameNotebook: (db: SQLiteDatabase, id: string, name: string) => Promise<void>;
   moveNotebookUp: (db: SQLiteDatabase, id: string) => Promise<void>;
   moveNotebookDown: (db: SQLiteDatabase, id: string) => Promise<void>;
   reorderNotebooks: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
@@ -50,6 +52,16 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     const notebook = await createNotebook(db, name);
     set((state) => ({ notebooks: [...state.notebooks, notebook] }));
     return notebook;
+  },
+
+  renameNotebook: async (db: SQLiteDatabase, id: string, name: string) => {
+    await dbRenameNotebook(db, id, name);
+    const now = Date.now();
+    set((state) => ({
+      notebooks: state.notebooks.map((n) =>
+        n.id === id ? { ...n, name, updatedAt: now } : n,
+      ),
+    }));
   },
 
   deleteNotebook: async (db: SQLiteDatabase, id: string) => {
