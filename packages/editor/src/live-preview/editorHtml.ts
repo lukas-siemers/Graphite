@@ -79,6 +79,50 @@ export function buildEditorHtml(): string {
   /* ── Placeholder ── */
   .cm-placeholder { color: #8A8F98 !important; font-style: italic; }
 
+  /* ── Fenced code block live preview ── */
+  /* Idle state — the "finished" look. Clean, developer-tool aesthetic. */
+  .cm-fence-line {
+    background: #141414;
+    font-family: 'SF Mono', 'JetBrains Mono', Consolas, Monaco, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 20px;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    border-left: 1px solid #333;
+    border-right: 1px solid #333;
+  }
+  .cm-fence-first {
+    padding-top: 6px !important;
+    border-top: 1px solid #333;
+  }
+  .cm-fence-last {
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid #333;
+  }
+
+  /* The opening/closing triple-backtick lines in idle state:
+     characters stay in the flow (never hidden) but recede visually.
+     Smaller font, muted color. When the user clicks into the fence
+     they flip to editing state and become normal size again. */
+  .cm-fence-first:not(.cm-fence-editing),
+  .cm-fence-last:not(.cm-fence-editing) {
+    font-size: 10px;
+    color: #555558;
+    opacity: 0.7;
+  }
+
+  /* Editing state — the "raw markdown" look. Slightly brighter background
+     to signal edit mode, fence markers at normal font size. */
+  .cm-fence-line.cm-fence-editing {
+    background: #1A1A1A;
+  }
+  .cm-fence-first.cm-fence-editing,
+  .cm-fence-last.cm-fence-editing {
+    font-size: 13px;
+    color: #8A8F98;
+    opacity: 1;
+  }
+
   /* ── Loading / error state ── */
   #status {
     position: fixed;
@@ -116,6 +160,8 @@ import {
   EditorView,
   keymap,
   placeholder,
+  ViewPlugin,
+  Decoration,
 } from 'https://esm.sh/@codemirror/view@6';
 import {
   defaultKeymap,
@@ -132,6 +178,7 @@ import {
   LanguageDescription,
   LanguageSupport,
   StreamLanguage,
+  syntaxTree,
 } from 'https://esm.sh/@codemirror/language@6';
 import { tags as t } from 'https://esm.sh/@lezer/highlight@1';
 
@@ -448,6 +495,61 @@ function reportHeight() {
 }
 
 // ---------------------------------------------------------------------------
+// Fence style plugin — Obsidian-style "finished vs editable" code blocks.
+//
+// Emits line decorations (no widgets, no replacements) that toggle CSS
+// classes on each line of a FencedCode node. When the selection head is
+// inside the fence, the "editing" modifier is added so the fence markers
+// become normal size again; otherwise markers recede via CSS font-size.
+// ---------------------------------------------------------------------------
+
+function buildFenceDecorations(view) {
+  const ranges = [];
+  const head = view.state.selection.main.head;
+  const tree = syntaxTree(view.state);
+
+  for (const { from, to } of view.visibleRanges) {
+    tree.iterate({
+      from,
+      to,
+      enter: (node) => {
+        if (node.name !== 'FencedCode') return;
+        const editing = head >= node.from && head <= node.to;
+        const startLine = view.state.doc.lineAt(node.from).number;
+        const endLine = view.state.doc.lineAt(node.to).number;
+        for (let ln = startLine; ln <= endLine; ln++) {
+          const line = view.state.doc.line(ln);
+          const classes = ['cm-fence-line'];
+          if (ln === startLine) classes.push('cm-fence-first');
+          if (ln === endLine) classes.push('cm-fence-last');
+          if (editing) classes.push('cm-fence-editing');
+          ranges.push(
+            Decoration.line({ attributes: { class: classes.join(' ') } }).range(line.from)
+          );
+        }
+      },
+    });
+  }
+  return Decoration.set(ranges, true);
+}
+
+const fenceStylePlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = buildFenceDecorations(view);
+    }
+    update(update) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        this.decorations = buildFenceDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Build the editor
 // ---------------------------------------------------------------------------
 
@@ -474,6 +576,7 @@ const view = new EditorView({
         codeLanguages: codeLanguageList,
       }),
       syntaxHighlighting(graphiteHighlight),
+      fenceStylePlugin,
       placeholder('Start writing...'),
       readOnlyCompartment.of(EditorState.readOnly.of(false)),
       EditorView.updateListener.of((update) => {
