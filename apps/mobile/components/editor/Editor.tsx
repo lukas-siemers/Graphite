@@ -8,10 +8,12 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
+import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -233,6 +235,8 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
           paddingHorizontal: 24,
           paddingTop: 20,
           paddingBottom: 4,
+          flexDirection: 'row',
+          alignItems: 'center',
         }}
       >
         <TextInput
@@ -242,6 +246,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
           placeholderTextColor={tokens.textHint}
           editable={inputMode !== 'ink'}
           style={{
+            flex: 1,
             fontSize: 28,
             fontWeight: '700',
             color: tokens.textPrimary,
@@ -250,6 +255,31 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
             padding: 0,
           }}
         />
+        <Pressable
+          onPress={() => {
+            if (!activeNote) return;
+            void exportNoteAsMarkdown({
+              id: activeNote.id,
+              title: localTitle,
+              body: localBody,
+            });
+          }}
+          accessibilityLabel="Export note as markdown"
+          style={({ pressed }) => ({
+            width: 30,
+            height: 30,
+            marginLeft: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: pressed ? tokens.bgHover : 'transparent',
+          })}
+        >
+          <MaterialCommunityIcons
+            name="download-outline"
+            size={18}
+            color={tokens.textMuted}
+          />
+        </Pressable>
       </View>
 
       {/* Breadcrumb */}
