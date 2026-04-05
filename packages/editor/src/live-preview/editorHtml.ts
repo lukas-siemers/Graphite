@@ -24,6 +24,7 @@ export function buildEditorHtml(): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
@@ -76,32 +77,86 @@ export function buildEditorHtml(): string {
   .cm-selectionBackground { background: rgba(242,133,0,0.25) !important; }
   .cm-focused .cm-selectionBackground { background: rgba(242,133,0,0.3) !important; }
 
-  /* ── Live-preview hidden marks ── */
-  .cm-md-hidden {
-    display: none;
-  }
-
-  /* ── Heading styles (applied via line decoration) ── */
-  .cm-md-h1 { font-size: 26px !important; font-weight: 700 !important; color: #FFFFFF !important; line-height: 36px !important; }
-  .cm-md-h2 { font-size: 22px !important; font-weight: 700 !important; color: #FFFFFF !important; line-height: 30px !important; }
-  .cm-md-h3 { font-size: 18px !important; font-weight: 600 !important; color: #FFFFFF !important; line-height: 26px !important; }
-
-  /* ── Inline styles (applied via mark decoration) ── */
-  .cm-md-bold   { font-weight: 700; color: #FFFFFF; }
-  .cm-md-italic { font-style: italic; }
-  .cm-md-strike { text-decoration: line-through; color: #8A8F98; }
-  .cm-md-code   { font-family: 'Courier New', monospace; font-size: 14px; color: #FFB347; background: #141414; padding: 1px 4px; border-radius: 2px; }
-  .cm-md-link   { color: #F28500; text-decoration: underline; }
-  .cm-md-blockquote-line { border-left: 3px solid #F28500; padding-left: 12px; color: #8A8F98; }
-  .cm-md-bullet   { color: #F28500; }
-
-  /* ── Fenced code blocks ── */
-  .cm-md-fence-line  { background: #141414; font-family: 'Courier New', monospace; font-size: 14px; color: #FFB347; }
-  .cm-md-fence-first { background: #141414; color: #555558; font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; padding-top: 8px; }
-  .cm-md-fence-last  { background: #141414; padding-bottom: 8px; }
-
   /* ── Placeholder ── */
   .cm-placeholder { color: #8A8F98 !important; font-style: italic; }
+
+  /* ── Fenced code block live preview ── */
+  /* Idle state — the "finished" look. Clean, developer-tool aesthetic.
+     Background matches bgSidebar (#252525). Width is driven at runtime by
+     the fenceStylePlugin: it measures each line's scrollWidth in a
+     requestMeasure pass and sets min-width on every line of a fence to
+     the max of its siblings, producing one rectangular block whose right
+     edge matches the widest line. white-space:pre keeps long lines from
+     wrapping — they overflow horizontally up to the max-width cap. */
+  .cm-fence-line {
+    background: #252525;
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    line-height: 20px;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    border-left: 1px solid #333;
+    border-right: 1px solid #333;
+    max-width: 100%;
+    white-space: pre;
+  }
+  /* Body-line top/bottom borders — these sit on the first and last actual
+     code content lines (NOT the fence marker lines), because in idle state
+     the marker lines collapse to zero height and can't carry borders. */
+  .cm-fence-body-first {
+    padding-top: 6px !important;
+    border-top: 1px solid #333;
+  }
+  .cm-fence-body-last {
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid #333;
+  }
+
+  /* The opening/closing triple-backtick lines in idle state:
+     characters stay in the flow (never hidden) but collapse to zero visual
+     height. No display:none, no visibility:hidden — the line element stays
+     addressable by cursor position, only its visual box is zeroed out.
+     When the user clicks into the fence the .cm-fence-editing modifier is
+     added and the companion rules below restore normal sizing. */
+  .cm-fence-line.cm-fence-first:not(.cm-fence-editing),
+  .cm-fence-line.cm-fence-last:not(.cm-fence-editing) {
+    height: 0 !important;
+    min-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    overflow: hidden !important;
+  }
+  .cm-fence-line.cm-fence-first:not(.cm-fence-editing) {
+    border-top-width: 0 !important;
+  }
+  .cm-fence-line.cm-fence-last:not(.cm-fence-editing) {
+    border-bottom-width: 0 !important;
+  }
+
+  /* Editing state — the "raw markdown" look. One step brighter than idle
+     (bgHover #2C2C2C vs bgSidebar #252525) to signal edit mode, fence
+     markers at normal font size. Selectors match the specificity of the
+     idle rules above (.cm-fence-line.cm-fence-first) so they reliably
+     override them when .cm-fence-editing is present. */
+  .cm-fence-line.cm-fence-editing {
+    background: #2C2C2C;
+  }
+  .cm-fence-line.cm-fence-first.cm-fence-editing,
+  .cm-fence-line.cm-fence-last.cm-fence-editing {
+    height: auto !important;
+    min-height: 0 !important;
+    font-size: 13.5px !important;
+    line-height: 20px !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+    color: #8A8F98;
+    opacity: 1;
+    overflow: visible !important;
+    border-top: 1px solid #333 !important;
+    border-bottom: 1px solid #333 !important;
+  }
 
   /* ── Loading / error state ── */
   #status {
@@ -135,13 +190,13 @@ window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 </script>
 
 <script type="module">
-import { EditorState, Compartment, RangeSetBuilder } from 'https://esm.sh/@codemirror/state@6';
+import { EditorState, Compartment } from 'https://esm.sh/@codemirror/state@6';
 import {
   EditorView,
-  ViewPlugin,
-  Decoration,
   keymap,
   placeholder,
+  ViewPlugin,
+  Decoration,
 } from 'https://esm.sh/@codemirror/view@6';
 import {
   defaultKeymap,
@@ -152,7 +207,105 @@ import {
   indentWithTab,
 } from 'https://esm.sh/@codemirror/commands@6';
 import { markdown, markdownLanguage } from 'https://esm.sh/@codemirror/lang-markdown@6';
-import { syntaxTree } from 'https://esm.sh/@codemirror/language@6';
+import {
+  HighlightStyle,
+  syntaxHighlighting,
+  LanguageDescription,
+  LanguageSupport,
+  StreamLanguage,
+  syntaxTree,
+} from 'https://esm.sh/@codemirror/language@6';
+import { tags as t } from 'https://esm.sh/@lezer/highlight@1';
+
+// ---------------------------------------------------------------------------
+// Static language imports — @codemirror/language-data uses dynamic import()
+// which does not work reliably via esm.sh in an iframe srcdoc without an
+// import map. Importing the grammars directly is a few more kB but avoids
+// the duplicate-@codemirror/state runtime error.
+// ---------------------------------------------------------------------------
+import { python }     from 'https://esm.sh/@codemirror/lang-python@6';
+import { javascript } from 'https://esm.sh/@codemirror/lang-javascript@6';
+import { cpp }        from 'https://esm.sh/@codemirror/lang-cpp@6';
+import { rust }       from 'https://esm.sh/@codemirror/lang-rust@6';
+import { java }       from 'https://esm.sh/@codemirror/lang-java@6';
+import { html as htmlLang } from 'https://esm.sh/@codemirror/lang-html@6';
+import { css as cssLang }   from 'https://esm.sh/@codemirror/lang-css@6';
+import { json as jsonLang } from 'https://esm.sh/@codemirror/lang-json@6';
+import { sql }        from 'https://esm.sh/@codemirror/lang-sql@6';
+// C# / Kotlin / Scala / Objective-C via the StreamLanguage clike parser
+import { csharp, kotlin, scala, objectiveC } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/clike';
+import { shell }      from 'https://esm.sh/@codemirror/legacy-modes@6/mode/shell';
+import { go as goMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/go';
+import { ruby }       from 'https://esm.sh/@codemirror/legacy-modes@6/mode/ruby';
+import { lua }        from 'https://esm.sh/@codemirror/legacy-modes@6/mode/lua';
+import { yaml as yamlMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/yaml';
+import { toml as tomlMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/toml';
+import { swift }      from 'https://esm.sh/@codemirror/legacy-modes@6/mode/swift';
+
+// Build a LanguageDescription list. The load function is async but we
+// resolve synchronously from closures — CodeMirror awaits the promise
+// internally and caches the result. Aliases let users write shorthand.
+const legacy = (mode) => new LanguageSupport(StreamLanguage.define(mode));
+const codeLanguageList = [
+  LanguageDescription.of({ name: 'python',     alias: ['py'],             load: async () => python() }),
+  LanguageDescription.of({ name: 'javascript', alias: ['js'],             load: async () => javascript() }),
+  LanguageDescription.of({ name: 'typescript', alias: ['ts'],             load: async () => javascript({ typescript: true }) }),
+  LanguageDescription.of({ name: 'jsx',                                   load: async () => javascript({ jsx: true }) }),
+  LanguageDescription.of({ name: 'tsx',                                   load: async () => javascript({ jsx: true, typescript: true }) }),
+  LanguageDescription.of({ name: 'cpp',        alias: ['c++', 'c'],       load: async () => cpp() }),
+  LanguageDescription.of({ name: 'csharp',     alias: ['c#', 'cs'],       load: async () => legacy(csharp) }),
+  LanguageDescription.of({ name: 'java',                                   load: async () => java() }),
+  LanguageDescription.of({ name: 'kotlin',     alias: ['kt'],             load: async () => legacy(kotlin) }),
+  LanguageDescription.of({ name: 'scala',                                  load: async () => legacy(scala) }),
+  LanguageDescription.of({ name: 'objective-c', alias: ['objc'],          load: async () => legacy(objectiveC) }),
+  LanguageDescription.of({ name: 'rust',       alias: ['rs'],             load: async () => rust() }),
+  LanguageDescription.of({ name: 'go',         alias: ['golang'],         load: async () => legacy(goMode) }),
+  LanguageDescription.of({ name: 'ruby',       alias: ['rb'],             load: async () => legacy(ruby) }),
+  LanguageDescription.of({ name: 'lua',                                    load: async () => legacy(lua) }),
+  LanguageDescription.of({ name: 'swift',                                  load: async () => legacy(swift) }),
+  LanguageDescription.of({ name: 'shell',      alias: ['bash', 'sh', 'zsh'], load: async () => legacy(shell) }),
+  LanguageDescription.of({ name: 'sql',                                    load: async () => sql() }),
+  LanguageDescription.of({ name: 'html',                                   load: async () => htmlLang() }),
+  LanguageDescription.of({ name: 'css',                                    load: async () => cssLang() }),
+  LanguageDescription.of({ name: 'json',                                   load: async () => jsonLang() }),
+  LanguageDescription.of({ name: 'yaml',       alias: ['yml'],            load: async () => legacy(yamlMode) }),
+  LanguageDescription.of({ name: 'toml',                                   load: async () => legacy(tomlMode) }),
+];
+
+// ---------------------------------------------------------------------------
+// Graphite syntax highlight style — matches the Digital Monolith design system
+// ---------------------------------------------------------------------------
+const graphiteHighlight = HighlightStyle.define([
+  { tag: t.keyword,                                                         color: '#FFB347', fontWeight: '600' },
+  { tag: [t.string, t.special(t.string), t.character],                       color: '#A8D060' },
+  { tag: [t.comment, t.lineComment, t.blockComment, t.docComment],           color: '#555558', fontStyle: 'italic' },
+  { tag: [t.number, t.bool, t.null, t.atom],                                 color: '#F28500' },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)],           color: '#FFFFFF' },
+  { tag: [t.definition(t.variableName), t.definition(t.function(t.variableName))], color: '#FFFFFF', fontWeight: '600' },
+  { tag: [t.typeName, t.className],                                          color: '#FFB347' },
+  { tag: [t.variableName, t.propertyName],                                   color: '#DCDDDE' },
+  { tag: t.operator,                                                         color: '#8A8F98' },
+  { tag: [t.punctuation, t.bracket, t.squareBracket, t.paren, t.brace],      color: '#8A8F98' },
+  { tag: [t.tagName, t.angleBracket],                                        color: '#FFB347' },
+  { tag: t.attributeName,                                                    color: '#A8D060' },
+  { tag: t.attributeValue,                                                   color: '#A8D060' },
+  { tag: t.regexp,                                                           color: '#F28500' },
+  { tag: t.escape,                                                           color: '#F28500' },
+  { tag: t.meta,                                                             color: '#8A8F98' },
+  { tag: t.invalid,                                                          color: '#FF6B6B', textDecoration: 'underline' },
+  // Markdown token styling — applied by the markdown extension to the
+  // tokens it parses (headings, emphasis, strong, links, etc.) including
+  // content nested inside fenced code blocks.
+  { tag: t.heading1,                                                         color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.heading2,                                                         color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.heading3,                                                         color: '#FFFFFF', fontWeight: '600' },
+  { tag: t.strong,                                                           color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.emphasis,                                                         fontStyle: 'italic' },
+  { tag: t.strikethrough,                                                    color: '#8A8F98', textDecoration: 'line-through' },
+  { tag: t.link,                                                             color: '#F28500', textDecoration: 'underline' },
+  { tag: t.url,                                                              color: '#F28500' },
+  { tag: t.monospace,                                                        color: '#FFB347' },
+]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -161,139 +314,6 @@ import { syntaxTree } from 'https://esm.sh/@codemirror/language@6';
 function post(msg) {
   window.parent.postMessage(msg, '*');
 }
-
-// ---------------------------------------------------------------------------
-// Live-preview decorations plugin
-// ---------------------------------------------------------------------------
-
-const livePreviewPlugin = ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.decorations = this.build(view);
-  }
-  update(update) {
-    if (update.docChanged || update.selectionSet || update.viewportChanged) {
-      this.decorations = this.build(update.view);
-    }
-  }
-  build(view) {
-    const builder = new RangeSetBuilder();
-    const doc = view.state.doc;
-    const selection = view.state.selection.main;
-
-    // Collect all decorations first, then add them sorted
-    const decos = [];
-
-    syntaxTree(view.state).iterate({
-      enter(node) {
-        const { from, to, name } = node;
-
-        // Determine if cursor is on same line as this node
-        const nodeLine = doc.lineAt(from).number;
-        const cursorLine = doc.lineAt(selection.head).number;
-        const cursorOnLine = nodeLine === cursorLine;
-
-        // Marks to hide when cursor is elsewhere
-        const hiddenWhenAway = [
-          'HeaderMark',
-          'EmphasisMark',
-          'CodeMark',
-          'StrikethroughMark',
-          'QuoteMark',
-        ];
-
-        if (hiddenWhenAway.includes(name) && !cursorOnLine) {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
-          return;
-        }
-
-        // Link URL — hide when cursor is not on this line
-        if (name === 'URL' && !cursorOnLine) {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
-          return;
-        }
-
-        // Heading line decorations
-        if (name === 'ATXHeading1') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h1' }) });
-        } else if (name === 'ATXHeading2') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h2' }) });
-        } else if (name === 'ATXHeading3') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h3' }) });
-        }
-
-        // Bold / Strong
-        if (name === 'StrongEmphasis') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-bold' }) });
-        }
-
-        // Italic / Emphasis
-        if (name === 'Emphasis') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-italic' }) });
-        }
-
-        // Strikethrough
-        if (name === 'Strikethrough') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-strike' }) });
-        }
-
-        // Inline code
-        if (name === 'InlineCode') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-code' }) });
-        }
-
-        // Link
-        if (name === 'Link') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-link' }) });
-        }
-
-        // Blockquote lines
-        if (name === 'Blockquote') {
-          // Iterate each line in the blockquote
-          let pos = from;
-          while (pos <= to) {
-            const line = doc.lineAt(pos);
-            decos.push({ from: line.from, to: line.from, deco: Decoration.line({ class: 'cm-md-blockquote-line' }) });
-            if (line.to >= to) break;
-            pos = line.to + 1;
-          }
-        }
-
-        // Fenced code blocks — style each line
-        if (name === 'FencedCode') {
-          let lineNum = doc.lineAt(from).number;
-          const lastLineNum = doc.lineAt(to).number;
-          while (lineNum <= lastLineNum) {
-            const line = doc.line(lineNum);
-            const cls = lineNum === doc.lineAt(from).number
-              ? 'cm-md-fence-first'
-              : lineNum === lastLineNum
-              ? 'cm-md-fence-last'
-              : 'cm-md-fence-line';
-            decos.push({ from: line.from, to: line.from, deco: Decoration.line({ class: cls }) });
-            lineNum++;
-          }
-        }
-      },
-    });
-
-    // Sort by position (line decorations first within same range to avoid overlap errors)
-    decos.sort((a, b) => {
-      if (a.from !== b.from) return a.from - b.from;
-      // Line decorations (from===to) before mark decorations
-      const aIsLine = a.from === a.to;
-      const bIsLine = b.from === b.to;
-      if (aIsLine && !bIsLine) return -1;
-      if (!aIsLine && bIsLine) return 1;
-      return a.to - b.to;
-    });
-
-    for (const { from, to, deco } of decos) {
-      builder.add(from, to, deco);
-    }
-
-    return builder.finish();
-  }
-}, { decorations: v => v.decorations });
 
 // ---------------------------------------------------------------------------
 // Active format detection (for toolbar highlighting)
@@ -385,10 +405,65 @@ function applyFormat(view, command) {
     }
   }
 
-  // Code block
+  // Code block — inserts a GitHub-style fenced block whose resulting text
+  // is byte-identical to what a user would type manually (parity guarantee:
+  // the surrounding parse produces a FencedCode node at the expected span).
+  //
+  // Edge cases handled:
+  //   - cursor at start of doc / start of line   → no leading newline
+  //   - cursor mid-line                          → leading newline splits the line
+  //   - cursor at end of line / end of doc       → no trailing newline
+  //   - selection wraps existing text            → that text becomes the body
+  //   - selection body ends with \\n             → strip one trailing \\n to avoid
+  //                                                a double blank line before closer
+  //   - selection body contains triple backticks → we still emit the fence; caller
+  //                                                gets the same output a manual
+  //                                                paste would produce. Flagged for QA.
   if (command === 'code-block') {
-    const fence = '\`\`\`\\n' + (selectedText || '') + '\\n\`\`\`';
-    changes = { from: sel.from, to: sel.to, insert: fence };
+    const atLineStart = sel.from === line.from;
+    const endLine = doc.lineAt(sel.to);
+    const atLineEnd = sel.to === endLine.to;
+    const leadingBreak = atLineStart ? '' : '\\n';
+    const trailingBreak = atLineEnd ? '' : '\\n';
+
+    // Normalize the body: strip at most one trailing newline so we don't
+    // produce a spurious blank line between body and closer when the user's
+    // selection happened to include the line terminator.
+    let body = selectedText || '';
+    if (body.endsWith('\\n')) body = body.slice(0, -1);
+
+    const opening = '\`\`\`';
+    const closing = '\`\`\`';
+    // Opening fence, body (or blank), closing fence — each on its own line.
+    // The insertion always contains: opener\\nBODY\\ncloser so the markdown
+    // parser sees a closed FencedCode node identical to manual entry.
+    const fence = leadingBreak + opening + '\\n' + body + '\\n' + closing + trailingBreak;
+
+    // Cursor position:
+    //   - empty selection  → just after the opening backticks, ready for
+    //                        the user to type the language identifier.
+    //   - non-empty wrap  → at the end of the inserted body so the user
+    //                        can continue typing inside the fence.
+    const openerEnd = sel.from + leadingBreak.length + opening.length;
+    const bodyStart = openerEnd + 1; // after the \\n that ends the opener line
+    const cursorPos = body.length === 0
+      ? openerEnd
+      : bodyStart + body.length;
+
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: fence },
+      selection: { anchor: cursorPos },
+      // Ensure the newly inserted fence is actually visible. Without this,
+      // inserting a block near the viewport edge (or via toolbar when the
+      // cursor was just off-screen) could leave the user staring at the old
+      // viewport with no visible change — which reads as "the button did
+      // nothing".
+      effects: EditorView.scrollIntoView(cursorPos, { y: 'center' }),
+    });
+    // Re-focus so the user can immediately type the language identifier.
+    view.focus();
+    post({ type: 'command-applied' });
+    return;
   }
 
   // Inline wrappers
@@ -401,18 +476,31 @@ function applyFormat(view, command) {
 
   if (inlineWrapMap[command]) {
     const wrap = inlineWrapMap[command];
-    const wrapped = wrap + (selectedText || '') + wrap;
     // Toggle: if selection is already wrapped, unwrap
     const before = doc.sliceString(Math.max(0, sel.from - wrap.length), sel.from);
     const after = doc.sliceString(sel.to, Math.min(doc.length, sel.to + wrap.length));
     if (before === wrap && after === wrap) {
-      changes = [
-        { from: sel.from - wrap.length, to: sel.from, insert: '' },
-        { from: sel.to, to: sel.to + wrap.length, insert: '' },
-      ];
-    } else {
-      changes = { from: sel.from, to: sel.to, insert: wrapped };
+      view.dispatch({
+        changes: [
+          { from: sel.from - wrap.length, to: sel.from, insert: '' },
+          { from: sel.to, to: sel.to + wrap.length, insert: '' },
+        ],
+      });
+      post({ type: 'command-applied' });
+      return;
     }
+    const wrapped = wrap + (selectedText || '') + wrap;
+    // Cursor lands between the two wrap markers when selection was empty,
+    // or just after the closing marker when text was selected.
+    const cursorPos = selectedText.length === 0
+      ? sel.from + wrap.length
+      : sel.from + wrapped.length;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: wrapped },
+      selection: { anchor: cursorPos },
+    });
+    post({ type: 'command-applied' });
+    return;
   }
 
   // Link
@@ -442,6 +530,199 @@ function reportHeight() {
 }
 
 // ---------------------------------------------------------------------------
+// Fence style plugin — Obsidian-style "finished vs editable" code blocks.
+//
+// Emits line decorations (no widgets, no replacements) that toggle CSS
+// classes on each line of a FencedCode node. When the selection head is
+// inside the fence, the "editing" modifier is added so the fence markers
+// become normal size again; otherwise markers recede via CSS font-size.
+// ---------------------------------------------------------------------------
+
+function buildFenceDecorations(view, widthsById) {
+  const ranges = [];
+  // Signature captures fence identity + line ranges only (NOT the editing
+  // flag). That way selection-only updates — which flip cm-fence-editing but
+  // don't change geometry — don't force a re-measure.
+  const sigParts = [];
+  const head = view.state.selection.main.head;
+  const tree = syntaxTree(view.state);
+
+  for (const { from, to } of view.visibleRanges) {
+    tree.iterate({
+      from,
+      to,
+      enter: (node) => {
+        if (node.name !== 'FencedCode') return;
+        const editing = head >= node.from && head <= node.to;
+        const startLine = view.state.doc.lineAt(node.from).number;
+        const endLine = view.state.doc.lineAt(node.to).number;
+        // Fence id = opener line number. Stable within a single build and
+        // sufficient to group sibling .cm-fence-line elements in the DOM.
+        const fenceId = String(startLine);
+        sigParts.push(startLine + ':' + endLine);
+        // Body lines are the lines strictly between the opener and closer.
+        // We tag the first and last body lines specifically so CSS can paint
+        // the top/bottom borders there — in idle state the marker lines
+        // collapse to zero height and cannot carry borders themselves.
+        const bodyFirst = startLine + 1;
+        const bodyLast = endLine - 1;
+        // Previously-measured width for this fence. Embedding it directly
+        // in the decoration's style attribute means newly-created lines
+        // (from pressing Enter, splitting a line, etc.) render at the
+        // correct width immediately — without a one-frame flash at full
+        // parent width while the async requestMeasure catches up.
+        const cachedWidth = widthsById.get(fenceId) || 0;
+        for (let ln = startLine; ln <= endLine; ln++) {
+          const line = view.state.doc.line(ln);
+          const classes = ['cm-fence-line'];
+          if (ln === startLine) classes.push('cm-fence-first');
+          if (ln === endLine) classes.push('cm-fence-last');
+          if (ln === bodyFirst && bodyFirst <= bodyLast) classes.push('cm-fence-body-first');
+          if (ln === bodyLast && bodyFirst <= bodyLast) classes.push('cm-fence-body-last');
+          if (editing) classes.push('cm-fence-editing');
+          const attrs = {
+            class: classes.join(' '),
+            'data-fence-id': fenceId,
+          };
+          if (cachedWidth > 0) {
+            attrs.style = 'width:' + cachedWidth + 'px';
+          }
+          ranges.push(
+            Decoration.line({ attributes: attrs }).range(line.from)
+          );
+        }
+      },
+    });
+  }
+  return {
+    decorations: Decoration.set(ranges, true),
+    signature: sigParts.join('|'),
+  };
+}
+
+const fenceStylePlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      // Map<fenceId, measured pixel width> — persists across updates so
+      // newly-created lines can be rendered at the correct width the
+      // moment they enter the DOM, eliminating the Enter-key flicker.
+      this.widthsById = new Map();
+      const built = buildFenceDecorations(view, this.widthsById);
+      this.decorations = built.decorations;
+      this.signature = built.signature;
+      this.lastMeasuredSignature = '';
+      this.scheduleMeasure(view);
+    }
+    update(update) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        const built = buildFenceDecorations(update.view, this.widthsById);
+        this.decorations = built.decorations;
+        this.signature = built.signature;
+      }
+      // Gate measurement on geometry-affecting updates only. Pure
+      // selectionSet flips cm-fence-editing (background only) and must NOT
+      // trigger a measurement pass — that would thrash on every arrow key.
+      // docChanged can change a line's content width; viewportChanged can
+      // bring new fence lines into the DOM. Both warrant re-measuring.
+      // Also re-measure if the signature ever drifts from what we last
+      // wrote (covers the very first update after construction).
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        this.signature !== this.lastMeasuredSignature
+      ) {
+        this.scheduleMeasure(update.view);
+      }
+    }
+    scheduleMeasure(view) {
+      const signatureAtSchedule = this.signature;
+      view.requestMeasure({
+        read: () => {
+          // Measure the actual TEXT width of each fence line using a DOM
+          // Range. We can't use el.scrollWidth here — .cm-fence-line is a
+          // block-level element, so scrollWidth returns max(contentWidth,
+          // clientWidth), and clientWidth is the parent's full width. That
+          // makes every line "measure" as full-width and defeats the whole
+          // purpose. A Range spanning the line's text content returns the
+          // true rendered text width regardless of the element's box size.
+          //
+          // We also can't use min-width to constrain the line — block
+          // elements default to width:auto which fills the parent, so
+          // min-width only sets a floor and never prevents expansion. We
+          // set style.width directly in the write phase to force the box
+          // to exactly the measured value.
+          //
+          // Since box-sizing: border-box applies (from the reset), width
+          // includes padding + border, so we add horizontal padding+border
+          // to the measured text width. Values match CSS: 16+16 padding,
+          // 1+1 border.
+          const PADDING_AND_BORDER = 16 + 16 + 1 + 1;
+          const nodes = view.dom.querySelectorAll(
+            '.cm-fence-line[data-fence-id]'
+          );
+          const byId = new Map();
+          // DO NOT clear el.style.width here. Range.getBoundingClientRect
+          // measures the actual text glyphs, not the element box, so the
+          // measurement is invariant to whatever width we set on the last
+          // pass. Clearing would cause a visible full-width flicker
+          // between read and write phases.
+          for (const el of nodes) {
+            const id = el.getAttribute('data-fence-id');
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const rect = range.getBoundingClientRect();
+            range.detach && range.detach();
+            const textWidth = rect.width;
+            // Empty (or collapsed marker) lines have textWidth 0 — skip
+            // so they don't drag the max down. They're still included in
+            // the visual block via the body-first/last borders.
+            if (textWidth <= 0) continue;
+            const w = textWidth + PADDING_AND_BORDER;
+            const prev = byId.get(id) || 0;
+            if (w > prev) byId.set(id, w);
+          }
+          return { byId, nodes };
+        },
+        write: ({ byId, nodes }) => {
+          // Refresh the cache from the freshly-measured values and write
+          // them imperatively to the current DOM nodes. The cache feeds
+          // the next decoration build so newly-created lines get the
+          // width embedded in their initial style attribute.
+          let cacheChanged = false;
+          for (const [id, max] of byId) {
+            if (this.widthsById.get(id) !== max) {
+              this.widthsById.set(id, max);
+              cacheChanged = true;
+            }
+          }
+          for (const el of nodes) {
+            const id = el.getAttribute('data-fence-id');
+            const max = byId.get(id);
+            if (max && max > 0) {
+              const target = max + 'px';
+              if (el.style.width !== target) {
+                el.style.width = target;
+              }
+            }
+          }
+          this.lastMeasuredSignature = signatureAtSchedule;
+          // If the cache changed, the next decoration rebuild (on the
+          // next update) will embed the new width in the style attribute.
+          // We don't force a synchronous rebuild here because the current
+          // DOM already has the correct width from the imperative write
+          // above; the cache just needs to be in sync for the NEXT new
+          // line creation.
+          void cacheChanged;
+        },
+      });
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Build the editor
 // ---------------------------------------------------------------------------
 
@@ -460,10 +741,17 @@ const view = new EditorView({
     extensions: [
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-      markdown({ base: markdownLanguage }),
+      markdown({
+        base: markdownLanguage,
+        // Static language list. codeLanguages accepts either an array or
+        // a resolver function — the array form matches info strings against
+        // each LanguageDescription's name + aliases automatically.
+        codeLanguages: codeLanguageList,
+      }),
+      syntaxHighlighting(graphiteHighlight),
+      fenceStylePlugin,
       placeholder('Start writing...'),
       readOnlyCompartment.of(EditorState.readOnly.of(false)),
-      livePreviewPlugin,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const value = update.state.doc.toString();
@@ -534,3 +822,4 @@ post({ type: 'ready' });
 </body>
 </html>`;
 }
+
