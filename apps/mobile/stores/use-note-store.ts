@@ -8,7 +8,10 @@ import {
   updateNote,
   deleteNote,
   updateNoteSortOrder,
+  moveNoteToNotebook as dbMoveNoteToNotebook,
   createEmptyCanvas,
+  extractTags,
+  syncNoteTags,
 } from '@graphite/db';
 // NOTE: imported for cross-store read only. We access via getState() inside
 // actions (never at module scope) to avoid circular-init issues.
@@ -46,6 +49,12 @@ interface NoteState {
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
   deleteIfEmpty: (db: SQLiteDatabase, id: string) => Promise<boolean>;
   reorderNotes: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
+  moveNoteToNotebook: (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetNotebookId: string,
+    targetFolderId?: string | null,
+  ) => Promise<void>;
 }
 
 export const useNoteStore = create<NoteState>((set, get) => ({
@@ -126,6 +135,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         n.id === id ? { ...n, ...patch, updatedAt: now } : n,
       ),
     }));
+    // Sync tags extracted from the body text
+    if (patch.body !== undefined) {
+      const tags = extractTags(patch.body);
+      await syncNoteTags(db, id, tags);
+      const { useTagStore } = await import('./use-tag-store');
+      await useTagStore.getState().loadTags(db);
+    }
   },
 
   updateNoteCanvas: async (
@@ -147,14 +163,26 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           : n,
       ),
     }));
+    // Sync tags from canvas body text
+    const bodyText = canvasDoc.textContent?.body ?? '';
+    if (bodyText) {
+      const tags = extractTags(bodyText);
+      await syncNoteTags(db, id, tags);
+      const { useTagStore } = await import('./use-tag-store');
+      await useTagStore.getState().loadTags(db);
+    }
   },
 
   deleteNote: async (db: SQLiteDatabase, id: string) => {
+    // syncNoteTags with empty array removes all links and GCs orphaned tags
+    await syncNoteTags(db, id, []);
     await deleteNote(db, id);
     set((state) => ({
       notes: state.notes.filter((n) => n.id !== id),
       activeNoteId: state.activeNoteId === id ? null : state.activeNoteId,
     }));
+    const { useTagStore } = await import('./use-tag-store');
+    await useTagStore.getState().loadTags(db);
   },
 
   /**
@@ -203,5 +231,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       updated.sort((a, b) => a.sortOrder - b.sortOrder);
       return { notes: updated };
     });
+  },
+
+
+  moveNoteToNotebook: async (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetNotebookId: string,
+    targetFolderId: string | null = null,
+  ) => {
+    await dbMoveNoteToNotebook(db, noteId, targetNotebookId, targetFolderId);
+    set((s) => ({
+      notes: s.notes.filter((n) => n.id !== noteId),
+      activeNoteId: s.activeNoteId === noteId ? null : s.activeNoteId,
+    }));
   },
 }));
