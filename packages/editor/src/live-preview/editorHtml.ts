@@ -357,6 +357,32 @@ function detectActiveFormats(state) {
 // Format command application
 // ---------------------------------------------------------------------------
 
+// Walk every line of the document, collect those whose text starts with a
+// triple backtick, and pair them up as (opener, closer), (opener, closer)…
+// If \`pos\` falls inside any such pair (inclusive of the opener and closer
+// lines themselves — defensive for cursor-on-marker-line), return that pair.
+// Otherwise return null.
+//
+// Pairing by document order (not by nesting) matches the CommonMark rule
+// that fenced code blocks cannot nest: the first \`\`\` after an opener is
+// always its closer. This keeps the helper O(n) in document lines and means
+// we don't need a parser hook.
+function findEnclosingFence(doc, pos) {
+  const fenceLines = [];
+  for (let n = 1; n <= doc.lines; n++) {
+    const l = doc.line(n);
+    if (/^\`\`\`/.test(l.text)) fenceLines.push(l);
+  }
+  for (let i = 0; i + 1 < fenceLines.length; i += 2) {
+    const opener = fenceLines[i];
+    const closer = fenceLines[i + 1];
+    if (pos >= opener.from && pos <= closer.to) {
+      return { openerLine: opener, closerLine: closer };
+    }
+  }
+  return null;
+}
+
 function applyFormat(view, command) {
   const state = view.state;
   const sel = state.selection.main;
@@ -420,6 +446,46 @@ function applyFormat(view, command) {
   //                                                gets the same output a manual
   //                                                paste would produce. Flagged for QA.
   if (command === 'code-block') {
+    // Toggle-off: if the caret is already inside a fenced code block (or
+    // defensively on the opener/closer marker line itself), unwrap the
+    // fence instead of inserting a new one. Without this, the Code toolbar
+    // button would insert a broken nested fence inside the current block.
+    const enclosing = findEnclosingFence(doc, sel.head);
+    if (enclosing) {
+      const { openerLine, closerLine } = enclosing;
+      // Replace the entire fence span [opener.from, closer.to) with just
+      // the body text (lines strictly between opener and closer, joined
+      // by \\n). Empty body → insertion is the empty string, which
+      // collapses the whole fence to a single empty line when it was the
+      // only content, or removes it cleanly when surrounded by other text.
+      const bodyStart = openerLine.to + 1; // first char of first body line
+      const bodyEnd = closerLine.from - 1; // last \\n before closer
+      const body = bodyEnd >= bodyStart ? doc.sliceString(bodyStart, bodyEnd) : '';
+
+      // Cursor mapping: line N inside the fence (N = 0 = opener line,
+      // 1 = first body line, …) maps to line N-1 of the unwrapped body.
+      // Implementation: clamp the original head to the body span, then
+      // translate by (opener.from - bodyStart).
+      let newHead;
+      if (bodyEnd < bodyStart) {
+        // Empty fence — no body. Cursor lands at the start of the (now
+        // collapsed) fence region.
+        newHead = openerLine.from;
+      } else {
+        const clamped = Math.min(Math.max(sel.head, bodyStart), bodyEnd);
+        newHead = openerLine.from + (clamped - bodyStart);
+      }
+
+      view.dispatch({
+        changes: { from: openerLine.from, to: closerLine.to, insert: body },
+        selection: { anchor: newHead },
+        effects: EditorView.scrollIntoView(newHead, { y: 'center' }),
+      });
+      view.focus();
+      post({ type: 'command-applied' });
+      return;
+    }
+
     const atLineStart = sel.from === line.from;
     const endLine = doc.lineAt(sel.to);
     const atLineEnd = sel.to === endLine.to;
