@@ -49,7 +49,9 @@ vi.mock('@graphite/db', async (importOriginal) => {
       return Promise.resolve([]);
     }),
     createFolder: vi.fn(),
-    deleteFolder: vi.fn(),
+    deleteFolder: vi.fn((_db: unknown, id: string) =>
+      Promise.resolve({ deletedFolderIds: [id], deletedNoteIds: [] }),
+    ),
     updateFolderSortOrder: vi.fn().mockResolvedValue(undefined),
   };
 });
