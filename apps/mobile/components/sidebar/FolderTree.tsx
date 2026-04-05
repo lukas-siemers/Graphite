@@ -1,23 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, TextInput, Alert, Platform } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateFolder } from '@graphite/db';
-import type { Folder } from '@graphite/db';
+import type { Folder, Note } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
-// Delay before a single tap fires expand/collapse. A second tap within this
-// window is treated as a double-tap and triggers rename instead.
-const DOUBLE_TAP_MS = 500;
+// Double-tap window. Long-press fires at 250ms (< this), cancels the pending
+// single-tap timer before drag starts — so expand/collapse never fires mid-drag.
+const DOUBLE_TAP_MS = 300;
 
 interface FolderTreeProps {
   notebookId: string;
+  searchQuery?: string;
 }
 
-export default function FolderTree({ notebookId }: FolderTreeProps) {
+export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeProps) {
   const folders = useFolderStore((s) => s.folders);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
@@ -29,25 +30,21 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const createNewNote = useNoteStore((s) => s.createNewNote);
+  const reorderNotes = useNoteStore((s) => s.reorderNotes);
 
   const notebookFolders = folders
     .filter((f) => f.notebookId === notebookId)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  // Load this notebook's folders when the tree mounts (i.e. when the notebook
-  // row is expanded). loadFolders merges by notebook so calling it here never
-  // wipes folders belonging to other expanded notebooks.
-  //
-  // BUG FIX: expandedFolders is initialised synchronously before loadFolders
-  // resolves, so the initial set is empty. After the async load completes, merge
-  // the freshly loaded folder IDs into expandedFolders so they appear expanded
-  // rather than collapsed.
+  // Load this notebook's folders on mount (when the notebook row is expanded).
+  // loadFolders merges by notebook so it never wipes folders from other open notebooks.
   useEffect(() => {
     async function loadAndExpand() {
+      // On web the DB is a no-op — skip so we don't wipe in-memory folders.
+      if (Platform.OS === 'web') return;
       try {
         const db = getDatabase();
         await loadFolders(db, notebookId);
-        // After load resolves the store has updated; read the fresh slice directly.
         const fresh = useFolderStore
           .getState()
           .folders.filter((f) => f.notebookId === notebookId);
@@ -56,26 +53,16 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
           fresh.forEach((f) => next.add(f.id));
           return next;
         });
-      } catch (_) {
-        // db not ready yet — folders will remain as initialised
-      }
+      } catch (_) {}
     }
     loadAndExpand();
-  // loadFolders identity is stable (Zustand); notebookId never changes per mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notebookId]);
 
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-    () => new Set<string>(),
-  );
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set<string>());
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  // Double-tap implementation:
-  //   - First tap: schedule the expand/collapse action after DOUBLE_TAP_MS.
-  //   - Second tap within DOUBLE_TAP_MS: cancel the scheduled action, fire rename.
-  // This prevents expand/collapse from firing at all when a double-tap follows,
-  // eliminating the flicker that previously triggered FolderTree remounts.
   const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   function handleFolderPress(folderId: string, folderName: string) {
@@ -83,38 +70,31 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
 
     const pending = pendingTapRef.current.get(folderId);
     if (pending !== undefined) {
-      // Second tap within window — cancel single-tap action and rename instead.
       clearTimeout(pending);
       pendingTapRef.current.delete(folderId);
       startFolderRename(folderId, folderName);
       return;
     }
 
-    // First tap — schedule the expand/collapse + active-folder action.
     const timer = setTimeout(() => {
       pendingTapRef.current.delete(folderId);
 
-      const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
-      // Always toggle expand/collapse
       setExpandedFolders((prev) => {
         const next = new Set(prev);
-        if (next.has(folderId)) {
-          next.delete(folderId);
-        } else {
-          next.add(folderId);
-        }
+        if (next.has(folderId)) next.delete(folderId);
+        else next.add(folderId);
         return next;
       });
-      // Only reload notes when switching to a different folder —
-      // collapsing the active folder must not wipe the note list
+
+      const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
       if (isAlreadyActive) return;
       setActiveFolder(folderId);
+
+      if (Platform.OS === 'web') return;
       try {
         const db = getDatabase();
         loadNotes(db, notebookId, folderId);
-      } catch (_) {
-        // db not ready yet
-      }
+      } catch (_) {}
     }, DOUBLE_TAP_MS);
 
     pendingTapRef.current.set(folderId, timer);
@@ -135,21 +115,16 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
       const db = getDatabase();
       await updateFolder(db, folderId, finalName);
       storeUpdateFolder(folderId, { name: finalName });
-    } catch (_) {
-      // db not ready yet
-    }
+    } catch (_) {}
   }
 
   async function handleCreateNewNote(folderId: string) {
     try {
       const db = getDatabase();
       await createNewNote(db, notebookId, folderId);
-    } catch (_) {
-      // db not ready yet
-    }
+    } catch (_) {}
   }
 
-  // Extracted so both the long-press handler and the × button can invoke it.
   function handleDeleteFolder(folderId: string, folderName: string) {
     Alert.alert(
       'Delete Folder',
@@ -174,91 +149,111 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
                 noteStore.setNotes([]);
                 noteStore.setActiveNote(null);
               } else {
-                noteStore.setNotes(
-                  noteStore.notes.filter((n) => n.folderId !== folderId),
-                );
+                noteStore.setNotes(noteStore.notes.filter((n) => n.folderId !== folderId));
               }
-            } catch (_) {
-              // db not ready yet
-            }
+            } catch (_) {}
           },
         },
       ],
     );
   }
 
-  function handleFolderLongPress(folderId: string, folderName: string) {
-    Alert.alert(
-      folderName,
-      undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Rename',
-          onPress: () => startFolderRename(folderId, folderName),
-        },
-        {
-          text: 'Delete Folder',
-          style: 'destructive',
-          onPress: () => handleDeleteFolder(folderId, folderName),
-        },
-      ],
+  function renderNote({ item: note, drag, isActive: isDraggingNote }: RenderItemParams<Note>) {
+    const isActiveNote = note.id === activeNoteId;
+    return (
+      <ScaleDecorator>
+        <Pressable
+          onPress={() => setActiveNote(note.id)}
+          onLongPress={() => {
+            // Cancel any pending folder single-tap before drag starts
+            drag();
+          }}
+          delayLongPress={250}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingLeft: isActiveNote ? 46 : 48,
+            paddingRight: 14,
+            paddingVertical: 6,
+            borderLeftWidth: isActiveNote ? 2 : 0,
+            borderLeftColor: tokens.accent,
+            backgroundColor: isDraggingNote ? tokens.bgHover : isActiveNote ? '#2A2A2A' : 'transparent',
+          }}
+        >
+          <MaterialCommunityIcons
+            name="file-document-outline"
+            size={15}
+            color={isActiveNote ? tokens.accentLight : tokens.textMuted}
+            style={{ marginRight: 7 }}
+          />
+          <Text
+            style={{
+              fontSize: 12,
+              color: isActiveNote ? tokens.accentLight : tokens.textMuted,
+              fontWeight: isActiveNote ? '500' : '400',
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
+            {note.title || 'Untitled'}
+          </Text>
+        </Pressable>
+      </ScaleDecorator>
     );
   }
 
-  function renderFolder({ item: folder, drag }: RenderItemParams<Folder>) {
+  function renderFolder({ item: folder, drag, isActive: isDragging }: RenderItemParams<Folder>) {
     const isActiveFolder = folder.id === activeFolderId;
     const isExpanded = expandedFolders.has(folder.id);
     const isRenaming = renamingFolderId === folder.id;
-    const folderNotes = notes.filter((n) => n.folderId === folder.id);
+
+    const q = searchQuery.toLowerCase();
+    const folderNotes = notes
+      .filter((n) => {
+        if (n.folderId !== folder.id) return false;
+        if (q) return (n.title || '').toLowerCase().includes(q) || (n.body || '').toLowerCase().includes(q);
+        return true;
+      })
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+    // If searching, auto-expand folders that have matching notes
+    const shouldExpand = isExpanded || (q.length > 0 && folderNotes.length > 0);
 
     return (
       <ScaleDecorator>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            {/* Drag handle */}
-            <Pressable
-              onLongPress={drag}
-              delayLongPress={150}
-              hitSlop={4}
-              style={{ paddingLeft: 12, paddingRight: 4, paddingVertical: 6 }}
-            >
-              <Text style={{ fontSize: 13, color: tokens.textHint, lineHeight: 18 }}>
-                {'\u2630'}
-              </Text>
-            </Pressable>
-
             <Pressable
               onPress={() => handleFolderPress(folder.id, folder.name)}
               onLongPress={() => {
-                if (!isRenaming) {
-                  handleFolderLongPress(folder.id, folder.name);
+                if (isRenaming) return;
+                const pending = pendingTapRef.current.get(folder.id);
+                if (pending !== undefined) {
+                  clearTimeout(pending);
+                  pendingTapRef.current.delete(folder.id);
                 }
+                drag();
               }}
+              delayLongPress={250}
               style={{
                 flex: 1,
                 flexDirection: 'row',
                 alignItems: 'center',
-                paddingLeft: isActiveFolder ? 0 : 2,
+                paddingLeft: isActiveFolder ? 22 : 24,
                 paddingRight: 8,
-                paddingVertical: 6,
+                paddingVertical: 8,
                 borderLeftWidth: isActiveFolder ? 2 : 0,
                 borderLeftColor: tokens.accent,
-                backgroundColor: isActiveFolder ? tokens.bgHover : 'transparent',
+                backgroundColor: isDragging ? tokens.bgHover : isActiveFolder ? '#2A2A2A' : 'transparent',
               }}
             >
-              {/* Expand/collapse arrow */}
-              <Text
-                style={{
-                  fontSize: 11,
-                  color: tokens.textMuted,
-                  marginRight: 4,
-                }}
-              >
-                {isExpanded ? '▼' : '▶'}
-              </Text>
+              <MaterialCommunityIcons
+                name={shouldExpand ? 'chevron-down' : 'chevron-right'}
+                size={16}
+                color={tokens.textHint}
+                style={{ marginRight: 6, width: 16 }}
+              />
 
-              {/* Name or rename input */}
               {isRenaming ? (
                 <TextInput
                   autoFocus
@@ -290,87 +285,40 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
                   {folder.name}
                 </Text>
               )}
-
-              {/* Delete × button */}
-              {!isRenaming && (
-                <Pressable
-                  onPress={() => handleDeleteFolder(folder.id, folder.name)}
-                  hitSlop={8}
-                  style={{ paddingHorizontal: 4 }}
-                >
-                  {({ pressed }: { pressed: boolean }) => (
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        color: pressed ? tokens.accent : tokens.textMuted,
-                        lineHeight: 18,
-                      }}
-                    >
-                      ×
-                    </Text>
-                  )}
-                </Pressable>
-              )}
             </Pressable>
+
+            {!isRenaming && (
+              <Pressable
+                onPress={() => handleDeleteFolder(folder.id, folder.name)}
+                hitSlop={10}
+                style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+              >
+                <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
+              </Pressable>
+            )}
           </View>
 
-          {isExpanded && (
+          {shouldExpand && (
             <View>
-              {folderNotes.map((note) => {
-                const isActiveNote = note.id === activeNoteId;
-                return (
-                  <Pressable
-                    key={note.id}
-                    onPress={() => setActiveNote(note.id)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingLeft: isActiveNote ? 42 : 44,
-                      paddingRight: 16,
-                      paddingVertical: 5,
-                      borderLeftWidth: isActiveNote ? 2 : 0,
-                      borderLeftColor: tokens.accent,
-                      backgroundColor: isActiveNote ? tokens.bgHover : 'transparent',
-                    }}
-                  >
-                    <MaterialCommunityIcons
-                      name="file-document-outline"
-                      size={13}
-                      color={isActiveNote ? tokens.accentLight : tokens.textMuted}
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: isActiveNote ? tokens.accentLight : tokens.textMuted,
-                        fontWeight: isActiveNote ? '500' : '400',
-                        flex: 1,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {note.title || 'Untitled'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-
-              {/* New Note row at the bottom of each folder */}
-              <Pressable
-                onPress={() => handleCreateNewNote(folder.id)}
-                style={{
-                  paddingLeft: 44,
-                  paddingVertical: 4,
+              <DraggableFlatList
+                data={folderNotes}
+                keyExtractor={(note) => note.id}
+                renderItem={renderNote}
+                onDragEnd={({ data }) => {
+                  try {
+                    reorderNotes(getDatabase(), data.map((n) => n.id));
+                  } catch (_) {}
                 }}
-              >
-                <Text
-                  style={{
-                    fontSize: 11,
-                    color: tokens.textHint,
-                  }}
+                scrollEnabled={false}
+              />
+              {!q && (
+                <Pressable
+                  onPress={() => handleCreateNewNote(folder.id)}
+                  style={{ paddingLeft: 48, paddingVertical: 5 }}
                 >
-                  + New Note
-                </Text>
-              </Pressable>
+                  <Text style={{ fontSize: 11, color: tokens.textHint }}>+ New Note</Text>
+                </Pressable>
+              )}
             </View>
           )}
         </View>
@@ -385,9 +333,7 @@ export default function FolderTree({ notebookId }: FolderTreeProps) {
       onDragEnd={({ data }) => {
         try {
           reorderFolders(getDatabase(), notebookId, data.map((f) => f.id));
-        } catch (_) {
-          // db not ready yet
-        }
+        } catch (_) {}
       }}
       renderItem={renderFolder}
       scrollEnabled={false}

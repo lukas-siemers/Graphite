@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, useWindowDimensions } from 'react-native';
+import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   initDatabase,
@@ -191,7 +191,6 @@ interface IPadLayoutProps {
 
 function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutProps) {
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
   const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
 
   const TOOLBAR_ITEMS = ['B', 'I', 'T', '<>', 'Link', '\u2014'] as const;
@@ -202,7 +201,7 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
       {/* Sidebar — collapses via width */}
       <View
         style={{
-          width: sidebarVisible ? 220 : 0,
+          width: sidebarVisible ? 260 : 0,
           overflow: 'hidden',
           backgroundColor: tokens.bgSidebar,
           borderRightWidth: sidebarVisible ? 1 : 0,
@@ -238,38 +237,6 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
           >
             <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
           </Pressable>
-
-          {/* Vertical divider */}
-          <View
-            style={{
-              width: 1,
-              height: 20,
-              backgroundColor: tokens.border,
-              marginHorizontal: 8,
-            }}
-          />
-
-          {/* Search input */}
-          <View style={{ flex: 1, maxWidth: 380 }}>
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search Graphite..."
-              placeholderTextColor={tokens.textHint}
-              style={{
-                backgroundColor: tokens.bgSidebar,
-                borderWidth: 1,
-                borderColor: tokens.border,
-                borderRadius: 0,
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: 36,
-                paddingRight: 12,
-                fontSize: 12,
-                color: tokens.textBody,
-              }}
-            />
-          </View>
 
           {/* Formatting buttons */}
           <View style={{ flexDirection: 'row', marginLeft: 8 }}>

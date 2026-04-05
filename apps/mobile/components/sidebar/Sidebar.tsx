@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, Pressable, TextInput, Image, Alert } from 'react-native';
+import { View, Text, Pressable, TextInput, Image, Alert, Platform } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -11,9 +11,9 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
-// Delay before a single tap fires expand/collapse. A second tap within this
-// window is treated as a double-tap and triggers rename instead.
-const DOUBLE_TAP_MS = 500;
+// Double-tap window. Long-press fires at 250ms (< this), cancels the pending
+// single-tap timer before drag starts — so expand/collapse never fires mid-drag.
+const DOUBLE_TAP_MS = 300;
 
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
@@ -24,12 +24,7 @@ export default function Sidebar() {
   const reorderNotebooks = useNotebookStore((s) => s.reorderNotebooks);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
-  const createNewNote = useNoteStore((s) => s.createNewNote);
-  const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
-  // Start empty — notebooks may not be loaded yet at mount time (Zustand store
-  // is populated asynchronously from SQLite). The effect below expands all
-  // notebooks once the first non-empty load arrives, then stops running.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const didAutoExpandRef = useRef(false);
   useEffect(() => {
@@ -37,16 +32,16 @@ export default function Sidebar() {
     didAutoExpandRef.current = true;
     setExpandedIds(new Set(notebooks.map((n) => n.id)));
   }, [notebooks]);
-  const [newNotePressed, setNewNotePressed] = useState(false);
+
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<TextInput>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Double-tap implementation:
-  //   - First tap: schedule the expand/collapse (and active-notebook switch) after
-  //     DOUBLE_TAP_MS. Store the timer ID keyed by notebookId.
-  //   - Second tap within DOUBLE_TAP_MS: cancel the scheduled action, fire rename.
-  // This prevents expand/collapse from firing at all when a double-tap follows.
+  // Double-tap to rename:
+  //   First tap  → schedule single-tap action at DOUBLE_TAP_MS.
+  //   Second tap → cancel timer, start rename.
+  //   Long press (250ms, fires BEFORE 300ms timer) → cancel timer, start drag.
   const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   function handleNotebookPress(notebookId: string, notebookName: string) {
@@ -54,61 +49,38 @@ export default function Sidebar() {
 
     const pending = pendingTapRef.current.get(notebookId);
     if (pending !== undefined) {
-      // Second tap within window — cancel single-tap action and rename instead.
       clearTimeout(pending);
       pendingTapRef.current.delete(notebookId);
       startRename(notebookId, notebookName);
       return;
     }
 
-    // First tap — schedule the expand/collapse + active-notebook switch.
     const timer = setTimeout(() => {
       pendingTapRef.current.delete(notebookId);
 
       setExpandedIds((prev) => {
         const next = new Set(prev);
-        if (next.has(notebookId)) {
-          next.delete(notebookId);
-        } else {
-          next.add(notebookId);
-        }
+        if (next.has(notebookId)) next.delete(notebookId);
+        else next.add(notebookId);
         return next;
       });
 
-      // Only reload data when switching to a different notebook.
-      // Toggling expand/collapse on the active notebook must not wipe the note
-      // list (especially on web where loadNotes returns empty).
       if (notebookId === activeNotebookId) return;
       setActiveNotebook(notebookId);
-      // Do NOT call loadFolders here — each FolderTree loads its own folders on
-      // mount. Calling loadFolders with the new notebook's ID replaces the
-      // entire folder store, which makes the previously-expanded notebook's
-      // FolderTree render empty while it is still visible.
+
+      if (Platform.OS === 'web') return;
       try {
         const db = getDatabase();
         loadNotes(db, notebookId, null);
-      } catch (_) {
-        // db not ready yet
-      }
+      } catch (_) {}
     }, DOUBLE_TAP_MS);
 
     pendingTapRef.current.set(notebookId, timer);
   }
 
-  async function handleNewNote() {
-    if (!activeNotebookId) return;
-    try {
-      const db = getDatabase();
-      await createNewNote(db, activeNotebookId, activeFolderId ?? undefined);
-    } catch (_) {
-      // db not ready yet
-    }
-  }
-
   function startRename(notebookId: string, currentName: string) {
     setRenamingNotebookId(notebookId);
     setRenameValue(currentName);
-    // Focus happens via autoFocus on the TextInput
   }
 
   async function commitRename(notebookId: string, originalName: string) {
@@ -121,9 +93,7 @@ export default function Sidebar() {
       const db = getDatabase();
       await updateNotebook(db, notebookId, finalName);
       storeUpdateNotebook(notebookId, { name: finalName });
-    } catch (_) {
-      // db not ready yet
-    }
+    } catch (_) {}
   }
 
   async function handleCreateNewNotebook() {
@@ -132,21 +102,16 @@ export default function Sidebar() {
       const notebook = await createNewNotebook(db, 'New Notebook');
       setExpandedIds((prev) => new Set([...prev, notebook.id]));
       startRename(notebook.id, notebook.name);
-    } catch (_) {
-      // db not ready yet
-    }
+    } catch (_) {}
   }
 
   async function handleCreateNewFolder(notebookId: string) {
     try {
       const db = getDatabase();
       await createNewFolder(db, notebookId, 'New Folder');
-    } catch (_) {
-      // db not ready yet
-    }
+    } catch (_) {}
   }
 
-  // Extracted so both the long-press handler and the × button can invoke it.
   function handleDeleteNotebook(notebookId: string, notebookName: string) {
     Alert.alert(
       'Delete Notebook',
@@ -164,35 +129,14 @@ export default function Sidebar() {
               useFolderStore.getState().setActiveFolder(null);
               useNoteStore.getState().setNotes([]);
               useNoteStore.getState().setActiveNote(null);
-            } catch (_) {
-              // db not ready yet
-            }
+            } catch (_) {}
           },
         },
       ],
     );
   }
 
-  function handleNotebookLongPress(notebookId: string, notebookName: string) {
-    Alert.alert(
-      notebookName,
-      undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Rename',
-          onPress: () => startRename(notebookId, notebookName),
-        },
-        {
-          text: 'Delete Notebook',
-          style: 'destructive',
-          onPress: () => handleDeleteNotebook(notebookId, notebookName),
-        },
-      ],
-    );
-  }
-
-  function renderNotebook({ item: notebook, drag }: RenderItemParams<Notebook>) {
+  function renderNotebook({ item: notebook, drag, isActive: isDragging }: RenderItemParams<Notebook>) {
     const isActive = notebook.id === activeNotebookId;
     const isExpanded = expandedIds.has(notebook.id);
     const isRenaming = renamingNotebookId === notebook.id;
@@ -200,61 +144,45 @@ export default function Sidebar() {
     return (
       <ScaleDecorator>
         <View key={notebook.id}>
-          {/* Outer row: flex-row so drag handle, content, and × live in one row */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-
-            {/* Drag handle — long press initiates the drag */}
-            <Pressable
-              onLongPress={drag}
-              delayLongPress={150}
-              hitSlop={4}
-              style={{ paddingLeft: 6, paddingRight: 4, paddingVertical: 6 }}
-            >
-              <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>
-                {'\u2630'}
-              </Text>
-            </Pressable>
-
             <Pressable
               onPress={() => handleNotebookPress(notebook.id, notebook.name)}
               onLongPress={() => {
-                if (!isRenaming) {
-                  handleNotebookLongPress(notebook.id, notebook.name);
+                if (isRenaming) return;
+                // Cancel pending single-tap so expand/collapse doesn't fire mid-drag
+                const pending = pendingTapRef.current.get(notebook.id);
+                if (pending !== undefined) {
+                  clearTimeout(pending);
+                  pendingTapRef.current.delete(notebook.id);
                 }
+                drag();
               }}
+              delayLongPress={250}
               style={{
                 flex: 1,
                 flexDirection: 'row',
                 alignItems: 'center',
-                paddingVertical: 6,
-                paddingRight: 4,
-                paddingLeft: isActive ? 0 : 2,
+                paddingVertical: 9,
+                paddingLeft: isActive ? 12 : 14,
+                paddingRight: 8,
                 borderLeftWidth: isActive ? 2 : 0,
                 borderLeftColor: tokens.accent,
-                backgroundColor: isActive ? tokens.bgHover : 'transparent',
+                backgroundColor: isDragging ? tokens.bgHover : isActive ? '#2A2A2A' : 'transparent',
               }}
             >
-              {/* Expand/collapse arrow */}
-              <Text
-                style={{
-                  fontSize: 10,
-                  color: tokens.textMuted,
-                  marginRight: 6,
-                  width: 10,
-                }}
-              >
-                {isExpanded ? '\u25BC' : '\u25B6'}
-              </Text>
-
-              {/* Folder icon */}
               <MaterialCommunityIcons
-                name="folder"
-                size={15}
+                name={isExpanded ? 'chevron-down' : 'chevron-right'}
+                size={16}
+                color={tokens.textHint}
+                style={{ marginRight: 4, width: 16 }}
+              />
+              <MaterialCommunityIcons
+                name={isExpanded ? 'folder-open' : 'folder'}
+                size={17}
                 color={isActive ? tokens.accentLight : tokens.textMuted}
-                style={{ marginRight: 6 }}
+                style={{ marginRight: 8 }}
               />
 
-              {/* Name or rename input */}
               {isRenaming ? (
                 <TextInput
                   ref={renameInputRef}
@@ -278,7 +206,7 @@ export default function Sidebar() {
                 <Text
                   style={{
                     fontSize: 13,
-                    fontWeight: '500',
+                    fontWeight: isActive ? '600' : '400',
                     color: isActive ? tokens.textBody : tokens.textMuted,
                     flex: 1,
                   }}
@@ -288,46 +216,29 @@ export default function Sidebar() {
                 </Text>
               )}
 
-              {/* New folder "+" button */}
               {isExpanded && !isRenaming && (
                 <Pressable
                   onPress={() => handleCreateNewFolder(notebook.id)}
-                  hitSlop={8}
-                  style={{ paddingHorizontal: 4 }}
+                  hitSlop={10}
+                  style={{ paddingHorizontal: 6 }}
                 >
-                  <Text style={{ fontSize: 14, color: tokens.textMuted, lineHeight: 18 }}>
-                    +
-                  </Text>
+                  <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
                 </Pressable>
               )}
             </Pressable>
 
-            {/* × delete button — outside the expand/collapse Pressable so
-                tapping the notebook name/row never accidentally triggers delete */}
             {!isRenaming && (
               <Pressable
                 onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
-                hitSlop={8}
-                style={{ paddingHorizontal: 6, paddingVertical: 6 }}
+                hitSlop={10}
+                style={{ paddingHorizontal: 10, paddingVertical: 9 }}
               >
-                {({ pressed }: { pressed: boolean }) => (
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      color: pressed ? tokens.accent : tokens.textMuted,
-                      lineHeight: 18,
-                    }}
-                  >
-                    ×
-                  </Text>
-                )}
+                <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
               </Pressable>
             )}
           </View>
 
-          {isExpanded && (
-            <FolderTree notebookId={notebook.id} />
-          )}
+          {isExpanded && <FolderTree notebookId={notebook.id} searchQuery={searchQuery} />}
         </View>
       </ScaleDecorator>
     );
@@ -338,102 +249,113 @@ export default function Sidebar() {
       {/* Header */}
       <View
         style={{
-          height: 48,
+          height: 52,
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: 16,
+          paddingHorizontal: 14,
           borderBottomWidth: 1,
           borderBottomColor: tokens.border,
         }}
       >
         <Image
           source={require('../../assets/icon.png')}
-          style={{ width: 22, height: 22, marginRight: 8 }}
+          style={{ width: 20, height: 20, marginRight: 9 }}
           resizeMode="contain"
         />
+        <Text style={{ fontSize: 15, fontWeight: '700', color: tokens.textPrimary, letterSpacing: -0.3 }}>
+          Graphite
+        </Text>
       </View>
 
-      {/* NOTEBOOKS section label row */}
+      {/* Search bar */}
+      <View style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: tokens.bgBase,
+            borderWidth: 1,
+            borderColor: tokens.border,
+            paddingHorizontal: 8,
+            paddingVertical: 6,
+          }}
+        >
+          <MaterialCommunityIcons
+            name="magnify"
+            size={15}
+            color={tokens.textHint}
+            style={{ marginRight: 6 }}
+          />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search notes..."
+            placeholderTextColor={tokens.textHint}
+            style={{
+              flex: 1,
+              fontSize: 12,
+              color: tokens.textBody,
+              padding: 0,
+              margin: 0,
+            }}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+              <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>×</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* Section label */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: 8,
-          paddingTop: 16,
-          paddingBottom: 8,
+          paddingLeft: 14,
+          paddingRight: 8,
+          paddingTop: 14,
+          paddingBottom: 6,
         }}
       >
         <Text
           style={{
             flex: 1,
-            fontSize: 11,
-            fontWeight: '500',
-            color: tokens.textMuted,
-            letterSpacing: 1.5,
+            fontSize: 10,
+            fontWeight: '600',
+            color: tokens.textHint,
+            letterSpacing: 1.8,
             textTransform: 'uppercase',
           }}
         >
-          NOTEBOOKS
+          Notebooks
         </Text>
-        <Pressable
-          onPress={handleCreateNewNotebook}
-          hitSlop={8}
-          style={{ paddingHorizontal: 4 }}
-        >
-          <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 18 }}>
-            +
-          </Text>
+        <Pressable onPress={handleCreateNewNotebook} hitSlop={10} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 20, color: tokens.textMuted, lineHeight: 22 }}>+</Text>
         </Pressable>
       </View>
 
-      {/* Notebook list — DraggableFlatList enables long-press drag reorder */}
-      <DraggableFlatList
-        data={notebooks}
-        keyExtractor={(item) => item.id}
-        onDragEnd={({ data }) => {
-          try {
-            reorderNotebooks(getDatabase(), data.map((n) => n.id));
-          } catch (_) {
-            // db not ready yet
-          }
-        }}
-        renderItem={renderNotebook}
-        style={{ flex: 1 }}
-        showsVerticalScrollIndicator={false}
-      />
-
-      {/* New Note button */}
-      <View style={{ marginHorizontal: 12, marginVertical: 8 }}>
-        <Pressable
-          onPress={handleNewNote}
-          onPressIn={() => setNewNotePressed(true)}
-          onPressOut={() => setNewNotePressed(false)}
-          style={{
-            backgroundColor: newNotePressed ? tokens.accentPressed : tokens.accentTint,
-            paddingVertical: 8,
-            borderRadius: 0,
-            borderWidth: 1,
-            borderColor: tokens.accent,
-            alignItems: 'center',
+      {/* Notebook list */}
+      <View style={{ flex: 1 }}>
+        <DraggableFlatList
+          data={notebooks}
+          keyExtractor={(item) => item.id}
+          onDragEnd={({ data }) => {
+            try {
+              reorderNotebooks(getDatabase(), data.map((n) => n.id));
+            } catch (_) {}
           }}
-        >
-          <Text
-            style={{
-              color: tokens.accentLight,
-              fontWeight: '500',
-              fontSize: 13,
-            }}
-          >
-            New Note
-          </Text>
-        </Pressable>
+          renderItem={renderNotebook}
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+        />
       </View>
 
       {/* Footer */}
       <View
         style={{
           flexDirection: 'row',
-          paddingHorizontal: 16,
+          paddingHorizontal: 14,
           paddingVertical: 12,
           borderTopWidth: 1,
           borderTopColor: tokens.border,
@@ -441,18 +363,25 @@ export default function Sidebar() {
           justifyContent: 'space-between',
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
           <View
             style={{
-              width: 32,
-              height: 32,
-              borderRadius: 0,
+              width: 28,
+              height: 28,
               backgroundColor: tokens.bgHover,
+              borderWidth: 1,
+              borderColor: tokens.border,
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
-          />
-          <Text style={{ fontSize: 12, color: tokens.textBody }}>Lukas S.</Text>
+          >
+            <Text style={{ fontSize: 11, color: tokens.textMuted, fontWeight: '600' }}>LS</Text>
+          </View>
+          <Text style={{ fontSize: 12, color: tokens.textMuted, fontWeight: '500' }}>Lukas S.</Text>
         </View>
-        <Text style={{ fontSize: 18, color: tokens.textMuted }}>{'\u2699'}</Text>
+        <Pressable hitSlop={10}>
+          <Text style={{ fontSize: 18, color: tokens.textHint }}>{'\u2699'}</Text>
+        </Pressable>
       </View>
     </View>
   );
