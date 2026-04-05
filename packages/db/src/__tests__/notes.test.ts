@@ -9,6 +9,7 @@ import {
   updateNote,
   deleteNote,
   searchNotes,
+  moveNote,
 } from '../operations/notes';
 
 describe('notes operations', () => {
@@ -194,6 +195,30 @@ describe('notes operations', () => {
     expect(topB.sortOrder).toBe(1);
     expect(inFolderA.sortOrder).toBe(0);
     expect(inFolderB.sortOrder).toBe(1);
+  });
+
+  it('moveNote updates folder_id and updated_at', async () => {
+    const notebook = await createNotebook(db, 'Work');
+    const folderA = await createFolder(db, notebook.id, 'A');
+    const folderB = await createFolder(db, notebook.id, 'B');
+    const note = await createNote(db, notebook.id, folderA.id);
+
+    vi.setSystemTime(new Date('2024-07-01'));
+    const expected = new Date('2024-07-01').getTime();
+
+    const result = await moveNote(db, note.id, folderB.id);
+
+    expect(result.folderId).toBe(folderB.id);
+    expect(result.updated_at).toBe(expected);
+
+    const updated = await getNote(db, note.id);
+    expect(updated!.folderId).toBe(folderB.id);
+    expect(updated!.updatedAt).toBe(expected);
+
+    // Move to null (no folder) works too.
+    await moveNote(db, note.id, null);
+    const rooted = await getNote(db, note.id);
+    expect(rooted!.folderId).toBeNull();
   });
 
   it('searchNotes returns empty array for no match', async () => {

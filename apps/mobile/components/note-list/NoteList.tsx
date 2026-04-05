@@ -15,6 +15,8 @@ import { getDatabase, searchNotes } from '@graphite/db';
 import type { Note } from '@graphite/db';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
+import { useFolderStore } from '../../stores/use-folder-store';
+import MoveNoteModal from './MoveNoteModal';
 
 function stripMarkdown(text: string): string {
   return text
@@ -179,7 +181,9 @@ export default function NoteList() {
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const reorderNotes = useNoteStore((s) => s.reorderNotes);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
+  const folders = useFolderStore((s) => s.folders);
 
+  const [moveTargetNote, setMoveTargetNote] = useState<Note | null>(null);
   const [displayedNotes, setDisplayedNotes] = useState<Note[] | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -243,6 +247,40 @@ export default function NoteList() {
     );
   }
 
+  // Long-press on a note card opens an action sheet. Alert.alert with multiple
+  // buttons is the supported cross-platform sheet on both iOS and web. The
+  // Delete branch defers to the existing confirmation flow.
+  function handleLongPressNote(note: Note) {
+    Alert.alert(
+      note.title || 'Untitled',
+      undefined,
+      [
+        {
+          text: 'Move to folder...',
+          onPress: () => setMoveTargetNote(note),
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => handleDeleteNote(note),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }
+
+  async function handleMoveConfirm(targetFolderId: string | null) {
+    const note = moveTargetNote;
+    setMoveTargetNote(null);
+    if (!note) return;
+    try {
+      const db = getDatabase();
+      await useNoteStore.getState().moveNote(db, note.id, targetFolderId);
+    } catch (_) {
+      // db not ready yet
+    }
+  }
+
   function renderNote({ item, drag }: RenderItemParams<Note>) {
     return (
       <ScaleDecorator>
@@ -250,7 +288,7 @@ export default function NoteList() {
           note={item}
           isActive={item.id === activeNoteId}
           onPress={() => handleNotePress(item.id)}
-          onLongPress={() => handleDeleteNote(item)}
+          onLongPress={() => handleLongPressNote(item)}
           onDelete={() => handleDeleteNote(item)}
           drag={drag}
           showDragHandle={!isSearching}
@@ -324,6 +362,18 @@ export default function NoteList() {
         renderItem={renderNote}
         ItemSeparatorComponent={null}
         style={{ flex: 1 }}
+      />
+
+      <MoveNoteModal
+        visible={moveTargetNote !== null}
+        folders={
+          moveTargetNote
+            ? folders.filter((f) => f.notebookId === moveTargetNote.notebookId)
+            : []
+        }
+        currentFolderId={moveTargetNote?.folderId ?? null}
+        onSelect={handleMoveConfirm}
+        onCancel={() => setMoveTargetNote(null)}
       />
     </View>
   );

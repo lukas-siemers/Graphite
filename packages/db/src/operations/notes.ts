@@ -261,6 +261,23 @@ export async function deleteNote(
   await db.runAsync('DELETE FROM notes WHERE id = ?', [id]);
 }
 
+export async function moveNote(
+  db: SQLiteDatabase,
+  noteId: string,
+  folderId: string | null,
+): Promise<{ noteId: string; folderId: string | null; updated_at: number }> {
+  const updated_at = Date.now();
+  await db.runAsync(
+    'UPDATE notes SET folder_id = ?, updated_at = ? WHERE id = ?',
+    [folderId, updated_at, noteId],
+  );
+  // Note: FTS5 manual maintenance is intentionally skipped here. The FTS index
+  // only stores title + body, neither of which change during a folder move,
+  // so there's nothing to re-index. See updateNote/deleteNote for the FTS
+  // maintenance pattern when title/body do change.
+  return { noteId, folderId, updated_at };
+}
+
 export async function updateNoteSortOrder(
   db: SQLiteDatabase,
   id: string,

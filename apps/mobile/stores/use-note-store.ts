@@ -9,6 +9,7 @@ import {
   deleteNote,
   updateNoteSortOrder,
   createEmptyCanvas,
+  moveNote as dbMoveNote,
 } from '@graphite/db';
 // NOTE: imported for cross-store read only. We access via getState() inside
 // actions (never at module scope) to avoid circular-init issues.
@@ -44,6 +45,11 @@ interface NoteState {
     silent?: boolean,
   ) => Promise<void>;
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
+  moveNote: (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetFolderId: string | null,
+  ) => Promise<void>;
   deleteIfEmpty: (db: SQLiteDatabase, id: string) => Promise<boolean>;
   reorderNotes: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
 }
@@ -155,6 +161,59 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       notes: state.notes.filter((n) => n.id !== id),
       activeNoteId: state.activeNoteId === id ? null : state.activeNoteId,
     }));
+  },
+
+  /**
+   * Move a note to a different folder (or to null / no-folder) within the
+   * same notebook. DB write happens first, then the in-memory list is
+   * reconciled against the currently-viewed folder context.
+   *
+   * Three cases:
+   *   - movedOut: note was in the active folder view, now isn't → drop it
+   *   - movedIn: note wasn't in the active folder view, now is → prepend it
+   *   - neither: in-place patch (same folder view or neither matches)
+   *
+   * A no-op move (same folder) early-exits without touching state to avoid
+   * an unnecessary re-render of the list.
+   */
+  moveNote: async (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetFolderId: string | null,
+  ) => {
+    const current = get().notes.find((n) => n.id === noteId);
+    // Same-folder move → no-op (skip DB write and state update entirely).
+    if (current && current.folderId === targetFolderId) return;
+
+    await dbMoveNote(db, noteId, targetFolderId);
+    const now = Date.now();
+    set((state) => {
+      const activeFolderId = useFolderStore.getState().activeFolderId;
+      const note = state.notes.find((n) => n.id === noteId);
+      if (!note) return {};
+      const movedOut =
+        note.folderId === activeFolderId && targetFolderId !== activeFolderId;
+      const movedIn =
+        note.folderId !== activeFolderId && targetFolderId === activeFolderId;
+      if (movedOut) {
+        return { notes: state.notes.filter((n) => n.id !== noteId) };
+      }
+      if (movedIn) {
+        return {
+          notes: [
+            { ...note, folderId: targetFolderId, updatedAt: now },
+            ...state.notes,
+          ],
+        };
+      }
+      return {
+        notes: state.notes.map((n) =>
+          n.id === noteId
+            ? { ...n, folderId: targetFolderId, updatedAt: now }
+            : n,
+        ),
+      };
+    });
   },
 
   /**
