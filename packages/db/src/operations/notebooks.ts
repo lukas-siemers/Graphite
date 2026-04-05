@@ -77,11 +77,50 @@ export async function updateNotebookSortOrder(
   await db.runAsync('UPDATE notebooks SET sort_order = ? WHERE id = ?', [sortOrder, id]);
 }
 
+/**
+ * Count the number of folders and notes contained in a notebook. Used to
+ * drive count-aware delete confirmation dialogs.
+ */
+export async function countNotebookContents(
+  db: SQLiteDatabase,
+  notebookId: string,
+): Promise<{ folderCount: number; noteCount: number }> {
+  const f = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) as c FROM folders WHERE notebook_id = ?',
+    [notebookId],
+  );
+  const n = await db.getFirstAsync<{ c: number }>(
+    'SELECT COUNT(*) as c FROM notes WHERE notebook_id = ?',
+    [notebookId],
+  );
+  return { folderCount: f?.c ?? 0, noteCount: n?.c ?? 0 };
+}
+
+/**
+ * Cascade-delete a notebook, all its folders, and all its notes in a
+ * single transaction. Returns the deleted folder and note ids so callers
+ * can update in-memory stores without a full reload.
+ */
 export async function deleteNotebook(
   db: SQLiteDatabase,
   id: string,
-): Promise<void> {
-  await db.runAsync('DELETE FROM notes WHERE notebook_id = ?', [id]);
-  await db.runAsync('DELETE FROM folders WHERE notebook_id = ?', [id]);
-  await db.runAsync('DELETE FROM notebooks WHERE id = ?', [id]);
+): Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }> {
+  const folderRows = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM folders WHERE notebook_id = ?',
+    [id],
+  );
+  const noteRows = await db.getAllAsync<{ id: string }>(
+    'SELECT id FROM notes WHERE notebook_id = ?',
+    [id],
+  );
+  const deletedFolderIds = folderRows.map((r: { id: string }) => r.id);
+  const deletedNoteIds = noteRows.map((r: { id: string }) => r.id);
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM notes WHERE notebook_id = ?', [id]);
+    await db.runAsync('DELETE FROM folders WHERE notebook_id = ?', [id]);
+    await db.runAsync('DELETE FROM notebooks WHERE id = ?', [id]);
+  });
+
+  return { deletedFolderIds, deletedNoteIds };
 }

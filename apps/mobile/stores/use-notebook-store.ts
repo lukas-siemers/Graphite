@@ -18,7 +18,10 @@ interface NotebookState {
   removeNotebook: (id: string) => void;
   loadNotebooks: (db: SQLiteDatabase) => Promise<void>;
   createNewNotebook: (db: SQLiteDatabase, name: string) => Promise<Notebook>;
-  deleteNotebook: (db: SQLiteDatabase, id: string) => Promise<void>;
+  deleteNotebook: (
+    db: SQLiteDatabase,
+    id: string,
+  ) => Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }>;
   moveNotebookUp: (db: SQLiteDatabase, id: string) => Promise<void>;
   moveNotebookDown: (db: SQLiteDatabase, id: string) => Promise<void>;
   reorderNotebooks: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
@@ -50,11 +53,12 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
   },
 
   deleteNotebook: async (db: SQLiteDatabase, id: string) => {
-    await deleteNotebook(db, id);
+    const result = await deleteNotebook(db, id);
     set((state) => ({
       notebooks: state.notebooks.filter((n) => n.id !== id),
       activeNotebookId: state.activeNotebookId === id ? null : state.activeNotebookId,
     }));
+    return result;
   },
 
   moveNotebookUp: async (db: SQLiteDatabase, id: string) => {
