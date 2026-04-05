@@ -24,6 +24,7 @@ export function buildEditorHtml(): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
@@ -83,44 +84,69 @@ export function buildEditorHtml(): string {
   /* Idle state — the "finished" look. Clean, developer-tool aesthetic. */
   .cm-fence-line {
     background: #141414;
-    font-family: 'SF Mono', 'JetBrains Mono', Consolas, Monaco, 'Courier New', monospace;
-    font-size: 13px;
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 13.5px;
     line-height: 20px;
     padding-left: 16px !important;
     padding-right: 16px !important;
     border-left: 1px solid #333;
     border-right: 1px solid #333;
   }
-  .cm-fence-first {
+  /* Body-line top/bottom borders — these sit on the first and last actual
+     code content lines (NOT the fence marker lines), because in idle state
+     the marker lines collapse to zero height and can't carry borders. */
+  .cm-fence-body-first {
     padding-top: 6px !important;
     border-top: 1px solid #333;
   }
-  .cm-fence-last {
+  .cm-fence-body-last {
     padding-bottom: 8px !important;
     border-bottom: 1px solid #333;
   }
 
   /* The opening/closing triple-backtick lines in idle state:
-     characters stay in the flow (never hidden) but recede visually.
-     Smaller font, muted color. When the user clicks into the fence
-     they flip to editing state and become normal size again. */
-  .cm-fence-first:not(.cm-fence-editing),
-  .cm-fence-last:not(.cm-fence-editing) {
-    font-size: 10px;
-    color: #555558;
-    opacity: 0.7;
+     characters stay in the flow (never hidden) but collapse to zero visual
+     height. No display:none, no visibility:hidden — the line element stays
+     addressable by cursor position, only its visual box is zeroed out.
+     When the user clicks into the fence the .cm-fence-editing modifier is
+     added and the companion rules below restore normal sizing. */
+  .cm-fence-line.cm-fence-first:not(.cm-fence-editing),
+  .cm-fence-line.cm-fence-last:not(.cm-fence-editing) {
+    height: 0 !important;
+    min-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    overflow: hidden !important;
+  }
+  .cm-fence-line.cm-fence-first:not(.cm-fence-editing) {
+    border-top-width: 0 !important;
+  }
+  .cm-fence-line.cm-fence-last:not(.cm-fence-editing) {
+    border-bottom-width: 0 !important;
   }
 
   /* Editing state — the "raw markdown" look. Slightly brighter background
-     to signal edit mode, fence markers at normal font size. */
+     to signal edit mode, fence markers at normal font size. Selectors match
+     the specificity of the idle rules above (.cm-fence-line.cm-fence-first)
+     so they reliably override them when .cm-fence-editing is present. */
   .cm-fence-line.cm-fence-editing {
     background: #1A1A1A;
   }
-  .cm-fence-first.cm-fence-editing,
-  .cm-fence-last.cm-fence-editing {
-    font-size: 13px;
+  .cm-fence-line.cm-fence-first.cm-fence-editing,
+  .cm-fence-line.cm-fence-last.cm-fence-editing {
+    height: auto !important;
+    min-height: 0 !important;
+    font-size: 13.5px !important;
+    line-height: 20px !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
     color: #8A8F98;
     opacity: 1;
+    overflow: visible !important;
+    border-top: 1px solid #333 !important;
+    border-bottom: 1px solid #333 !important;
   }
 
   /* ── Loading / error state ── */
@@ -517,11 +543,19 @@ function buildFenceDecorations(view) {
         const editing = head >= node.from && head <= node.to;
         const startLine = view.state.doc.lineAt(node.from).number;
         const endLine = view.state.doc.lineAt(node.to).number;
+        // Body lines are the lines strictly between the opener and closer.
+        // We tag the first and last body lines specifically so CSS can paint
+        // the top/bottom borders there — in idle state the marker lines
+        // collapse to zero height and cannot carry borders themselves.
+        const bodyFirst = startLine + 1;
+        const bodyLast = endLine - 1;
         for (let ln = startLine; ln <= endLine; ln++) {
           const line = view.state.doc.line(ln);
           const classes = ['cm-fence-line'];
           if (ln === startLine) classes.push('cm-fence-first');
           if (ln === endLine) classes.push('cm-fence-last');
+          if (ln === bodyFirst && bodyFirst <= bodyLast) classes.push('cm-fence-body-first');
+          if (ln === bodyLast && bodyFirst <= bodyLast) classes.push('cm-fence-body-last');
           if (editing) classes.push('cm-fence-editing');
           ranges.push(
             Decoration.line({ attributes: { class: classes.join(' ') } }).range(line.from)
