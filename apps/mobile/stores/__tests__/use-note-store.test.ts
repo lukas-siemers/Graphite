@@ -12,6 +12,7 @@ vi.mock('@graphite/db', async (importOriginal) => {
     getNotes: vi.fn().mockResolvedValue([]),
     createNote: vi.fn(),
     deleteNote: vi.fn(),
+    updateNoteSortOrder: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -25,6 +26,7 @@ const note1: Note = {
   drawingAssetId: null,
   canvasJson: null,
   isDirty: 0,
+  sortOrder: 0,
   createdAt: 1700000000000,
   updatedAt: 1700000000000,
   syncedAt: null,
@@ -39,8 +41,24 @@ const note2: Note = {
   drawingAssetId: null,
   canvasJson: null,
   isDirty: 0,
+  sortOrder: 1,
   createdAt: 1700000000001,
   updatedAt: 1700000000001,
+  syncedAt: null,
+};
+
+const note3: Note = {
+  id: 'n-3',
+  folderId: null,
+  notebookId: 'nb-1',
+  title: 'Third',
+  body: '',
+  drawingAssetId: null,
+  canvasJson: null,
+  isDirty: 0,
+  sortOrder: 2,
+  createdAt: 1700000000002,
+  updatedAt: 1700000000002,
   syncedAt: null,
 };
 
@@ -138,5 +156,45 @@ describe('updateNoteCanvas', () => {
     await useNoteStore.getState().updateNoteCanvas(fakeDb, 'n-1', emptyCanvas, false);
     const note = useNoteStore.getState().notes.find((n) => n.id === 'n-1')!;
     expect(note.isDirty).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderNotes — bulk drag-and-drop reorder action
+// ---------------------------------------------------------------------------
+
+describe('reorderNotes', () => {
+  beforeEach(() => {
+    useNoteStore.setState({ notes: [note1, note2, note3], activeNoteId: null });
+  });
+
+  it('assigns sequential sortOrder values matching the provided order', async () => {
+    // Provide reversed order: n-3, n-2, n-1
+    await useNoteStore.getState().reorderNotes(fakeDb, ['n-3', 'n-2', 'n-1']);
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'n-3')?.sortOrder).toBe(0);
+    expect(notes.find((n) => n.id === 'n-2')?.sortOrder).toBe(1);
+    expect(notes.find((n) => n.id === 'n-1')?.sortOrder).toBe(2);
+  });
+
+  it('re-sorts the in-memory notes array by the new sortOrder', async () => {
+    await useNoteStore.getState().reorderNotes(fakeDb, ['n-3', 'n-2', 'n-1']);
+    const { notes } = useNoteStore.getState();
+    expect(notes[0].id).toBe('n-3');
+    expect(notes[1].id).toBe('n-2');
+    expect(notes[2].id).toBe('n-1');
+  });
+
+  it('does not alter notes that are not present in orderedIds', async () => {
+    // Only reorder n-1 and n-2 — n-3 should keep its existing sortOrder (2).
+    await useNoteStore.getState().reorderNotes(fakeDb, ['n-2', 'n-1']);
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'n-3')?.sortOrder).toBe(2);
+  });
+
+  it('produces correct sortOrder when a single note is provided', async () => {
+    await useNoteStore.getState().reorderNotes(fakeDb, ['n-2']);
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'n-2')?.sortOrder).toBe(0);
   });
 });

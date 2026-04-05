@@ -174,4 +174,43 @@ describe('useNotebookStore', () => {
     expect(notebooks.find((n) => n.id === 'nb-1')?.sortOrder).toBe(0);
     expect(notebooks.find((n) => n.id === 'nb-2')?.sortOrder).toBe(1);
   });
+
+  // -------------------------------------------------------------------------
+  // reorderNotebooks — bulk drag-and-drop reorder action
+  // -------------------------------------------------------------------------
+
+  it('reorderNotebooks assigns sequential sortOrder values matching the provided order', async () => {
+    // Start with nb1 at index 0, nb2 at index 1.
+    // Provide reversed order — nb2 first, nb1 second.
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().reorderNotebooks(fakeDb, ['nb-2', 'nb-1']);
+    const { notebooks } = useNotebookStore.getState();
+    expect(notebooks.find((n) => n.id === 'nb-2')?.sortOrder).toBe(0);
+    expect(notebooks.find((n) => n.id === 'nb-1')?.sortOrder).toBe(1);
+  });
+
+  it('reorderNotebooks re-sorts the in-memory array by the new sortOrder', async () => {
+    useNotebookStore.getState().setNotebooks([nb1, nb2]);
+    await useNotebookStore.getState().reorderNotebooks(fakeDb, ['nb-2', 'nb-1']);
+    const { notebooks } = useNotebookStore.getState();
+    // After reorder the first element in the array must be nb2 (sortOrder 0).
+    expect(notebooks[0].id).toBe('nb-2');
+    expect(notebooks[1].id).toBe('nb-1');
+  });
+
+  it('reorderNotebooks does not alter notebooks that are not in orderedIds', async () => {
+    const nb3: Notebook = {
+      id: 'nb-3',
+      name: 'Extra',
+      createdAt: 1700000000002,
+      updatedAt: 1700000000002,
+      syncedAt: null,
+      sortOrder: 2,
+    };
+    useNotebookStore.getState().setNotebooks([nb1, nb2, nb3]);
+    await useNotebookStore.getState().reorderNotebooks(fakeDb, ['nb-2', 'nb-1']);
+    const { notebooks } = useNotebookStore.getState();
+    // nb3 was not in the orderedIds list — its sortOrder must be unchanged.
+    expect(notebooks.find((n) => n.id === 'nb-3')?.sortOrder).toBe(2);
+  });
 });

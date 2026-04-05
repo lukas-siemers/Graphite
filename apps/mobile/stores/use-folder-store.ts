@@ -26,6 +26,7 @@ interface FolderState {
   deleteFolder: (db: SQLiteDatabase, id: string) => Promise<void>;
   moveFolderUp: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
   moveFolderDown: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
+  reorderFolders: (db: SQLiteDatabase, notebookId: string, orderedIds: string[]) => Promise<void>;
 }
 
 export const useFolderStore = create<FolderState>((set, get) => ({
@@ -112,5 +113,18 @@ export const useFolderStore = create<FolderState>((set, get) => ({
         return f;
       }),
     }));
+  },
+
+  reorderFolders: async (db: SQLiteDatabase, notebookId: string, orderedIds: string[]) => {
+    await Promise.all(orderedIds.map((id, index) => updateFolderSortOrder(db, id, index)));
+    set((s) => {
+      const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+      const updated = s.folders.map((f) =>
+        f.notebookId === notebookId
+          ? { ...f, sortOrder: orderMap.get(f.id) ?? f.sortOrder }
+          : f,
+      );
+      return { folders: updated };
+    });
   },
 }));

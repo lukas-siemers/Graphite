@@ -26,6 +26,7 @@ export interface Note {
   drawingAssetId: string | null;
   canvasJson: string | null;
   isDirty: number;
+  sortOrder: number;
   createdAt: number;
   updatedAt: number;
   syncedAt: number | null;

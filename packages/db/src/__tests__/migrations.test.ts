@@ -41,7 +41,7 @@ describe('schema migrations', () => {
     expect(names).toHaveLength(7);
   });
 
-  it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json', () => {
+  it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json, sort_order', () => {
     const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
@@ -55,7 +55,25 @@ describe('schema migrations', () => {
     expect(names).toContain('updated_at');
     expect(names).toContain('synced_at');
     expect(names).toContain('canvas_json');
-    expect(names).toHaveLength(11);
+    expect(names).toContain('sort_order');
+    expect(names).toHaveLength(12);
+  });
+
+  it('ADD_NOTE_SORT_ORDER migration adds sort_order column to notes', () => {
+    const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{ name: string }>;
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('sort_order');
+  });
+
+  it('ADD_NOTE_SORT_ORDER migration: sort_order defaults to 0 for new notes', () => {
+    db.prepare(
+      "INSERT INTO notebooks (id, name, created_at, updated_at) VALUES ('nb-1', 'Work', 1700000000000, 1700000000000)"
+    ).run();
+    db.prepare(
+      "INSERT INTO notes (id, notebook_id, created_at, updated_at) VALUES ('n-1', 'nb-1', 1700000000000, 1700000000000)"
+    ).run();
+    const note = db.prepare("SELECT sort_order FROM notes WHERE id = 'n-1'").get() as { sort_order: number };
+    expect(note.sort_order).toBe(0);
   });
 
   it('ADD_NOTEBOOK_SORT_ORDER migration adds sort_order column to notebooks', () => {

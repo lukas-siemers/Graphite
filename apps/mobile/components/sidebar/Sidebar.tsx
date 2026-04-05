@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, TextInput, Image, Alert } from 'react-native';
+import { View, Text, Pressable, TextInput, Image, Alert } from 'react-native';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateNotebook } from '@graphite/db';
+import type { Notebook } from '@graphite/db';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -18,8 +21,7 @@ export default function Sidebar() {
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
   const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
-  const moveNotebookUp = useNotebookStore((s) => s.moveNotebookUp);
-  const moveNotebookDown = useNotebookStore((s) => s.moveNotebookDown);
+  const reorderNotebooks = useNotebookStore((s) => s.reorderNotebooks);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
   const createNewNote = useNoteStore((s) => s.createNewNote);
@@ -38,7 +40,6 @@ export default function Sidebar() {
   const [newNotePressed, setNewNotePressed] = useState(false);
   const [renamingNotebookId, setRenamingNotebookId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [reorderMode, setReorderMode] = useState(false);
   const renameInputRef = useRef<TextInput>(null);
 
   // Double-tap implementation:
@@ -191,22 +192,145 @@ export default function Sidebar() {
     );
   }
 
-  async function handleMoveUp(notebookId: string) {
-    try {
-      const db = getDatabase();
-      await moveNotebookUp(db, notebookId);
-    } catch (_) {
-      // db not ready yet
-    }
-  }
+  function renderNotebook({ item: notebook, drag }: RenderItemParams<Notebook>) {
+    const isActive = notebook.id === activeNotebookId;
+    const isExpanded = expandedIds.has(notebook.id);
+    const isRenaming = renamingNotebookId === notebook.id;
 
-  async function handleMoveDown(notebookId: string) {
-    try {
-      const db = getDatabase();
-      await moveNotebookDown(db, notebookId);
-    } catch (_) {
-      // db not ready yet
-    }
+    return (
+      <ScaleDecorator>
+        <View key={notebook.id}>
+          {/* Outer row: flex-row so drag handle, content, and × live in one row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+
+            {/* Drag handle — long press initiates the drag */}
+            <Pressable
+              onLongPress={drag}
+              delayLongPress={150}
+              hitSlop={4}
+              style={{ paddingLeft: 6, paddingRight: 4, paddingVertical: 6 }}
+            >
+              <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>
+                {'\u2630'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleNotebookPress(notebook.id, notebook.name)}
+              onLongPress={() => {
+                if (!isRenaming) {
+                  handleNotebookLongPress(notebook.id, notebook.name);
+                }
+              }}
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: 6,
+                paddingRight: 4,
+                paddingLeft: isActive ? 0 : 2,
+                borderLeftWidth: isActive ? 2 : 0,
+                borderLeftColor: tokens.accent,
+                backgroundColor: isActive ? tokens.bgHover : 'transparent',
+              }}
+            >
+              {/* Expand/collapse arrow */}
+              <Text
+                style={{
+                  fontSize: 10,
+                  color: tokens.textMuted,
+                  marginRight: 6,
+                  width: 10,
+                }}
+              >
+                {isExpanded ? '\u25BC' : '\u25B6'}
+              </Text>
+
+              {/* Folder icon */}
+              <MaterialCommunityIcons
+                name="folder"
+                size={15}
+                color={isActive ? tokens.accentLight : tokens.textMuted}
+                style={{ marginRight: 6 }}
+              />
+
+              {/* Name or rename input */}
+              {isRenaming ? (
+                <TextInput
+                  ref={renameInputRef}
+                  autoFocus
+                  value={renameValue}
+                  onChangeText={setRenameValue}
+                  onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
+                  onBlur={() => commitRename(notebook.id, notebook.name)}
+                  style={{
+                    flex: 1,
+                    fontSize: 13,
+                    fontWeight: '500',
+                    color: tokens.textBody,
+                    padding: 0,
+                    margin: 0,
+                  }}
+                  selectTextOnFocus
+                  returnKeyType="done"
+                />
+              ) : (
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: '500',
+                    color: isActive ? tokens.textBody : tokens.textMuted,
+                    flex: 1,
+                  }}
+                  numberOfLines={1}
+                >
+                  {notebook.name}
+                </Text>
+              )}
+
+              {/* New folder "+" button */}
+              {isExpanded && !isRenaming && (
+                <Pressable
+                  onPress={() => handleCreateNewFolder(notebook.id)}
+                  hitSlop={8}
+                  style={{ paddingHorizontal: 4 }}
+                >
+                  <Text style={{ fontSize: 14, color: tokens.textMuted, lineHeight: 18 }}>
+                    +
+                  </Text>
+                </Pressable>
+              )}
+            </Pressable>
+
+            {/* × delete button — outside the expand/collapse Pressable so
+                tapping the notebook name/row never accidentally triggers delete */}
+            {!isRenaming && (
+              <Pressable
+                onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
+                hitSlop={8}
+                style={{ paddingHorizontal: 6, paddingVertical: 6 }}
+              >
+                {({ pressed }: { pressed: boolean }) => (
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      color: pressed ? tokens.accent : tokens.textMuted,
+                      lineHeight: 18,
+                    }}
+                  >
+                    ×
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+
+          {isExpanded && (
+            <FolderTree notebookId={notebook.id} />
+          )}
+        </View>
+      </ScaleDecorator>
+    );
   }
 
   return (
@@ -251,22 +375,6 @@ export default function Sidebar() {
         >
           NOTEBOOKS
         </Text>
-        {/* Reorder toggle button */}
-        <Pressable
-          onPress={() => setReorderMode((v) => !v)}
-          hitSlop={8}
-          style={{ paddingHorizontal: 6 }}
-        >
-          <Text
-            style={{
-              fontSize: 11,
-              color: reorderMode ? tokens.accent : tokens.textHint,
-              fontWeight: '500',
-            }}
-          >
-            Reorder
-          </Text>
-        </Pressable>
         <Pressable
           onPress={handleCreateNewNotebook}
           hitSlop={8}
@@ -278,179 +386,21 @@ export default function Sidebar() {
         </Pressable>
       </View>
 
-      {/* Notebook list */}
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {notebooks.map((notebook, index) => {
-          const isActive = notebook.id === activeNotebookId;
-          const isExpanded = expandedIds.has(notebook.id);
-          const isRenaming = renamingNotebookId === notebook.id;
-          const isFirst = index === 0;
-          const isLast = index === notebooks.length - 1;
-
-          return (
-            <View key={notebook.id}>
-              {/* Outer row: flex-row so × lives outside the main Pressable tap area */}
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Pressable
-                onPress={() => {
-                  if (reorderMode) return;
-                  handleNotebookPress(notebook.id, notebook.name);
-                }}
-                onLongPress={() => {
-                  if (!isRenaming && !reorderMode) {
-                    handleNotebookLongPress(notebook.id, notebook.name);
-                  }
-                }}
-                style={{
-                  flex: 1,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: 6,
-                  paddingRight: 4,
-                  paddingLeft: isActive ? 6 : 8,
-                  borderLeftWidth: isActive ? 2 : 0,
-                  borderLeftColor: tokens.accent,
-                  backgroundColor: isActive ? tokens.bgHover : 'transparent',
-                }}
-              >
-                {/* Expand/collapse arrow — hidden in reorder mode */}
-                {!reorderMode && (
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: tokens.textMuted,
-                      marginRight: 6,
-                      width: 10,
-                    }}
-                  >
-                    {isExpanded ? '\u25BC' : '\u25B6'}
-                  </Text>
-                )}
-
-                {/* Folder icon */}
-                <MaterialCommunityIcons
-                  name="folder"
-                  size={15}
-                  color={isActive ? tokens.accentLight : tokens.textMuted}
-                  style={{ marginRight: 6 }}
-                />
-
-                {/* Name or rename input */}
-                {isRenaming ? (
-                  <TextInput
-                    ref={renameInputRef}
-                    autoFocus
-                    value={renameValue}
-                    onChangeText={setRenameValue}
-                    onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
-                    onBlur={() => commitRename(notebook.id, notebook.name)}
-                    style={{
-                      flex: 1,
-                      fontSize: 13,
-                      fontWeight: '500',
-                      color: tokens.textBody,
-                      padding: 0,
-                      margin: 0,
-                    }}
-                    selectTextOnFocus
-                    returnKeyType="done"
-                  />
-                ) : (
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: '500',
-                      color: isActive ? tokens.textBody : tokens.textMuted,
-                      flex: 1,
-                    }}
-                    numberOfLines={1}
-                  >
-                    {notebook.name}
-                  </Text>
-                )}
-
-                {/* Reorder ▲▼ buttons — shown only in reorder mode */}
-                {reorderMode && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                    <Pressable
-                      onPress={() => !isFirst && handleMoveUp(notebook.id)}
-                      hitSlop={6}
-                      style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: isFirst ? tokens.textHint : tokens.textMuted,
-                        }}
-                      >
-                        ▲
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => !isLast && handleMoveDown(notebook.id)}
-                      hitSlop={6}
-                      style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: isLast ? tokens.textHint : tokens.textMuted,
-                        }}
-                      >
-                        ▼
-                      </Text>
-                    </Pressable>
-                  </View>
-                )}
-
-                {/* New folder "+" button — hidden in reorder mode */}
-                {isExpanded && !isRenaming && !reorderMode && (
-                  <Pressable
-                    onPress={() => handleCreateNewFolder(notebook.id)}
-                    hitSlop={8}
-                    style={{ paddingHorizontal: 4 }}
-                  >
-                    <Text style={{ fontSize: 14, color: tokens.textMuted, lineHeight: 18 }}>
-                      +
-                    </Text>
-                  </Pressable>
-                )}
-
-              </Pressable>
-
-                {/* × delete button — outside the expand/collapse Pressable so
-                    tapping the notebook name/row never accidentally triggers delete */}
-                {!isRenaming && !reorderMode && (
-                  <Pressable
-                    onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
-                    hitSlop={8}
-                    style={{ paddingHorizontal: 6, paddingVertical: 6 }}
-                  >
-                    {({ pressed }: { pressed: boolean }) => (
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          color: pressed ? tokens.accent : tokens.textMuted,
-                          lineHeight: 18,
-                        }}
-                      >
-                        ×
-                      </Text>
-                    )}
-                  </Pressable>
-                )}
-              </View>
-
-              {isExpanded && !reorderMode && (
-                <FolderTree notebookId={notebook.id} reorderMode={false} />
-              )}
-              {isExpanded && reorderMode && (
-                <FolderTree notebookId={notebook.id} reorderMode={true} />
-              )}
-            </View>
-          );
-        })}
-      </ScrollView>
+      {/* Notebook list — DraggableFlatList enables long-press drag reorder */}
+      <DraggableFlatList
+        data={notebooks}
+        keyExtractor={(item) => item.id}
+        onDragEnd={({ data }) => {
+          try {
+            reorderNotebooks(getDatabase(), data.map((n) => n.id));
+          } catch (_) {
+            // db not ready yet
+          }
+        }}
+        renderItem={renderNotebook}
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+      />
 
       {/* New Note button */}
       <View style={{ marginHorizontal: 12, marginVertical: 8 }}>

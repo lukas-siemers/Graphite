@@ -3,10 +3,11 @@ import {
   View,
   Text,
   TextInput,
-  FlatList,
   Pressable,
   Alert,
 } from 'react-native';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { tokens } from '@graphite/ui';
 import { getDatabase, searchNotes } from '@graphite/db';
 import type { Note } from '@graphite/db';
@@ -48,55 +49,76 @@ interface NoteCardProps {
   isActive: boolean;
   onPress: () => void;
   onLongPress: () => void;
+  drag: () => void;
+  showDragHandle: boolean;
 }
 
-function NoteCard({ note, isActive, onPress, onLongPress }: NoteCardProps) {
+function NoteCard({ note, isActive, onPress, onLongPress, drag, showDragHandle }: NoteCardProps) {
   const preview = stripMarkdown(note.body);
   return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
-      style={{
-        borderLeftWidth: 2,
-        borderLeftColor: isActive ? tokens.accent : 'transparent',
-        backgroundColor: isActive ? tokens.bgActive : 'transparent',
-        paddingLeft: 14,
-        paddingRight: 16,
-        paddingVertical: 12,
-      }}
-    >
-      <Text
+    <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+      {showDragHandle && (
+        <Pressable
+          onLongPress={drag}
+          delayLongPress={150}
+          hitSlop={4}
+          style={{
+            justifyContent: 'center',
+            paddingHorizontal: 8,
+            paddingVertical: 12,
+          }}
+        >
+          <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>
+            {'\u2630'}
+          </Text>
+        </Pressable>
+      )}
+      <Pressable
+        onPress={onPress}
+        onLongPress={onLongPress}
         style={{
-          fontSize: 14,
-          fontWeight: '600',
-          color: tokens.textPrimary,
+          flex: 1,
+          borderLeftWidth: 2,
+          borderLeftColor: isActive ? tokens.accent : 'transparent',
+          backgroundColor: isActive ? tokens.bgHover : 'transparent',
+          paddingLeft: 14,
+          paddingRight: 16,
+          paddingVertical: 12,
         }}
-        numberOfLines={1}
       >
-        {note.title || 'Untitled'}
-      </Text>
-      {preview.length > 0 && (
         <Text
           style={{
-            fontSize: 12,
-            color: tokens.textMuted,
-            marginTop: 2,
+            fontSize: 14,
+            fontWeight: '600',
+            color: tokens.textPrimary,
           }}
-          numberOfLines={2}
+          numberOfLines={1}
         >
-          {preview}
+          {note.title || 'Untitled'}
         </Text>
-      )}
-      <Text
-        style={{
-          fontSize: 11,
-          color: tokens.textHint,
-          marginTop: 4,
-        }}
-      >
-        {formatTimestamp(note.updatedAt)}
-      </Text>
-    </Pressable>
+        {preview.length > 0 && (
+          <Text
+            style={{
+              fontSize: 12,
+              color: tokens.textMuted,
+              marginTop: 2,
+            }}
+            numberOfLines={2}
+          >
+            {preview}
+          </Text>
+        )}
+        <Text
+          style={{
+            fontSize: 11,
+            color: tokens.textHint,
+            marginTop: 4,
+          }}
+        >
+          {formatTimestamp(note.updatedAt)}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -104,6 +126,7 @@ export default function NoteList() {
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
+  const reorderNotes = useNoteStore((s) => s.reorderNotes);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
 
   const [displayedNotes, setDisplayedNotes] = useState<Note[] | null>(null);
@@ -111,6 +134,7 @@ export default function NoteList() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shownNotes = displayedNotes ?? notes;
+  const isSearching = searchQuery.trim().length > 0;
 
   const handleSearch = useCallback(
     (text: string) => {
@@ -168,6 +192,21 @@ export default function NoteList() {
     );
   }
 
+  function renderNote({ item, drag }: RenderItemParams<Note>) {
+    return (
+      <ScaleDecorator>
+        <NoteCard
+          note={item}
+          isActive={item.id === activeNoteId}
+          onPress={() => handleNotePress(item.id)}
+          onLongPress={() => handleDeleteNote(item)}
+          drag={drag}
+          showDragHandle={!isSearching}
+        />
+      </ScaleDecorator>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       {/* Header bar */}
@@ -216,18 +255,21 @@ export default function NoteList() {
         />
       </View>
 
-      {/* Note list */}
-      <FlatList
+      {/* Note list — DraggableFlatList enables long-press drag reorder.
+          Drag handle is hidden when a search query is active because search
+          results have no persisted order. */}
+      <DraggableFlatList
         data={shownNotes}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <NoteCard
-            note={item}
-            isActive={item.id === activeNoteId}
-            onPress={() => handleNotePress(item.id)}
-            onLongPress={() => handleDeleteNote(item)}
-          />
-        )}
+        onDragEnd={({ data }) => {
+          if (isSearching) return;
+          try {
+            reorderNotes(getDatabase(), data.map((n) => n.id));
+          } catch (_) {
+            // db not ready yet
+          }
+        }}
+        renderItem={renderNote}
         ItemSeparatorComponent={null}
         style={{ flex: 1 }}
       />
