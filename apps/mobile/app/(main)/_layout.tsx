@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, useWindowDimensions } from 'react-native';
+import { View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   initDatabase,
@@ -140,8 +140,8 @@ function PhoneLayout() {
               onToggleDrawing={() => setDrawingOpen((v) => !v)}
               drawingOpen={drawingOpen}
             />
-            {/* FAB — square tangerine, draws over the editor */}
-            <Pressable
+            {/* FAB — iPad/native only; hidden on web */}
+            {Platform.OS !== 'web' && <Pressable
               onPress={async () => {
                 if (!drawingOpen && activeNoteId) {
                   const strokes = await loadStrokes(activeNoteId);
@@ -162,8 +162,8 @@ function PhoneLayout() {
               })}
             >
               <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-            </Pressable>
-            {drawingOpen && activeNoteId && (
+            </Pressable>}
+            {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
               <DrawingCanvas
                 noteId={activeNoteId}
                 initialStrokes={initialStrokes}
@@ -283,8 +283,8 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
             onToggleDrawing={() => setDrawingOpen((v) => !v)}
             drawingOpen={drawingOpen}
           />
-          {/* FAB — square tangerine */}
-          <Pressable
+          {/* FAB — iPad/native only; hidden on web */}
+          {Platform.OS !== 'web' && <Pressable
             onPress={async () => {
               if (!drawingOpen && activeNoteId) {
                 const strokes = await loadStrokes(activeNoteId);
@@ -305,8 +305,8 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
             })}
           >
             <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-          </Pressable>
-          {drawingOpen && activeNoteId && (
+          </Pressable>}
+          {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
             <DrawingCanvas
               noteId={activeNoteId}
               initialStrokes={initialStrokes}
