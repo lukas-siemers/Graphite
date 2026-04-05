@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { View, Text, Pressable, TextInput, Image, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, updateNotebook, countNotebookContents } from '@graphite/db';
+import { getDatabase, countNotebookContents } from '@graphite/db';
 import type { Notebook } from '@graphite/db';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
@@ -31,7 +31,7 @@ export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
-  const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
+  const renameNotebookAction = useNotebookStore((s) => s.renameNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
@@ -98,9 +98,13 @@ export default function Sidebar() {
     if (finalName === originalName) return;
     try {
       const db = getDatabase();
-      await updateNotebook(db, notebookId, finalName);
-      storeUpdateNotebook(notebookId, { name: finalName });
+      await renameNotebookAction(db, notebookId, finalName);
     } catch (_) {}
+  }
+
+  function cancelRename() {
+    setRenamingNotebookId(null);
+    setRenameValue('');
   }
 
   async function handleCreateNewNotebook() {
@@ -197,6 +201,12 @@ export default function Sidebar() {
                 onChangeText={setRenameValue}
                 onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
                 onBlur={() => commitRename(notebook.id, notebook.name)}
+                onKeyPress={(e: any) => {
+                  if (e?.nativeEvent?.key === 'Escape') {
+                    e.preventDefault?.();
+                    cancelRename();
+                  }
+                }}
                 style={{
                   flex: 1,
                   fontSize: 13,

@@ -5,6 +5,7 @@ import {
   createFolder,
   getFolders,
   updateFolder,
+  renameFolder,
   deleteFolder,
 } from '../operations/folders';
 
@@ -69,6 +70,20 @@ describe('folders operations', () => {
     const folders = await getFolders(db, notebook.id);
     const updated = folders.find((f) => f.id === folder.id)!;
     expect(updated.name).toBe('New Name');
+  });
+
+  it('renameFolder updates the name and updated_at', async () => {
+    const notebook = await createNotebook(db, 'Work');
+    const folder = await createFolder(db, notebook.id, 'Old');
+
+    vi.setSystemTime(new Date('2024-07-15'));
+    const expectedNow = new Date('2024-07-15').getTime();
+    await renameFolder(db, folder.id, 'Renamed');
+
+    const folders = await getFolders(db, notebook.id);
+    const updated = folders.find((f) => f.id === folder.id)!;
+    expect(updated.name).toBe('Renamed');
+    expect(updated.updatedAt).toBe(expectedNow);
   });
 
   it('deleteFolder removes the folder', async () => {

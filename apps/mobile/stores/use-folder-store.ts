@@ -5,6 +5,7 @@ import {
   getFolders,
   createFolder,
   deleteFolder,
+  renameFolder as dbRenameFolder,
   updateFolderSortOrder,
 } from '@graphite/db';
 
@@ -27,6 +28,7 @@ interface FolderState {
     db: SQLiteDatabase,
     id: string,
   ) => Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }>;
+  renameFolder: (db: SQLiteDatabase, id: string, name: string) => Promise<void>;
   moveFolderUp: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
   moveFolderDown: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
   reorderFolders: (db: SQLiteDatabase, notebookId: string, orderedIds: string[]) => Promise<void>;
@@ -67,6 +69,16 @@ export const useFolderStore = create<FolderState>((set, get) => ({
     const folder = await createFolder(db, notebookId, name, parentId);
     set((state) => ({ folders: [...state.folders, folder] }));
     return folder;
+  },
+
+  renameFolder: async (db: SQLiteDatabase, id: string, name: string) => {
+    await dbRenameFolder(db, id, name);
+    const now = Date.now();
+    set((state) => ({
+      folders: state.folders.map((f) =>
+        f.id === id ? { ...f, name, updatedAt: now } : f,
+      ),
+    }));
   },
 
   deleteFolder: async (db: SQLiteDatabase, id: string) => {
