@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { View, ScrollView, StyleSheet, Platform } from 'react-native';
 
 // Gesture handler is native-only — on web the ink layer is a no-op anyway
@@ -20,7 +20,9 @@ import { nanoid } from 'nanoid';
 import { tokens } from '@graphite/ui';
 import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite/db';
 import { CanvasTextInput } from './CanvasTextInput';
+import { LivePreviewInput } from './LivePreviewInput';
 import { CodeBlock } from './CodeBlock';
+import type { FormatCommand } from './types';
 
 // ---------------------------------------------------------------------------
 // Skia — dynamic import so the component works in Expo Go (no native module)
@@ -49,6 +51,14 @@ export interface CanvasRendererProps {
   readOnly?: boolean;
   /** Controls whether the text layer accepts keyboard input */
   inputMode?: 'ink' | 'scroll';
+  /** Format command dispatched from the toolbar — routed to the last-focused text segment */
+  pendingCommand?: FormatCommand | null;
+  /** Called when the pending command has been consumed */
+  onCommandApplied?: () => void;
+  /** Reports which formats are active at the cursor — for toolbar highlighting */
+  onActiveFormatsChange?: (formats: FormatCommand[]) => void;
+  /** Auto-focus the first text segment — set true when entering edit mode from preview */
+  autoFocusFirst?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,9 +202,15 @@ export function CanvasRenderer({
   onTextChange,
   readOnly = false,
   inputMode = 'scroll',
+  pendingCommand,
+  onCommandApplied,
+  onActiveFormatsChange,
+  autoFocusFirst = false,
 }: CanvasRendererProps) {
   const scrollRef = useRef<ScrollView>(null);
   const contentHeightRef = useRef<number>(600);
+  // Track which text-segment index last received focus so commands route correctly
+  const [lastFocusedIndex, setLastFocusedIndex] = useState(0);
 
   // Active stroke being drawn — accumulated between pan start/change/end
   const activeStrokeRef = useRef<InkStroke | null>(null);
@@ -295,6 +311,30 @@ export function CanvasRenderer({
 
   let textValueIndex = 0;
 
+  // ── Web path ─────────────────────────────────────────────────────────────
+  // On web we render ONE CodeMirror-based live preview editor with the full
+  // body. CodeMirror's markdown mode already renders fenced code, headings,
+  // bold, etc. inline — no segment parsing, no separate CodeBlock component.
+  // Ink layer is a no-op on web (Skia stub), so we can skip the ScrollView
+  // gymnastics entirely and let the live preview component manage its own
+  // height and scrolling.
+  if (Platform.OS === 'web') {
+    return (
+      <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+        <LivePreviewInput
+          value={canvasDoc.textContent.body}
+          onChange={(text) => onTextChange?.(text)}
+          inputMode={readOnly ? 'ink' : inputMode}
+          placeholder="Start writing..."
+          pendingCommand={pendingCommand}
+          onCommandApplied={onCommandApplied}
+          onActiveFormatsChange={onActiveFormatsChange}
+          autoFocus={autoFocusFirst}
+        />
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <GestureDetector gesture={inkGesture}>
@@ -339,6 +379,11 @@ export function CanvasRenderer({
                     onChange={(text) => handleSegmentChange(segTextIndex, text)}
                     inputMode={readOnly ? 'ink' : inputMode}
                     placeholder={idx === 0 ? 'Start writing...' : undefined}
+                    onFocus={() => setLastFocusedIndex(segTextIndex)}
+                    pendingCommand={pendingCommand && lastFocusedIndex === segTextIndex ? pendingCommand : null}
+                    onCommandApplied={onCommandApplied}
+                    onActiveFormatsChange={onActiveFormatsChange}
+                    autoFocus={autoFocusFirst && segTextIndex === 0}
                   />
                 );
               })}

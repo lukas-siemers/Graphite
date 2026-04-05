@@ -75,7 +75,7 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     const last = lastTapRef.current.get(folderId) ?? 0;
     lastTapRef.current.set(folderId, now);
 
-    if (now - last < 300) {
+    if (now - last < 500) {
       lastTapRef.current.delete(folderId);
       startFolderRename(folderId, folderName);
       return;

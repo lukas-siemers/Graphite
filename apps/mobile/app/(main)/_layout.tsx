@@ -19,6 +19,7 @@ import { useFolderStore } from '../../stores/use-folder-store';
 import Sidebar from '../../components/sidebar/Sidebar';
 import NoteList from '../../components/note-list/NoteList';
 import Editor from '../../components/editor/Editor';
+import { FormattingToolbar } from '../../components/editor/FormattingToolbar';
 import { DrawingCanvas } from '../../components/drawing';
 import type { Stroke } from '../../components/drawing';
 
@@ -193,9 +194,6 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
 
-  const TOOLBAR_ITEMS = ['B', 'I', 'T', '<>', 'Link', '\u2014'] as const;
-  const RIGHT_ICONS = ['\u21BB', '\u2197', '\u2699', '\u22EE'] as const;
-
   return (
     <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
       {/* Sidebar — collapses via width */}
@@ -222,7 +220,7 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
             backgroundColor: tokens.bgBase,
             borderBottomWidth: 1,
             borderBottomColor: tokens.border,
-            paddingHorizontal: 8,
+            paddingLeft: 8,
           }}
         >
           {/* Sidebar toggle */}
@@ -233,48 +231,17 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
               height: 36,
               alignItems: 'center',
               justifyContent: 'center',
+              marginRight: 4,
             }}
           >
             <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
           </Pressable>
 
-          {/* Formatting buttons */}
-          <View style={{ flexDirection: 'row', marginLeft: 8 }}>
-            {TOOLBAR_ITEMS.map((label) => (
-              <Pressable
-                key={label}
-                style={({ pressed }) => ({
-                  width: 36,
-                  height: 36,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: pressed ? tokens.bgBright : tokens.bgHover,
-                  marginRight: 2,
-                })}
-              >
-                <Text style={{ fontSize: 13, fontWeight: '600', color: tokens.textMuted }}>
-                  {label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* Right side icons */}
-          <View style={{ flexDirection: 'row', marginLeft: 'auto' }}>
-            {RIGHT_ICONS.map((icon) => (
-              <Pressable
-                key={icon}
-                style={{
-                  width: 36,
-                  height: 36,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 16, color: tokens.textMuted }}>{icon}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {/* Formatting toolbar */}
+          <FormattingToolbar
+            onToggleDrawing={() => setDrawingOpen((v) => !v)}
+            drawingOpen={drawingOpen}
+          />
         </View>
 
         {/* Editor area */}

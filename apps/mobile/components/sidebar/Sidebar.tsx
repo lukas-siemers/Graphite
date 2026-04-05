@@ -55,7 +55,7 @@ export default function Sidebar() {
     const last = lastTapRef.current.get(notebookId) ?? 0;
     lastTapRef.current.set(notebookId, now);
 
-    if (now - last < 300) {
+    if (now - last < 500) {
       lastTapRef.current.delete(notebookId);
       startRename(notebookId, notebookName);
       return;

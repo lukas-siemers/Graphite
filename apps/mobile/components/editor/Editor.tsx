@@ -5,6 +5,7 @@ import {
   TextInput,
   ScrollView,
   Pressable,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
@@ -15,6 +16,7 @@ import { CanvasRenderer } from '@graphite/editor';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
 import { usePencilDetection } from '../../hooks/use-pencil-detection';
 
@@ -178,10 +180,15 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const { width: windowWidth } = useWindowDimensions();
   const { inputMode, handleTouchStart } = usePencilDetection();
 
+  const previewMode = useEditorStore((s) => s.previewMode);
+  const setPreviewMode = useEditorStore((s) => s.setPreviewMode);
+  const pendingCommand = useEditorStore((s) => s.pendingCommand);
+  const clearCommand = useEditorStore((s) => s.clearCommand);
+  const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
+
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
-  const [previewMode, setPreviewMode] = useState(false);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -358,15 +365,16 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         </View>
       )}
 
-      {/* Content area — CanvasRenderer (edit) or Markdown preview */}
+      {/* Content area — always editable, reading view is optional via toolbar */}
       {previewMode ? (
+        /* ── Reading view (triggered only from toolbar eye icon) ── */
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
           <Markdown style={markdownStyles} rules={markdownRules}>
             {localBody.length > 0 ? localBody : ' '}
           </Markdown>
         </ScrollView>
       ) : activeCanvasDoc !== null ? (
-        /* Canvas-based editing — CanvasDocument exists (migrated or new) */
+        /* ── Primary surface — always open for writing ── */
         <View style={{ flex: 1 }}>
           <CanvasRenderer
             canvasDoc={activeCanvasDoc}
@@ -380,10 +388,13 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
               updateNoteCanvas(db, activeNote.id, updated);
             }}
             inputMode={inputMode}
+            pendingCommand={pendingCommand}
+            onCommandApplied={clearCommand}
+            onActiveFormatsChange={setActiveFormats}
           />
         </View>
       ) : (
-        /* Fallback plain TextInput while migration hasn't run yet */
+        /* ── Fallback while canvas migration runs ── */
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
           <TextInput
             value={localBody}
@@ -395,10 +406,12 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
               fontSize: 16,
               lineHeight: 24,
               color: tokens.textBody,
-              backgroundColor: tokens.bgBase,
+              backgroundColor: 'transparent',
+              borderWidth: 0,
               padding: 24,
               minHeight: 300,
               textAlignVertical: 'top',
+              ...(Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none', resize: 'none', boxShadow: 'none' } as any : {}),
             }}
           />
         </ScrollView>
@@ -427,42 +440,6 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         >
           {wordCount} WORDS \u00B7 {saveStatus.toUpperCase()}
         </Text>
-        <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
-          {/* Preview toggle */}
-          <Pressable onPress={() => setPreviewMode((v) => !v)}>
-            <Text
-              style={{
-                fontSize: 11,
-                letterSpacing: 0.5,
-                textTransform: 'uppercase',
-                color: previewMode ? tokens.accent : tokens.textHint,
-                fontWeight: previewMode ? '700' : '400',
-              }}
-            >
-              {previewMode ? 'EDITING' : 'PREVIEW'}
-            </Text>
-          </Pressable>
-          <Text
-            style={{
-              fontSize: 11,
-              color: tokens.textHint,
-              letterSpacing: 0.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            MARKDOWN GUIDE
-          </Text>
-          <Text
-            style={{
-              fontSize: 11,
-              color: tokens.textHint,
-              letterSpacing: 0.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            SUPPORT
-          </Text>
-        </View>
       </View>
     </View>
   );
