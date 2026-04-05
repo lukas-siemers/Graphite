@@ -73,9 +73,12 @@ describe('notes operations', () => {
     expect(folderNotes.every((n) => n.folderId === folder.id)).toBe(true);
   });
 
-  it('getNotes returns notes ordered by updated_at DESC', async () => {
+  it('getNotes returns notes ordered by sort_order ASC (tiebreak: updated_at DESC)', async () => {
     const notebook = await createNotebook(db, 'Work');
 
+    // createNote now assigns an incrementing sort_order per bucket, so
+    // insertion order determines the primary sort. updated_at only breaks
+    // ties when sort_order values collide.
     const note1 = await createNote(db, notebook.id);
 
     vi.setSystemTime(new Date('2024-03-01'));
@@ -86,10 +89,10 @@ describe('notes operations', () => {
 
     const notes = await getNotes(db, notebook.id);
 
-    // Most recently created/updated first
-    expect(notes[0].id).toBe(note2.id);
-    expect(notes[1].id).toBe(note3.id);
-    expect(notes[2].id).toBe(note1.id);
+    // Primary: sort_order ASC — insertion order.
+    expect(notes[0].id).toBe(note1.id);
+    expect(notes[1].id).toBe(note2.id);
+    expect(notes[2].id).toBe(note3.id);
   });
 
   it('getNote returns the correct note by id', async () => {
@@ -160,6 +163,37 @@ describe('notes operations', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((n) => n.id === note.id)).toBe(true);
     expect(results.every((n) => n.id !== otherNote.id)).toBe(true);
+  });
+
+  it('createNote assigns incrementing sort_order within a folder bucket', async () => {
+    const notebook = await createNotebook(db, 'Work');
+    const folder = await createFolder(db, notebook.id, 'Projects');
+
+    const first = await createNote(db, notebook.id, folder.id);
+    const second = await createNote(db, notebook.id, folder.id);
+    const third = await createNote(db, notebook.id, folder.id);
+
+    expect(first.sortOrder).toBe(0);
+    expect(second.sortOrder).toBe(1);
+    expect(third.sortOrder).toBe(2);
+    // Distinct — the core regression we are guarding.
+    const orders = new Set([first.sortOrder, second.sortOrder, third.sortOrder]);
+    expect(orders.size).toBe(3);
+  });
+
+  it('createNote tracks sort_order independently for top-level vs folder buckets', async () => {
+    const notebook = await createNotebook(db, 'Work');
+    const folder = await createFolder(db, notebook.id, 'Projects');
+
+    const topA = await createNote(db, notebook.id);
+    const topB = await createNote(db, notebook.id);
+    const inFolderA = await createNote(db, notebook.id, folder.id);
+    const inFolderB = await createNote(db, notebook.id, folder.id);
+
+    expect(topA.sortOrder).toBe(0);
+    expect(topB.sortOrder).toBe(1);
+    expect(inFolderA.sortOrder).toBe(0);
+    expect(inFolderB.sortOrder).toBe(1);
   });
 
   it('searchNotes returns empty array for no match', async () => {

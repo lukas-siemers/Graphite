@@ -10,6 +10,9 @@ import {
   updateNoteSortOrder,
   createEmptyCanvas,
 } from '@graphite/db';
+// NOTE: imported for cross-store read only. We access via getState() inside
+// actions (never at module scope) to avoid circular-init issues.
+import { useFolderStore } from './use-folder-store';
 
 interface NoteState {
   notes: Note[];
@@ -80,10 +83,34 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const canvasJson = JSON.stringify(canvasDoc);
     await updateNote(db, note.id, { canvasJson, skipTimestamp: true });
     const noteWithCanvas = { ...note, canvasJson };
-    set((state) => ({
-      notes: [noteWithCanvas, ...state.notes],
-      activeNoteId: note.id,
-    }));
+
+    // Folder-context awareness: if the new note targets a different folder
+    // than the currently active one in the sidebar, switch the active folder
+    // and reload that folder's notes from the DB. The reloaded list will
+    // already contain the freshly-inserted note (createNote committed above),
+    // so we only need to set activeNoteId — no optimistic prepend.
+    const folderStore = useFolderStore.getState();
+    const currentFolderId = folderStore.activeFolderId;
+    const targetFolderId = folderId ?? null;
+    const sameFolder = currentFolderId === targetFolderId;
+
+    if (sameFolder) {
+      // Fast path: optimistic prepend for the currently viewed folder.
+      set((state) => ({
+        notes: [noteWithCanvas, ...state.notes],
+        activeNoteId: note.id,
+      }));
+    } else {
+      // Switch sidebar selection to the target folder, reload its notes
+      // (which already includes the new note from the DB), and mark the
+      // new note active.
+      folderStore.setActiveFolder(targetFolderId);
+      // getNotes treats null/undefined as "no folder filter = notebook-wide";
+      // callers elsewhere pass null for the top-level bucket, so preserve
+      // that semantic here.
+      const reloaded = await getNotes(db, notebookId, targetFolderId);
+      set({ notes: reloaded, activeNoteId: note.id });
+    }
     return noteWithCanvas;
   },
 

@@ -42,11 +42,26 @@ export async function createNote(
   const id = nanoid();
   const now = Date.now();
   const folder = folderId ?? null;
+  // Compute next sort_order for this folder/notebook bucket so new notes do
+  // not all collide at sort_order=0. Scope the MAX lookup to the same bucket
+  // createNote is inserting into: matching notebook AND matching folder_id
+  // (treating NULL as its own bucket for top-level notes).
+  const maxRow =
+    folder === null
+      ? await db.getFirstAsync<{ max_order: number | null }>(
+          'SELECT MAX(sort_order) as max_order FROM notes WHERE notebook_id = ? AND folder_id IS NULL',
+          [notebookId],
+        )
+      : await db.getFirstAsync<{ max_order: number | null }>(
+          'SELECT MAX(sort_order) as max_order FROM notes WHERE notebook_id = ? AND folder_id = ?',
+          [notebookId, folder],
+        );
+  const sortOrder = (maxRow?.max_order ?? -1) + 1;
   await db.runAsync(
     `INSERT INTO notes
-       (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at)
-     VALUES (?, ?, ?, 'Untitled', '', NULL, 0, ?, ?, NULL)`,
-    [id, folder, notebookId, now, now],
+       (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, sort_order, created_at, updated_at, synced_at)
+     VALUES (?, ?, ?, 'Untitled', '', NULL, 0, ?, ?, ?, NULL)`,
+    [id, folder, notebookId, sortOrder, now, now],
   );
   const inserted = await db.getFirstAsync<{ rowid: number }>(
     'SELECT rowid FROM notes WHERE id = ?',
@@ -67,7 +82,7 @@ export async function createNote(
     drawingAssetId: null,
     canvasJson: null,
     isDirty: 0,
-    sortOrder: 0,
+    sortOrder,
     createdAt: now,
     updatedAt: now,
     syncedAt: null,

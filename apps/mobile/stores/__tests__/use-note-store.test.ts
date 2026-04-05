@@ -236,7 +236,6 @@ describe('reorderNotes', () => {
   });
 });
 
-
 // ---------------------------------------------------------------------------
 // deleteIfEmpty — auto-delete empty notes on navigate-away
 // ---------------------------------------------------------------------------
@@ -328,5 +327,67 @@ describe('deleteIfEmpty', () => {
     useNoteStore.setState({ notes: [note] });
     const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-7');
     expect(deleted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createNewNote — regression pin for "odd behavior when creating a new note"
+//
+// Bug that was fixed (fix/new-note-ux): createNewNote unconditionally
+// prepended the newly created note to the in-memory `notes` array regardless
+// of whether it belonged to the currently viewed folder. Clicking the
+// "+ New Note" button on folder B while folder A was active would leave a
+// stray folder-B note in folder A's list and silently jump the editor.
+//
+// The fix makes createNewNote switch the active folder context to the target
+// folder and reload that folder's notes before setting the new note active,
+// so sidebar selection, note list, and editor all stay in sync.
+// ---------------------------------------------------------------------------
+
+describe('createNewNote', () => {
+  beforeEach(async () => {
+    useNoteStore.setState({ notes: [], activeNoteId: null });
+    const db = await import('@graphite/db');
+    const mockCreate = db.createNote as unknown as ReturnType<typeof vi.fn>;
+    mockCreate.mockReset();
+  });
+
+  it('does not pollute the active folder list when creating a note for a different folder', async () => {
+    // Arrange: user is currently viewing folder A; its notes are loaded.
+    const folderANote: Note = {
+      ...note1,
+      id: 'note-in-A',
+      folderId: 'folder-A',
+    };
+    useNoteStore.setState({ notes: [folderANote], activeNoteId: 'note-in-A' });
+
+    // The user clicks the "+ New Note" button on folder B in the sidebar.
+    // createNote (DB op) returns a note whose folderId is folder-B.
+    const db = await import('@graphite/db');
+    const mockCreate = db.createNote as unknown as ReturnType<typeof vi.fn>;
+    mockCreate.mockResolvedValue({
+      id: 'note-in-B',
+      folderId: 'folder-B',
+      notebookId: 'nb-1',
+      title: 'Untitled',
+      body: '',
+      drawingAssetId: null,
+      canvasJson: null,
+      isDirty: 0,
+      sortOrder: 0,
+      createdAt: 1700000100000,
+      updatedAt: 1700000100000,
+      syncedAt: null,
+    } as Note);
+
+    // Act: create the new note for folder B while folder A is still active.
+    await useNoteStore.getState().createNewNote(fakeDb, 'nb-1', 'folder-B');
+
+    // Assert: the folder-A note list must not contain a note whose folderId
+    // is something other than folder-A. The bug under test causes the new
+    // folder-B note to be prepended into the folder-A list.
+    const { notes } = useNoteStore.getState();
+    const strayNotes = notes.filter((n) => n.folderId !== 'folder-A');
+    expect(strayNotes).toEqual([]);
   });
 });
