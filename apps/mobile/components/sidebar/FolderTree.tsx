@@ -149,40 +149,62 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     );
   }
 
+  function handleDeleteNote(noteId: string, noteTitle: string) {
+    webConfirmDelete(
+      `Delete "${noteTitle || 'Untitled'}"? This cannot be undone.`,
+      async () => {
+        try {
+          const db = getDatabase();
+          await useNoteStore.getState().deleteNote(db, noteId);
+        } catch (_) {}
+      },
+    );
+  }
+
   function renderNote({ item: note }: { item: Note }) {
     const isActiveNote = note.id === activeNoteId;
     return (
-      <Pressable
-        onPress={() => setActiveNote(note.id)}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingLeft: isActiveNote ? 46 : 48,
-          paddingRight: 14,
-          paddingVertical: 6,
-          borderLeftWidth: isActiveNote ? 2 : 0,
-          borderLeftColor: tokens.accent,
-          backgroundColor: isActiveNote ? '#2A2A2A' : 'transparent',
-        }}
-      >
-        <MaterialCommunityIcons
-          name="file-document-outline"
-          size={15}
-          color={isActiveNote ? tokens.accentLight : tokens.textMuted}
-          style={{ marginRight: 7 }}
-        />
-        <Text
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Pressable
+          onPress={() => setActiveNote(note.id)}
           style={{
-            fontSize: 12,
-            color: isActiveNote ? tokens.accentLight : tokens.textMuted,
-            fontWeight: isActiveNote ? '500' : '400',
             flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingLeft: isActiveNote ? 46 : 48,
+            paddingRight: 8,
+            paddingVertical: 6,
+            borderLeftWidth: isActiveNote ? 2 : 0,
+            borderLeftColor: tokens.accent,
+            backgroundColor: isActiveNote ? '#2A2A2A' : 'transparent',
           }}
-          numberOfLines={1}
         >
-          {note.title || 'Untitled'}
-        </Text>
-      </Pressable>
+          <MaterialCommunityIcons
+            name="file-document-outline"
+            size={15}
+            color={isActiveNote ? tokens.accentLight : tokens.textMuted}
+            style={{ marginRight: 7 }}
+          />
+          <Text
+            style={{
+              fontSize: 12,
+              color: isActiveNote ? tokens.accentLight : tokens.textMuted,
+              fontWeight: isActiveNote ? '500' : '400',
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
+            {note.title || 'Untitled'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => handleDeleteNote(note.id, note.title)}
+          hitSlop={10}
+          style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+        >
+          <Text style={{ fontSize: 16, color: tokens.textHint, lineHeight: 20 }}>×</Text>
+        </Pressable>
+      </View>
     );
   }
 
