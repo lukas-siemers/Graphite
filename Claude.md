@@ -16,7 +16,7 @@ Graphite is a cross-platform markdown note-taking app inspired by Obsidian. It t
 |---|---|
 | Mobile | React Native + Expo SDK 54 |
 | Desktop | Electron + Expo for Web |
-| Editor | Markdown-based, CodeMirror 6 via WebView |
+| Editor | CodeMirror 6 (unified) — iframe on web/Electron, `react-native-webview` on mobile; shared `editorHtml.ts` |
 | Drawing | react-native-skia (iPad), tldraw (desktop) |
 | Local DB | expo-sqlite (mobile), better-sqlite3 (desktop) |
 | Backend | Supabase (Postgres, Realtime, Storage, Auth) |
@@ -36,12 +36,15 @@ Graphite/
 │   └── desktop/       # Electron wrapper
 ├── packages/
 │   ├── ui/            # Shared React Native components
-│   ├── editor/        # Markdown editor
-│   ├── sync/          # Supabase sync engine
-│   └── db/            # SQLite schema + migrations
+│   ├── editor/        # CodeMirror 6 editor (shared editorHtml.ts, Canvas*, LivePreviewInput.*)
+│   │   └── src/live-preview/  # shared CM6 iframe bundle + applyFormat tests
+│   ├── sync/          # Supabase sync engine (Phase 2)
+│   └── db/            # SQLite schema + migrations + operations
 ├── supabase/
 │   ├── migrations/
 │   └── functions/
+├── docs/
+│   └── specs/         # Design specs (e.g. code-block.md)
 ├── CLAUDE.md
 └── package.json
 ```
@@ -78,7 +81,8 @@ CREATE TABLE notebooks (
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  synced_at INTEGER
+  synced_at INTEGER,
+  sort_order INTEGER DEFAULT 0       -- migration 6
 );
 
 CREATE TABLE folders (
@@ -87,7 +91,8 @@ CREATE TABLE folders (
   parent_id TEXT REFERENCES folders(id),
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  sort_order INTEGER DEFAULT 0       -- migration 6
 );
 
 CREATE TABLE notes (
@@ -95,15 +100,17 @@ CREATE TABLE notes (
   folder_id TEXT REFERENCES folders(id),
   notebook_id TEXT NOT NULL REFERENCES notebooks(id),
   title TEXT NOT NULL DEFAULT 'Untitled',
-  body TEXT NOT NULL DEFAULT '',
-  drawing_asset_id TEXT,
+  body TEXT NOT NULL DEFAULT '',     -- legacy, still written (dual-write)
+  drawing_asset_id TEXT,             -- legacy, still present
+  canvas_json TEXT,                  -- migration 5 — v1.5 canvas model source of truth
   is_dirty INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  synced_at INTEGER
+  synced_at INTEGER,
+  sort_order INTEGER DEFAULT 0       -- migration 7
 );
 
--- Full-text search virtual table
+-- Full-text search virtual table (manually maintained — NO triggers)
 CREATE VIRTUAL TABLE notes_fts USING fts5(
   title,
   body,
@@ -112,7 +119,9 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
 );
 ```
 
-All IDs use nanoid. All timestamps are Unix ms integers.
+Migrations live in `packages/db/src/schema.ts` (`ALL_MIGRATIONS`). Current migration count: 8. All IDs use nanoid. All timestamps are Unix ms integers.
+
+**FTS5 maintenance rule.** The `notes_fts` index is maintained *manually* inside `updateNote()` / `deleteNote()` — there are no SQLite triggers. Any new write path that touches `notes.title` or `notes.body` MUST emit the matching `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ...)` + re-insert pair, or search will silently drift / return orphaned rows. When `canvas_json` is present, `updateNote()` extracts `$.textContent.body` via `json_extract` and concatenates it into the FTS `body` column so canvas prose is searchable.
 
 ---
 
@@ -137,6 +146,8 @@ Sync is the paywall. Supabase client is never initialized for free users.
 ---
 
 ## Target Product Vision
+
+> **Status (2026-04-05):** The v1.5 canvas-first model is still the committed direction, but implementation has been paused while the text-editing foundation is polished. Recent work (editor unification on CodeMirror 6, fence live preview, delete ops) is all in the text/content layer. The ink layer, free positioning, and canvas coordinate space are **not yet built**; `canvas_json` exists at the DB level (dual-write) but the editor still reads and writes legacy `body`. Pick this back up before Phase 2 sync starts.
 
 ### Finalized product decisions (v1.5 canvas model)
 
@@ -197,10 +208,14 @@ Large assets (images, future) are stored as separate asset files and referenced 
 
 **Markdown is no longer the primary format.** The canvas document is the source of truth. Markdown export remains a planned feature in Phase 4.
 
-**Migration path (v1.5):**
-1. Add `canvas_json TEXT` column (nullable) alongside existing `body` and `drawing_asset_id`
-2. On first open of a legacy note, convert `body` text → a single positioned text object at the canvas origin; preserve `drawing_asset_id` strokes in the ink layer
-3. After full migration, drop `body` and `drawing_asset_id` in a later migration
+**Migration path (v1.5) — current status:**
+1. [x] `canvas_json TEXT` column added (migration 5) alongside existing `body` and `drawing_asset_id`
+2. [~] Dual-write phase: editor currently writes to both `body` and `canvas_json`. Legacy `body` is still the primary read path for the text editing UI; `canvas_json` is populated so the sync engine (Phase 2) and future canvas renderer have the v1.5 shape available.
+3. [ ] Backfill: convert every legacy row's `body` → single positioned text object in `canvas_json`. Not yet run.
+4. [ ] Cutover: switch editor read path to `canvas_json` as source of truth.
+5. [ ] Drop `body` and `drawing_asset_id` in a later migration.
+
+Until step 4 lands, **do not treat `canvas_json` as the sole source of truth in code**. Writes must stay dual until the cutover or the FTS index and existing UI will break.
 
 **Why this matters for sync:** ink layer changes and content layer changes are independent deltas within `canvas_json`. The sync engine (Phase 2) is built on this model — do not build sync against the old `body` + `drawing_asset_id` schema.
 
@@ -241,9 +256,9 @@ Implement the canvas-first data model and `canvas_json` migration before Phase 2
   - [x] Note cards with title, preview, timestamp
   - [x] Active card left-border accent
   - [x] Sort: last edited
-  - [ ] Delete note — swipe or long-press to delete, confirmation prompt
-  - [ ] Delete folder — long-press in sidebar, only allowed when folder is empty or with confirmation to also delete contents
-  - [ ] Delete notebook — long-press in sidebar, confirmation required, deletes all contained notes and folders
+  - [x] Delete note — swipe-left + long-press with Alert confirm (fixes FTS5 orphan bug in `deleteNote`)
+  - [x] Delete folder — long-press in sidebar, cascade confirm (subtree walker fix)
+  - [x] Delete notebook — long-press in sidebar, cascade confirm (cross-notebook store wipe fix)
   - [ ] New note UX — investigate and fix odd behavior when creating a new note (reported by user)
 - [x] Markdown editor component:
   - [x] Title input (28px, no border)
@@ -282,16 +297,23 @@ Implement the canvas-first data model and `canvas_json` migration before Phase 2
 - 12 Vitest unit tests for `applyFormat` code-block parity + source drift guard.
 - Removed the pencil/eye preview-mode toggle (dead UI, no review mode use case). Dropped `react-native-markdown-display` dependency.
 
-**In flight — feat/fence-copy-button** (not yet merged)
-- COPY button per fence, rendered as a plain DOM overlay inside the iframe (no CodeMirror widgets). Positioned just outside the right edge of the fence box. Hides when cursor is inside the fence.
+**2026-04-05 — Fence COPY button** (merged to main as `38f0171`)
+- COPY button per fence, rendered as a plain DOM overlay inside the iframe (no CodeMirror widgets). Positioned just outside the right edge of the fence box (`4ab516f`, `ab7b507`, `70ccd84`).
+
+**2026-04-05 — Toggle-off code block** (merged to main as `5a2a1ab`)
+- Cursor inside an existing fence + code-block toolbar command now unwraps the fence instead of nesting a new one (`ca9c724`).
+
+**2026-04-05 — Delete note** (merged to main as `c01f20e`)
+- Swipe-left and long-press deletion with `Alert` confirmation in the note list (`ffe6c69`). Fixed a pre-existing FTS5 orphan bug in `deleteNote` — rows were leaving the index dirty because the manual `'delete'` command was never emitted.
+
+**2026-04-05 — Delete folder + notebook** (merged to main as `f812773`)
+- Long-press cascade delete in the sidebar (`a75015a`). Fixed two pre-existing bugs: subtree walking for nested folders, and a cross-notebook store wipe where the note list for an unrelated notebook was being cleared on delete.
+
+Current test totals (2026-04-05): editor 24/24, db 44/44.
 
 ### Still open in Phase 1
-- [ ] Delete note — swipe or long-press to delete, confirmation prompt
-- [ ] Delete folder — long-press in sidebar, empty or cascade confirm
-- [ ] Delete notebook — long-press, cascade confirm
 - [ ] New note UX — investigate and fix odd creation behavior
 - [ ] Auto-delete empty notes — silent delete on navigate-away (Phase 4 item, bumped up)
-- [ ] Toggle-off code-block — cursor inside existing fence + code-block command → unwrap
 - [ ] iPad layout redesign pass (deferred, Designer-owned)
 - [ ] iOS `pod install` + Apple Pencil pass-through smoke (pre-TestFlight gate, needs Mac — no `ios/` directory in repo yet)
 - [ ] TestFlight build + App Store submission
@@ -331,6 +353,7 @@ Implement the canvas-first data model and `canvas_json` migration before Phase 2
 - Free users never touch any network call related to sync
 - Always re-verify subscription with StoreKit on launch — never trust cache alone
 - Realtime channel scoped to `user_id`, not per-note (prevents channel explosion)
+- **Canvas-first cutover gate:** the `canvas_json` migration (see "Storage model" above) MUST land and ship before any sync code is written. Sync engine is designed against `canvas_json` only — no dual-write path against legacy `body` / `drawing_asset_id`. If the canvas cutover slips, Phase 2 slips with it.
 
 ---
 
@@ -412,6 +435,47 @@ Dev mode is working: Metro bundles the Expo app and Electron loads it via `http:
 
 ---
 
+## Engineering playbook
+
+### Testing strategy
+
+- **Unit (Vitest):** pure logic only — `applyFormat`, markdown transforms, DB operations against an in-memory better-sqlite3, sync delta computation. Runs on every PR via `yarn test` at repo root. Target: fast (<5s), no filesystem, no network.
+- **Integration (Vitest + better-sqlite3):** DB migrations, FTS5 rebuild, multi-operation flows (create-edit-delete). Lives in `packages/db/src/__tests__`.
+- **Editor parity (Vitest):** `packages/editor/src/live-preview/__tests__` guards the shared `editorHtml.ts` — both the iframe (web) and WebView (native) runtimes share one source of truth, and drift is a test failure.
+- **E2E (Detox):** reserved for Phase 1 close-out. Smoke path: create notebook → create folder → create note → type → draw → delete. Not yet wired; do not block feature work on it.
+- **Manual QA gate:** every PR needs the native-config audit from `feedback_qa_native_awareness` in MEMORY. No exceptions.
+- **Coverage targets:** editor and db packages must stay green on every merge. Current baseline: editor 24/24, db 44/44 (2026-04-05).
+
+### FTS5 maintenance checklist
+
+The `notes_fts` virtual table is content-linked to `notes` via `content='notes'` + `content_rowid='rowid'`. It does NOT auto-update. Any code touching `notes` must also update FTS5:
+
+- **Insert note:** `INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)` after the row insert.
+- **Update note:** emit `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', rowid, old_title, old_body)` then insert the new values. The `'delete'` command is mandatory — skipping it leaves orphan rows in the index (see the `deleteNote` bug fixed in commit `ffe6c69`).
+- **Delete note:** emit the same `'delete'` command before `DELETE FROM notes`.
+- **Bulk rebuild:** `INSERT INTO notes_fts(notes_fts) VALUES('rebuild')` — used by migrations only.
+- All FTS5 writes happen inside the same transaction as the underlying `notes` write. Never split them.
+- Tests for every note operation must assert the FTS row count matches the note count after the op.
+
+### Editor architecture
+
+- **Single source of truth:** `packages/editor/src/live-preview/editorHtml.ts` is the CodeMirror 6 bundle HTML. It is loaded by the web iframe and the native `react-native-webview` — they share one runtime. Never fork the bundle.
+- **Markdown mode:** we use CodeMirror's built-in `@codemirror/lang-markdown` + 23 statically-imported language packs for code-fence highlighting. No custom tokenizer.
+- **Line decorations only:** fence edit/render toggling uses pure line decorations. Block widgets caused cursor-jump bugs and are banned in this codebase (see commit `3455e9f`).
+- **applyFormat:** all toolbar commands (`bold`, `italic`, `code`, `h1`, `link`) go through a single `applyFormat(cmd, state)` function. New commands must ship with a Vitest parity test.
+- **Fence width cache:** per-block fence width is measured via `requestMeasure` + DOM Range and cached per fence id. Do not recompute on every keystroke — that caused the Enter-key flicker (commit `720976e`).
+- **No preview mode:** the pencil/eye preview toggle is removed. Graphite is edit-only; live preview renders inline.
+
+### Branch hygiene
+
+- One branch per logical change. Branch off `main`, never stack.
+- Name: `feat/<kebab-desc>` for features, `fix/<kebab-desc>` for bug fixes, `chore/<kebab-desc>` for tooling/docs, `refactor/<kebab-desc>` for pure refactors.
+- Rebase, don't merge, when pulling `main` into a feature branch mid-work. Merge commits only appear at the final `main` integration.
+- Delete local feature branches after merge. Keep `git branch` short.
+- Never commit directly to `main`. The merge gate lives there — see Conventions below.
+
+---
+
 ## Conventions
 
 - Files: `kebab-case`
@@ -420,8 +484,9 @@ Dev mode is working: Metro bundles the Expo app and Electron loads it via `http:
 - DB columns: `snake_case`
 - Supabase tables: plural `snake_case` (`notes`, `notebooks`, `folders`)
 - Commits: Conventional Commits — `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
-- Branches: `feat/name` or `fix/name` branched off `dev`
-- `dev` → `main` only for release builds
+- Branches: `feat/name` or `fix/name` branched off **`main`**. There is no `dev` branch. `main` is the integration branch.
+- Merge gate: every feature/fix branch must pass QA (including the native-config audit in MEMORY) before merging to `main`. Never commit directly to `main`.
+- Release tags are cut from `main` directly — there is no staging branch.
 
 ---
 
@@ -446,3 +511,6 @@ Never commit secrets. Use `.env.local` (already in `.gitignore`).
 - expo-iap (StoreKit 2): https://github.com/dooboolab-community/expo-iap
 - better-sqlite3: https://github.com/WiseLibs/better-sqlite3
 - tldraw: https://tldraw.dev
+- CodeMirror 6 reference manual: https://codemirror.net/docs/ref/
+- CodeMirror 6 system guide: https://codemirror.net/docs/guide/
+- react-native-webview: https://github.com/react-native-webview/react-native-webview
