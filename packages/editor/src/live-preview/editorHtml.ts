@@ -81,9 +81,15 @@ export function buildEditorHtml(): string {
   .cm-placeholder { color: #8A8F98 !important; font-style: italic; }
 
   /* ── Fenced code block live preview ── */
-  /* Idle state — the "finished" look. Clean, developer-tool aesthetic. */
+  /* Idle state — the "finished" look. Clean, developer-tool aesthetic.
+     Background matches bgSidebar (#252525). Width is driven at runtime by
+     the fenceStylePlugin: it measures each line's scrollWidth in a
+     requestMeasure pass and sets min-width on every line of a fence to
+     the max of its siblings, producing one rectangular block whose right
+     edge matches the widest line. white-space:pre keeps long lines from
+     wrapping — they overflow horizontally up to the max-width cap. */
   .cm-fence-line {
-    background: #141414;
+    background: #252525;
     font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
     font-size: 13.5px;
     line-height: 20px;
@@ -91,6 +97,8 @@ export function buildEditorHtml(): string {
     padding-right: 16px !important;
     border-left: 1px solid #333;
     border-right: 1px solid #333;
+    max-width: 100%;
+    white-space: pre;
   }
   /* Body-line top/bottom borders — these sit on the first and last actual
      code content lines (NOT the fence marker lines), because in idle state
@@ -127,12 +135,13 @@ export function buildEditorHtml(): string {
     border-bottom-width: 0 !important;
   }
 
-  /* Editing state — the "raw markdown" look. Slightly brighter background
-     to signal edit mode, fence markers at normal font size. Selectors match
-     the specificity of the idle rules above (.cm-fence-line.cm-fence-first)
-     so they reliably override them when .cm-fence-editing is present. */
+  /* Editing state — the "raw markdown" look. One step brighter than idle
+     (bgHover #2C2C2C vs bgSidebar #252525) to signal edit mode, fence
+     markers at normal font size. Selectors match the specificity of the
+     idle rules above (.cm-fence-line.cm-fence-first) so they reliably
+     override them when .cm-fence-editing is present. */
   .cm-fence-line.cm-fence-editing {
-    background: #1A1A1A;
+    background: #2C2C2C;
   }
   .cm-fence-line.cm-fence-first.cm-fence-editing,
   .cm-fence-line.cm-fence-last.cm-fence-editing {
@@ -531,6 +540,10 @@ function reportHeight() {
 
 function buildFenceDecorations(view) {
   const ranges = [];
+  // Signature captures fence identity + line ranges only (NOT the editing
+  // flag). That way selection-only updates — which flip cm-fence-editing but
+  // don't change geometry — don't force a re-measure.
+  const sigParts = [];
   const head = view.state.selection.main.head;
   const tree = syntaxTree(view.state);
 
@@ -543,6 +556,10 @@ function buildFenceDecorations(view) {
         const editing = head >= node.from && head <= node.to;
         const startLine = view.state.doc.lineAt(node.from).number;
         const endLine = view.state.doc.lineAt(node.to).number;
+        // Fence id = opener line number. Stable within a single build and
+        // sufficient to group sibling .cm-fence-line elements in the DOM.
+        const fenceId = String(startLine);
+        sigParts.push(startLine + ':' + endLine);
         // Body lines are the lines strictly between the opener and closer.
         // We tag the first and last body lines specifically so CSS can paint
         // the top/bottom borders there — in idle state the marker lines
@@ -558,24 +575,89 @@ function buildFenceDecorations(view) {
           if (ln === bodyLast && bodyFirst <= bodyLast) classes.push('cm-fence-body-last');
           if (editing) classes.push('cm-fence-editing');
           ranges.push(
-            Decoration.line({ attributes: { class: classes.join(' ') } }).range(line.from)
+            Decoration.line({
+              attributes: {
+                class: classes.join(' '),
+                'data-fence-id': fenceId,
+              },
+            }).range(line.from)
           );
         }
       },
     });
   }
-  return Decoration.set(ranges, true);
+  return {
+    decorations: Decoration.set(ranges, true),
+    signature: sigParts.join('|'),
+  };
 }
 
 const fenceStylePlugin = ViewPlugin.fromClass(
   class {
     constructor(view) {
-      this.decorations = buildFenceDecorations(view);
+      const built = buildFenceDecorations(view);
+      this.decorations = built.decorations;
+      this.signature = built.signature;
+      this.lastMeasuredSignature = '';
+      this.scheduleMeasure(view);
     }
     update(update) {
       if (update.docChanged || update.selectionSet || update.viewportChanged) {
-        this.decorations = buildFenceDecorations(update.view);
+        const built = buildFenceDecorations(update.view);
+        this.decorations = built.decorations;
+        this.signature = built.signature;
       }
+      // Gate measurement on geometry-affecting updates only. Pure
+      // selectionSet flips cm-fence-editing (background only) and must NOT
+      // trigger a measurement pass — that would thrash on every arrow key.
+      // docChanged can change a line's content width; viewportChanged can
+      // bring new fence lines into the DOM. Both warrant re-measuring.
+      // Also re-measure if the signature ever drifts from what we last
+      // wrote (covers the very first update after construction).
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        this.signature !== this.lastMeasuredSignature
+      ) {
+        this.scheduleMeasure(update.view);
+      }
+    }
+    scheduleMeasure(view) {
+      const signatureAtSchedule = this.signature;
+      view.requestMeasure({
+        read: () => {
+          // Group fence-line elements by data-fence-id and record the max
+          // scrollWidth per group. scrollWidth ignores the element's own
+          // min-width, so leftover min-width from a previous pass does not
+          // skew the measurement upward — but to be safe against future
+          // changes, we clear inline min-width before reading.
+          const nodes = view.dom.querySelectorAll(
+            '.cm-fence-line[data-fence-id]'
+          );
+          const byId = new Map();
+          for (const el of nodes) {
+            // Clear previous min-width so we measure natural content width.
+            el.style.minWidth = '';
+          }
+          for (const el of nodes) {
+            const id = el.getAttribute('data-fence-id');
+            const w = el.scrollWidth;
+            const prev = byId.get(id) || 0;
+            if (w > prev) byId.set(id, w);
+          }
+          return { byId, nodes };
+        },
+        write: ({ byId, nodes }) => {
+          for (const el of nodes) {
+            const id = el.getAttribute('data-fence-id');
+            const max = byId.get(id);
+            if (max && max > 0) {
+              el.style.minWidth = max + 'px';
+            }
+          }
+          this.lastMeasuredSignature = signatureAtSchedule;
+        },
+      });
     }
   },
   {
