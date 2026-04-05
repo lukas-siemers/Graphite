@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { View, Text, Pressable, TextInput, Image, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, updateNotebook } from '@graphite/db';
+import { getDatabase, updateNotebook, countNotebookContents } from '@graphite/db';
 import type { Notebook } from '@graphite/db';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
@@ -10,14 +10,19 @@ import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
-function webConfirmDelete(message: string, onConfirm: () => void) {
+function webConfirmDelete(
+  title: string,
+  message: string,
+  confirmLabel: string,
+  onConfirm: () => void,
+) {
   if (Platform.OS === 'web') {
     // eslint-disable-next-line no-restricted-globals
-    if (confirm(message)) onConfirm();
+    if (confirm(`${title}\n\n${message}`)) onConfirm();
   } else {
-    Alert.alert('Delete', message, [
+    Alert.alert(title, message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+      { text: confirmLabel, style: 'destructive', onPress: onConfirm },
     ]);
   }
 }
@@ -114,20 +119,36 @@ export default function Sidebar() {
     } catch (_) {}
   }
 
-  function handleDeleteNotebook(notebookId: string, notebookName: string) {
-    webConfirmDelete(
-      `Delete "${notebookName}" and all its contents? This cannot be undone.`,
-      async () => {
+  async function handleDeleteNotebook(notebookId: string, notebookName: string) {
+    try {
+      const db = getDatabase();
+      const { folderCount, noteCount } = await countNotebookContents(db, notebookId);
+      const message =
+        folderCount === 0 && noteCount === 0
+          ? `"${notebookName}" is empty. Delete it?`
+          : `This will delete ${folderCount} folder${folderCount === 1 ? '' : 's'} and ${noteCount} note${noteCount === 1 ? '' : 's'}. This cannot be undone.`;
+      webConfirmDelete('Delete notebook?', message, 'Delete All', async () => {
         try {
-          const db = getDatabase();
-          await useNotebookStore.getState().deleteNotebook(db, notebookId);
-          useFolderStore.getState().setFolders([]);
-          useFolderStore.getState().setActiveFolder(null);
-          useNoteStore.getState().setNotes([]);
-          useNoteStore.getState().setActiveNote(null);
+          const { deletedFolderIds, deletedNoteIds } = await useNotebookStore
+            .getState()
+            .deleteNotebook(db, notebookId);
+          // Drop every folder from the deleted notebook from the folder store.
+          const folderIdSet = new Set(deletedFolderIds);
+          useFolderStore.setState((s) => ({
+            folders: s.folders.filter((f) => !folderIdSet.has(f.id) && f.notebookId !== notebookId),
+            activeFolderId:
+              s.activeFolderId && folderIdSet.has(s.activeFolderId) ? null : s.activeFolderId,
+          }));
+          // Drop every deleted note from the note store; clear editor if active.
+          const noteIdSet = new Set(deletedNoteIds);
+          const currentActive = useNoteStore.getState().activeNoteId;
+          useNoteStore.setState((s) => ({
+            notes: s.notes.filter((n) => !noteIdSet.has(n.id) && n.notebookId !== notebookId),
+            activeNoteId: currentActive && noteIdSet.has(currentActive) ? null : currentActive,
+          }));
         } catch (_) {}
-      },
-    );
+      });
+    } catch (_) {}
   }
 
   function renderNotebook({ item: notebook }: { item: Notebook }) {
@@ -141,6 +162,8 @@ export default function Sidebar() {
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Pressable
             onPress={() => handleNotebookPress(notebook.id, notebook.name)}
+            onLongPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
+            delayLongPress={500}
             style={{
               flex: 1,
               flexDirection: 'row',

@@ -87,10 +87,80 @@ export async function updateFolderSortOrder(
   await db.runAsync('UPDATE folders SET sort_order = ? WHERE id = ?', [sortOrder, id]);
 }
 
+/**
+ * Recursively collect the given folder's id and the ids of all descendant
+ * (child / grandchild / ...) folders via parent_id chains within a notebook.
+ */
+async function collectFolderSubtree(
+  db: SQLiteDatabase,
+  rootId: string,
+): Promise<string[]> {
+  const all: string[] = [rootId];
+  let frontier: string[] = [rootId];
+  while (frontier.length > 0) {
+    const placeholders = frontier.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{ id: string }>(
+      `SELECT id FROM folders WHERE parent_id IN (${placeholders})`,
+      frontier,
+    );
+    const next = rows.map((r: { id: string }) => r.id);
+    all.push(...next);
+    frontier = next;
+  }
+  return all;
+}
+
+/**
+ * Count the number of direct+descendant notes and descendant subfolders for
+ * a given folder. Used to drive count-aware delete confirmation dialogs.
+ */
+export async function countFolderContents(
+  db: SQLiteDatabase,
+  folderId: string,
+): Promise<{ folderCount: number; noteCount: number }> {
+  const subtree = await collectFolderSubtree(db, folderId);
+  const descendantFolderCount = subtree.length - 1; // exclude the root folder itself
+  const placeholders = subtree.map(() => '?').join(',');
+  const row = await db.getFirstAsync<{ c: number }>(
+    `SELECT COUNT(*) as c FROM notes WHERE folder_id IN (${placeholders})`,
+    subtree,
+  );
+  return {
+    folderCount: descendantFolderCount,
+    noteCount: row?.c ?? 0,
+  };
+}
+
+/**
+ * Cascade-delete a folder, all its descendant subfolders, and every note
+ * inside any of them — in a single transaction. Returns the ids that were
+ * removed so callers can update in-memory stores without reloading.
+ */
 export async function deleteFolder(
   db: SQLiteDatabase,
   id: string,
-): Promise<void> {
-  await db.runAsync('DELETE FROM notes WHERE folder_id = ?', [id]);
-  await db.runAsync('DELETE FROM folders WHERE id = ?', [id]);
+): Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }> {
+  const deletedFolderIds = await collectFolderSubtree(db, id);
+  const placeholders = deletedFolderIds.map(() => '?').join(',');
+  const noteRows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM notes WHERE folder_id IN (${placeholders})`,
+    deletedFolderIds,
+  );
+  const deletedNoteIds = noteRows.map((r: { id: string }) => r.id);
+
+  await db.withTransactionAsync(async () => {
+    if (deletedNoteIds.length > 0) {
+      const noteHolders = deletedNoteIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM notes WHERE id IN (${noteHolders})`,
+        deletedNoteIds,
+      );
+    }
+    // Delete children before parents to satisfy FK constraints.
+    for (let i = deletedFolderIds.length - 1; i >= 0; i--) {
+      await db.runAsync('DELETE FROM folders WHERE id = ?', [deletedFolderIds[i]]);
+    }
+  });
+
+  return { deletedFolderIds, deletedNoteIds };
 }

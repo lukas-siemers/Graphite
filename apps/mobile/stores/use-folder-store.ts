@@ -23,7 +23,10 @@ interface FolderState {
     name: string,
     parentId?: string,
   ) => Promise<Folder>;
-  deleteFolder: (db: SQLiteDatabase, id: string) => Promise<void>;
+  deleteFolder: (
+    db: SQLiteDatabase,
+    id: string,
+  ) => Promise<{ deletedFolderIds: string[]; deletedNoteIds: string[] }>;
   moveFolderUp: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
   moveFolderDown: (db: SQLiteDatabase, id: string, notebookId: string) => Promise<void>;
   reorderFolders: (db: SQLiteDatabase, notebookId: string, orderedIds: string[]) => Promise<void>;
@@ -67,11 +70,16 @@ export const useFolderStore = create<FolderState>((set, get) => ({
   },
 
   deleteFolder: async (db: SQLiteDatabase, id: string) => {
-    await deleteFolder(db, id);
+    const { deletedFolderIds, deletedNoteIds } = await deleteFolder(db, id);
+    const folderIdSet = new Set(deletedFolderIds);
     set((state) => ({
-      folders: state.folders.filter((f) => f.id !== id),
-      activeFolderId: state.activeFolderId === id ? null : state.activeFolderId,
+      folders: state.folders.filter((f) => !folderIdSet.has(f.id)),
+      activeFolderId:
+        state.activeFolderId && folderIdSet.has(state.activeFolderId)
+          ? null
+          : state.activeFolderId,
     }));
+    return { deletedFolderIds, deletedNoteIds };
   },
 
   moveFolderUp: async (db: SQLiteDatabase, id: string, notebookId: string) => {

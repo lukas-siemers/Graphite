@@ -41,5 +41,17 @@ export function createExpoCompatibleDb(): any {
       const stmt = db.prepare(sql);
       return (stmt.get(...params) as T) ?? null;
     },
+    // better-sqlite3 transactions are synchronous, but we simulate the
+    // expo-sqlite async API here. On any thrown error we roll back.
+    withTransactionAsync: async (fn: () => Promise<void>) => {
+      db.exec('BEGIN');
+      try {
+        await fn();
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
   };
 }

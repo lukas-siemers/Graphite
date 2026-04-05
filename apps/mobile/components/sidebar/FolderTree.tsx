@@ -2,20 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, TextInput, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, updateFolder } from '@graphite/db';
+import { getDatabase, updateFolder, countFolderContents } from '@graphite/db';
 import type { Folder, Note } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
-function webConfirmDelete(message: string, onConfirm: () => void) {
+function webConfirmDelete(
+  title: string,
+  message: string,
+  confirmLabel: string,
+  onConfirm: () => void,
+) {
   if (Platform.OS === 'web') {
     // eslint-disable-next-line no-restricted-globals
-    if (confirm(message)) onConfirm();
+    if (confirm(`${title}\n\n${message}`)) onConfirm();
   } else {
-    Alert.alert('Delete', message, [
+    Alert.alert(title, message, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+      { text: confirmLabel, style: 'destructive', onPress: onConfirm },
     ]);
   }
 }
@@ -124,34 +129,45 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     } catch (_) {}
   }
 
-  function handleDeleteFolder(folderId: string, folderName: string) {
-    webConfirmDelete(
-      `Delete "${folderName}" and all its notes? This cannot be undone.`,
-      async () => {
+  async function handleDeleteFolder(folderId: string, folderName: string) {
+    try {
+      const db = getDatabase();
+      const { folderCount, noteCount } = await countFolderContents(db, folderId);
+      const total = folderCount + noteCount;
+      const message =
+        total === 0
+          ? `"${folderName}" is empty.`
+          : `This folder contains ${noteCount} note${noteCount === 1 ? '' : 's'}${
+              folderCount > 0
+                ? ` and ${folderCount} subfolder${folderCount === 1 ? '' : 's'}`
+                : ''
+            }. Delete folder and all contents?`;
+      const confirmLabel = total === 0 ? 'Delete' : 'Delete All';
+      webConfirmDelete('Delete folder?', message, confirmLabel, async () => {
         try {
-          const db = getDatabase();
-          await useFolderStore.getState().deleteFolder(db, folderId);
-          if (useFolderStore.getState().activeFolderId === folderId) {
-            useFolderStore.getState().setActiveFolder(null);
-          }
-          const noteStore = useNoteStore.getState();
-          const activeNoteInFolder = noteStore.notes.find(
-            (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
-          );
-          if (activeNoteInFolder) {
-            noteStore.setNotes([]);
-            noteStore.setActiveNote(null);
-          } else {
-            noteStore.setNotes(noteStore.notes.filter((n) => n.folderId !== folderId));
-          }
+          const { deletedFolderIds, deletedNoteIds } = await useFolderStore
+            .getState()
+            .deleteFolder(db, folderId);
+          const noteIdSet = new Set(deletedNoteIds);
+          const folderIdSet = new Set(deletedFolderIds);
+          const currentActiveNote = useNoteStore.getState().activeNoteId;
+          useNoteStore.setState((s) => ({
+            notes: s.notes.filter(
+              (n) => !noteIdSet.has(n.id) && !(n.folderId && folderIdSet.has(n.folderId)),
+            ),
+            activeNoteId:
+              currentActiveNote && noteIdSet.has(currentActiveNote) ? null : currentActiveNote,
+          }));
         } catch (_) {}
-      },
-    );
+      });
+    } catch (_) {}
   }
 
   function handleDeleteNote(noteId: string, noteTitle: string) {
     webConfirmDelete(
+      'Delete note?',
       `Delete "${noteTitle || 'Untitled'}"? This cannot be undone.`,
+      'Delete',
       async () => {
         try {
           const db = getDatabase();
@@ -229,6 +245,8 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Pressable
             onPress={() => handleFolderPress(folder.id, folder.name)}
+            onLongPress={() => handleDeleteFolder(folder.id, folder.name)}
+            delayLongPress={500}
             style={{
               flex: 1,
               flexDirection: 'row',
