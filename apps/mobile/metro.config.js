@@ -37,6 +37,7 @@ config.resolver.extraNodeModules = {
   'react-native-worklets-core':   path.join(stubDir, 'react-native-worklets-stub.js'),
   'expo-file-system':             path.join(stubDir, 'expo-file-system-stub.js'),
   'expo-file-system/legacy':      path.join(stubDir, 'expo-file-system-stub.js'),
+  'expo-sharing':                 path.join(stubDir, 'expo-sharing-stub.js'),
   'expo-sqlite':                  path.join(stubDir, 'expo-sqlite-stub.js'),
   'tldraw':                       path.join(stubDir, 'tldraw-stub.js'),
   'tldraw/tldraw.css':            path.join(stubDir, 'empty.js'),
