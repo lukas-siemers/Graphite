@@ -1,5 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, TextInput, Alert, Platform } from 'react-native';
+
+// On web, Alert.alert is unreliable — use window.confirm directly instead.
+function webConfirmDelete(message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line no-restricted-globals
+    if (confirm(message)) onConfirm();
+  } else {
+    Alert.alert('Delete', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+}
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -126,35 +139,27 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   }
 
   function handleDeleteFolder(folderId: string, folderName: string) {
-    Alert.alert(
-      'Delete Folder',
+    webConfirmDelete(
       `Delete "${folderName}" and all its notes? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const db = getDatabase();
-              await useFolderStore.getState().deleteFolder(db, folderId);
-              if (useFolderStore.getState().activeFolderId === folderId) {
-                useFolderStore.getState().setActiveFolder(null);
-              }
-              const noteStore = useNoteStore.getState();
-              const activeNoteInFolder = noteStore.notes.find(
-                (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
-              );
-              if (activeNoteInFolder) {
-                noteStore.setNotes([]);
-                noteStore.setActiveNote(null);
-              } else {
-                noteStore.setNotes(noteStore.notes.filter((n) => n.folderId !== folderId));
-              }
-            } catch (_) {}
-          },
-        },
-      ],
+      async () => {
+        try {
+          const db = getDatabase();
+          await useFolderStore.getState().deleteFolder(db, folderId);
+          if (useFolderStore.getState().activeFolderId === folderId) {
+            useFolderStore.getState().setActiveFolder(null);
+          }
+          const noteStore = useNoteStore.getState();
+          const activeNoteInFolder = noteStore.notes.find(
+            (n) => n.folderId === folderId && n.id === noteStore.activeNoteId,
+          );
+          if (activeNoteInFolder) {
+            noteStore.setNotes([]);
+            noteStore.setActiveNote(null);
+          } else {
+            noteStore.setNotes(noteStore.notes.filter((n) => n.folderId !== folderId));
+          }
+        } catch (_) {}
+      },
     );
   }
 

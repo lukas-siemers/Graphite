@@ -11,6 +11,19 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 
+// On web, Alert.alert is unreliable — use window.confirm directly instead.
+function webConfirmDelete(message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line no-restricted-globals
+    if (confirm(message)) onConfirm();
+  } else {
+    Alert.alert('Delete', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+}
+
 // Double-tap window. Long-press fires at 250ms (< this), cancels the pending
 // single-tap timer before drag starts — so expand/collapse never fires mid-drag.
 const DOUBLE_TAP_MS = 300;
@@ -113,26 +126,18 @@ export default function Sidebar() {
   }
 
   function handleDeleteNotebook(notebookId: string, notebookName: string) {
-    Alert.alert(
-      'Delete Notebook',
+    webConfirmDelete(
       `Delete "${notebookName}" and all its contents? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const db = getDatabase();
-              await useNotebookStore.getState().deleteNotebook(db, notebookId);
-              useFolderStore.getState().setFolders([]);
-              useFolderStore.getState().setActiveFolder(null);
-              useNoteStore.getState().setNotes([]);
-              useNoteStore.getState().setActiveNote(null);
-            } catch (_) {}
-          },
-        },
-      ],
+      async () => {
+        try {
+          const db = getDatabase();
+          await useNotebookStore.getState().deleteNotebook(db, notebookId);
+          useFolderStore.getState().setFolders([]);
+          useFolderStore.getState().setActiveFolder(null);
+          useNoteStore.getState().setNotes([]);
+          useNoteStore.getState().setActiveNote(null);
+        } catch (_) {}
+      },
     );
   }
 
