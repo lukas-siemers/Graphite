@@ -158,6 +158,56 @@ export function buildEditorHtml(): string {
     border-bottom: 1px solid #333 !important;
   }
 
+  /* ── Fence copy-button overlay ──
+     Plain DOM container appended to .cm-scroller. NOT a CodeMirror widget
+     and NOT part of CM's decoration/measurement system — this sidesteps
+     every cursor-jump and vanishing-character issue we had with the old
+     FenceHeaderWidget. The container is pointer-events:none so clicks
+     pass through to the code lines; only the buttons themselves are
+     clickable. Each button is absolutely positioned in scroller-local
+     coordinates (see scheduleOverlayMeasure in fenceStylePlugin). */
+  .cm-fence-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .cm-fence-copy-btn {
+    position: absolute;
+    pointer-events: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #FFB347;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 0;
+    padding: 4px 8px;
+    cursor: pointer;
+    user-select: none;
+    line-height: 12px;
+    z-index: 6;
+    transition: background 80ms ease, color 80ms ease;
+  }
+  .cm-fence-copy-btn:hover {
+    background: #2C2C2C;
+  }
+  .cm-fence-copy-btn:active {
+    background: #141414;
+  }
+  .cm-fence-copy-btn--copied {
+    color: #A8D060;
+    border-color: #A8D060;
+  }
+  .cm-fence-copy-btn--hidden {
+    display: none;
+  }
+
   /* ── Loading / error state ── */
   #status {
     position: fixed;
@@ -313,6 +363,28 @@ const graphiteHighlight = HighlightStyle.define([
 
 function post(msg) {
   window.parent.postMessage(msg, '*');
+}
+
+// Shared clipboard writer. Used by the copy-code-block command and by the
+// per-fence overlay COPY buttons. Promise-based with a textarea fallback
+// for environments where navigator.clipboard is unavailable.
+function writeClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error('execCommand copy failed'));
+    } catch (err) { reject(err); }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -508,25 +580,11 @@ function applyFormat(view, command) {
       bodyLines.push(doc.line(i).text);
     }
     const body = bodyLines.join('\\n');
-    const writeClipboard = (text) => {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
-      }
-      // Fallback: hidden textarea + execCommand('copy').
-      return new Promise((resolve, reject) => {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.opacity = '0';
-          document.body.appendChild(ta);
-          ta.select();
-          const ok = document.execCommand('copy');
-          document.body.removeChild(ta);
-          ok ? resolve() : reject(new Error('execCommand copy failed'));
-        } catch (err) { reject(err); }
-      });
-    };
+    // writeClipboard is a shared helper hoisted above applyFormat — used
+    // by both this command and the per-fence overlay COPY buttons. The
+    // drift-guard test asserts navigator.clipboard.writeText and
+    // document.execCommand('copy') are still referenced in this source
+    // file, which remains true via the helper.
     Promise.resolve(writeClipboard(body)).then(
       () => post({ type: 'command-applied' }),
       (err) => post({ type: 'error', message: 'Copy failed: ' + (err && err.message || err) })
@@ -612,6 +670,10 @@ function buildFenceDecorations(view, widthsById) {
   // flag). That way selection-only updates — which flip cm-fence-editing but
   // don't change geometry — don't force a re-measure.
   const sigParts = [];
+  // Per-fence metadata collected during the walk. The overlay button pass
+  // (see scheduleOverlayMeasure) consumes this to know which fences exist,
+  // what text they contain, and whether each is currently in editing state.
+  const fences = [];
   const head = view.state.selection.main.head;
   const tree = syntaxTree(view.state);
 
@@ -624,6 +686,21 @@ function buildFenceDecorations(view, widthsById) {
         const editing = head >= node.from && head <= node.to;
         const startLine = view.state.doc.lineAt(node.from).number;
         const endLine = view.state.doc.lineAt(node.to).number;
+        // Extract the body text (lines strictly between opener and closer)
+        // for the per-fence overlay COPY button. Cheap — just a slice of
+        // doc lines we already have a hot pointer to.
+        const bodyParts = [];
+        for (let ln = startLine + 1; ln <= endLine - 1; ln++) {
+          bodyParts.push(view.state.doc.line(ln).text);
+        }
+        fences.push({
+          id: String(startLine),
+          startLine,
+          endLine,
+          fromPos: node.from,
+          editing,
+          body: bodyParts.join('\\n'),
+        });
         // Fence id = opener line number. Stable within a single build and
         // sufficient to group sibling .cm-fence-line elements in the DOM.
         const fenceId = String(startLine);
@@ -665,6 +742,7 @@ function buildFenceDecorations(view, widthsById) {
   return {
     decorations: Decoration.set(ranges, true),
     signature: sigParts.join('|'),
+    fences,
   };
 }
 
@@ -675,17 +753,35 @@ const fenceStylePlugin = ViewPlugin.fromClass(
       // newly-created lines can be rendered at the correct width the
       // moment they enter the DOM, eliminating the Enter-key flicker.
       this.widthsById = new Map();
+      // Per-fence overlay state.
+      // buttonsById : Map<fenceId, HTMLButtonElement> for O(1) reuse
+      // bodiesById  : Map<fenceId, string> — latest body text (closure for click handler)
+      // overlay    : <div class="cm-fence-overlay"> appended to scrollDOM
+      this.buttonsById = new Map();
+      this.bodiesById = new Map();
+      this.overlay = document.createElement('div');
+      this.overlay.className = 'cm-fence-overlay';
+      view.scrollDOM.appendChild(this.overlay);
       const built = buildFenceDecorations(view, this.widthsById);
       this.decorations = built.decorations;
       this.signature = built.signature;
+      this.fences = built.fences;
       this.lastMeasuredSignature = '';
       this.scheduleMeasure(view);
+      this.scheduleOverlayMeasure(view);
     }
     update(update) {
       if (update.docChanged || update.selectionSet || update.viewportChanged) {
         const built = buildFenceDecorations(update.view, this.widthsById);
         this.decorations = built.decorations;
         this.signature = built.signature;
+        this.fences = built.fences;
+      }
+      // Overlay needs to react to geometry, content, AND selection changes
+      // (selection governs editing-state visibility of each button). It's
+      // cheap — no layout reads until inside requestMeasure.
+      if (update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged) {
+        this.scheduleOverlayMeasure(update.view);
       }
       // Gate measurement on geometry-affecting updates only. Pure
       // selectionSet flips cm-fence-editing (background only) and must NOT
@@ -783,6 +879,145 @@ const fenceStylePlugin = ViewPlugin.fromClass(
           void cacheChanged;
         },
       });
+    }
+
+    // ---------------------------------------------------------------------
+    // Per-fence COPY button overlay
+    //
+    // The overlay container is a plain <div> appended to view.scrollDOM
+    // ONCE in the constructor. It is NOT a CodeMirror widget, decoration,
+    // or replacement — CM has no knowledge of it. This is intentional:
+    // the previous FenceHeaderWidget (Decoration.widget({ block: true }))
+    // caused cursor jumps, measurement glitches, and vanishing characters
+    // because it participated in CM's line-height/layout system. Plain
+    // absolutely-positioned DOM elements inside the scroll container
+    // scroll naturally with content and don't perturb layout at all.
+    //
+    // Lifecycle:
+    //   - constructor: create overlay, schedule first measure
+    //   - update:      on any doc/selection/viewport/geometry change, walk
+    //                  this.fences (collected in buildFenceDecorations),
+    //                  reuse existing buttons by fenceId, create missing
+    //                  ones, remove stale ones.
+    //   - destroy:     remove overlay and all button children.
+    //
+    // Position math: view.coordsAtPos(fromPos) returns viewport-relative
+    // coords. To express them in scrollDOM-local coordinates (where the
+    // overlay lives) we subtract scrollDOM.getBoundingClientRect() and
+    // add scrollDOM.scrollTop/scrollLeft. The X position uses the cached
+    // fence width (this.widthsById) so the button pins to the RIGHT edge
+    // of the fence box, not the right edge of the scroll container.
+    // ---------------------------------------------------------------------
+    scheduleOverlayMeasure(view) {
+      view.requestMeasure({
+        read: () => {
+          const fences = this.fences || [];
+          const scrollRect = view.scrollDOM.getBoundingClientRect();
+          const scrollTop = view.scrollDOM.scrollTop;
+          const scrollLeft = view.scrollDOM.scrollLeft;
+          // Find the left edge of .cm-content so the button's x anchor
+          // tracks actual text, not the scroll container (which may have
+          // gutters or padding).
+          const contentEl = view.contentDOM;
+          const contentRect = contentEl.getBoundingClientRect();
+          const contentLeft = contentRect.left - scrollRect.left + scrollLeft;
+          const positions = [];
+          for (const f of fences) {
+            let coords = null;
+            try {
+              coords = view.coordsAtPos(f.fromPos);
+            } catch (_) { coords = null; }
+            if (!coords) continue;
+            const topInScroller = coords.top - scrollRect.top + scrollTop;
+            const width = this.widthsById.get(f.id) || 0;
+            positions.push({
+              id: f.id,
+              top: topInScroller,
+              fenceWidth: width,
+              contentLeft,
+              editing: f.editing,
+              body: f.body,
+            });
+          }
+          return { positions };
+        },
+        write: ({ positions }) => {
+          const BUTTON_WIDTH = 56; // approximate rendered width of "COPY"
+          const BUTTON_MARGIN = 6;
+          const TOP_INSET = 4;
+          const seen = new Set();
+          for (const p of positions) {
+            seen.add(p.id);
+            let btn = this.buttonsById.get(p.id);
+            if (!btn) {
+              btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'cm-fence-copy-btn';
+              btn.textContent = 'COPY';
+              btn.setAttribute('data-fence-id', p.id);
+              btn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                // Latest body lives on the button element itself (data
+                // attribute) — avoids capturing a stale closure when the
+                // fence contents change. We refresh it on every write pass.
+                const body = this.bodiesById.get(p.id) || '';
+                Promise.resolve(writeClipboard(body)).then(
+                  () => {
+                    btn.classList.add('cm-fence-copy-btn--copied');
+                    const original = btn.textContent;
+                    btn.textContent = 'COPIED';
+                    setTimeout(() => {
+                      btn.classList.remove('cm-fence-copy-btn--copied');
+                      btn.textContent = original;
+                    }, 1200);
+                  },
+                  (err) => post({ type: 'error', message: 'Copy failed: ' + (err && err.message || err) }),
+                );
+              });
+              this.overlay.appendChild(btn);
+              this.buttonsById.set(p.id, btn);
+            }
+            this.bodiesById.set(p.id, p.body);
+            // Hide while the fence is being edited — copying mid-edit is
+            // noisy and the button would overlap the caret target.
+            if (p.editing) {
+              btn.classList.add('cm-fence-copy-btn--hidden');
+            } else {
+              btn.classList.remove('cm-fence-copy-btn--hidden');
+            }
+            // Position: pin to the right edge of the fence box. If width
+            // hasn't been measured yet (brand-new fence, one frame early),
+            // fall back to contentLeft so the button is at least visible.
+            const right = p.fenceWidth > 0
+              ? p.contentLeft + p.fenceWidth - BUTTON_WIDTH - BUTTON_MARGIN
+              : p.contentLeft + BUTTON_MARGIN;
+            btn.style.top = (p.top + TOP_INSET) + 'px';
+            btn.style.left = right + 'px';
+          }
+          // Remove stale buttons whose fence no longer exists (user deleted
+          // it, or it scrolled out of the visible range).
+          for (const [id, btn] of this.buttonsById) {
+            if (!seen.has(id)) {
+              btn.remove();
+              this.buttonsById.delete(id);
+              this.bodiesById.delete(id);
+            }
+          }
+        },
+      });
+    }
+
+    destroy() {
+      // Tear down the overlay so it doesn't leak DOM nodes across editor
+      // reloads. The plugin itself is GC'd by CM, but scrollDOM persists
+      // if the whole editor is re-created inside the same iframe.
+      for (const btn of this.buttonsById.values()) btn.remove();
+      this.buttonsById.clear();
+      this.bodiesById.clear();
+      if (this.overlay && this.overlay.parentNode) {
+        this.overlay.parentNode.removeChild(this.overlay);
+      }
     }
   },
   {
