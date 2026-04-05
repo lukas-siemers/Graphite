@@ -350,6 +350,19 @@ function detectActiveFormats(state) {
   const strikeCount = (textBefore.match(/~~/g) || []).length;
   if (strikeCount % 2 === 1) formats.push('strikethrough');
 
+  // In-fence detection: walk backwards counting lines that start a fence
+  // marker. An odd count means the cursor is inside an unclosed fence. This
+  // is cheaper than walking the syntax tree and avoids a syntaxTree import
+  // in the detect path. The regex literal below must render at runtime as
+  // /^\\s*\`\`\`/ — inside the outer template literal each backtick is
+  // escaped as \\\`.
+  const cursorLineNum = cursorLine.number;
+  let fenceCount = 0;
+  for (let i = 1; i < cursorLineNum; i++) {
+    if (/^\\s*\`\`\`/.test(state.doc.line(i).text)) fenceCount++;
+  }
+  if (fenceCount % 2 === 1) formats.push('in-fence');
+
   return formats;
 }
 
@@ -463,6 +476,61 @@ function applyFormat(view, command) {
     // Re-focus so the user can immediately type the language identifier.
     view.focus();
     post({ type: 'command-applied' });
+    return;
+  }
+
+  // Copy the body of the fence surrounding the cursor to the clipboard.
+  // Walks outward from the current line to find the opener and closer fence
+  // marker lines, joins everything strictly between them, and writes to the
+  // clipboard. Posts an error message if the cursor is not inside a fence.
+  if (command === 'copy-code-block') {
+    const fenceRe = /^\\s*\`\`\`/;
+    const totalLines = doc.lines;
+    const currentLineNum = line.number;
+    // Find opener: walk backwards from current line until we hit a fence
+    // marker line.
+    let openerLine = -1;
+    for (let i = currentLineNum; i >= 1; i--) {
+      if (fenceRe.test(doc.line(i).text)) { openerLine = i; break; }
+    }
+    if (openerLine === -1) {
+      post({ type: 'error', message: 'Not inside a code block' });
+      return;
+    }
+    // Find closer: first fence marker line after the opener. Falls through
+    // to EOF when the fence is unclosed (we still copy whatever body exists).
+    let closerLine = totalLines + 1;
+    for (let i = openerLine + 1; i <= totalLines; i++) {
+      if (fenceRe.test(doc.line(i).text)) { closerLine = i; break; }
+    }
+    const bodyLines = [];
+    for (let i = openerLine + 1; i < closerLine; i++) {
+      bodyLines.push(doc.line(i).text);
+    }
+    const body = bodyLines.join('\\n');
+    const writeClipboard = (text) => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      // Fallback: hidden textarea + execCommand('copy').
+      return new Promise((resolve, reject) => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok ? resolve() : reject(new Error('execCommand copy failed'));
+        } catch (err) { reject(err); }
+      });
+    };
+    Promise.resolve(writeClipboard(body)).then(
+      () => post({ type: 'command-applied' }),
+      (err) => post({ type: 'error', message: 'Copy failed: ' + (err && err.message || err) })
+    );
     return;
   }
 

@@ -156,6 +156,16 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
 
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
+
+        {/* Contextual — COPY button only when cursor is inside a fenced code
+            block. Dispatches `copy-code-block` which extracts the fence body
+            and writes it to the clipboard via the editor bridge. */}
+        {isActive('in-fence') && (
+          <>
+            <Separator />
+            <ToolbarButton command="copy-code-block" icon="content-copy" />
+          </>
+        )}
       </ScrollView>
 
       {/* Right side — fixed */}
