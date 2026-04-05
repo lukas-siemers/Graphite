@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, Pressable, TextInput, Image, Alert, Platform } from 'react-native';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
-import type { RenderItemParams } from 'react-native-draggable-flatlist';
+import { View, Text, Pressable, TextInput, Image, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateNotebook } from '@graphite/db';
@@ -24,14 +22,12 @@ function webConfirmDelete(message: string, onConfirm: () => void) {
   }
 }
 
-
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
   const storeUpdateNotebook = useNotebookStore((s) => s.updateNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
-  const reorderNotebooks = useNotebookStore((s) => s.reorderNotebooks);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
 
@@ -48,9 +44,7 @@ export default function Sidebar() {
   const renameInputRef = useRef<TextInput>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Track timestamp of last tap per notebook for double-tap detection.
   // First tap fires immediately. Second tap within 300ms triggers rename.
-  // No timer deferral — zero delay on single tap.
   const lastTapRef = useRef<Map<string, number>>(new Map());
 
   function handleNotebookPress(notebookId: string, notebookName: string) {
@@ -66,7 +60,6 @@ export default function Sidebar() {
       return;
     }
 
-    // Single tap — fire immediately, no delay.
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(notebookId)) next.delete(notebookId);
@@ -134,102 +127,98 @@ export default function Sidebar() {
     );
   }
 
-  function renderNotebook({ item: notebook, drag, isActive: isDragging }: RenderItemParams<Notebook>) {
+  function renderNotebook({ item: notebook }: { item: Notebook }) {
     const isActive = notebook.id === activeNotebookId;
     const isExpanded = expandedIds.has(notebook.id);
     const isRenaming = renamingNotebookId === notebook.id;
 
     return (
-      <ScaleDecorator>
-        <View key={notebook.id}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Pressable
-              onPress={() => handleNotebookPress(notebook.id, notebook.name)}
-              onLongPress={() => { if (!isRenaming) drag(); }}
-              delayLongPress={250}
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingVertical: 9,
-                paddingLeft: isActive ? 12 : 14,
-                paddingRight: 8,
-                borderLeftWidth: isActive ? 2 : 0,
-                borderLeftColor: tokens.accent,
-                backgroundColor: isDragging ? tokens.bgHover : isActive ? '#2A2A2A' : 'transparent',
-              }}
-            >
-              <MaterialCommunityIcons
-                name={isExpanded ? 'chevron-down' : 'chevron-right'}
-                size={16}
-                color={tokens.textHint}
-                style={{ marginRight: 4, width: 16 }}
+      <View key={notebook.id}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable
+            onPress={() => handleNotebookPress(notebook.id, notebook.name)}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingVertical: 9,
+              paddingLeft: isActive ? 12 : 14,
+              paddingRight: 8,
+              borderLeftWidth: isActive ? 2 : 0,
+              borderLeftColor: tokens.accent,
+              backgroundColor: isActive ? '#2A2A2A' : 'transparent',
+            }}
+          >
+            <MaterialCommunityIcons
+              name={isExpanded ? 'chevron-down' : 'chevron-right'}
+              size={16}
+              color={tokens.textHint}
+              style={{ marginRight: 4, width: 16 }}
+            />
+            <MaterialCommunityIcons
+              name={isExpanded ? 'notebook' : 'notebook-outline'}
+              size={17}
+              color={isActive ? tokens.accentLight : tokens.textMuted}
+              style={{ marginRight: 8 }}
+            />
+
+            {isRenaming ? (
+              <TextInput
+                ref={renameInputRef}
+                autoFocus
+                value={renameValue}
+                onChangeText={setRenameValue}
+                onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
+                onBlur={() => commitRename(notebook.id, notebook.name)}
+                style={{
+                  flex: 1,
+                  fontSize: 13,
+                  fontWeight: '500',
+                  color: tokens.textBody,
+                  padding: 0,
+                  margin: 0,
+                }}
+                selectTextOnFocus
+                returnKeyType="done"
               />
-              <MaterialCommunityIcons
-                name={isExpanded ? 'notebook' : 'notebook-outline'}
-                size={17}
-                color={isActive ? tokens.accentLight : tokens.textMuted}
-                style={{ marginRight: 8 }}
-              />
-
-              {isRenaming ? (
-                <TextInput
-                  ref={renameInputRef}
-                  autoFocus
-                  value={renameValue}
-                  onChangeText={setRenameValue}
-                  onSubmitEditing={() => commitRename(notebook.id, notebook.name)}
-                  onBlur={() => commitRename(notebook.id, notebook.name)}
-                  style={{
-                    flex: 1,
-                    fontSize: 13,
-                    fontWeight: '500',
-                    color: tokens.textBody,
-                    padding: 0,
-                    margin: 0,
-                  }}
-                  selectTextOnFocus
-                  returnKeyType="done"
-                />
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: isActive ? '600' : '400',
-                    color: isActive ? tokens.textBody : tokens.textMuted,
-                    flex: 1,
-                  }}
-                  numberOfLines={1}
-                >
-                  {notebook.name}
-                </Text>
-              )}
-
-              {isExpanded && !isRenaming && (
-                <Pressable
-                  onPress={() => handleCreateNewFolder(notebook.id)}
-                  hitSlop={10}
-                  style={{ paddingHorizontal: 6 }}
-                >
-                  <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
-                </Pressable>
-              )}
-            </Pressable>
-
-            {!isRenaming && (
-              <Pressable
-                onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
-                hitSlop={10}
-                style={{ paddingHorizontal: 10, paddingVertical: 9 }}
+            ) : (
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontWeight: isActive ? '600' : '400',
+                  color: isActive ? tokens.textBody : tokens.textMuted,
+                  flex: 1,
+                }}
+                numberOfLines={1}
               >
-                <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
+                {notebook.name}
+              </Text>
+            )}
+
+            {isExpanded && !isRenaming && (
+              <Pressable
+                onPress={() => handleCreateNewFolder(notebook.id)}
+                hitSlop={10}
+                style={{ paddingHorizontal: 6 }}
+              >
+                <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
               </Pressable>
             )}
-          </View>
+          </Pressable>
 
-          {isExpanded && <FolderTree notebookId={notebook.id} searchQuery={searchQuery} />}
+          {!isRenaming && (
+            <Pressable
+              onPress={() => handleDeleteNotebook(notebook.id, notebook.name)}
+              hitSlop={10}
+              style={{ paddingHorizontal: 10, paddingVertical: 9 }}
+            >
+              <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
+            </Pressable>
+          )}
         </View>
-      </ScaleDecorator>
+
+        {isExpanded && <FolderTree notebookId={notebook.id} searchQuery={searchQuery} />}
+      </View>
     );
   }
 
@@ -269,24 +258,13 @@ export default function Sidebar() {
             paddingVertical: 6,
           }}
         >
-          <MaterialCommunityIcons
-            name="magnify"
-            size={15}
-            color={tokens.textHint}
-            style={{ marginRight: 6 }}
-          />
+          <MaterialCommunityIcons name="magnify" size={15} color={tokens.textHint} style={{ marginRight: 6 }} />
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Search notes..."
             placeholderTextColor={tokens.textHint}
-            style={{
-              flex: 1,
-              fontSize: 12,
-              color: tokens.textBody,
-              padding: 0,
-              margin: 0,
-            }}
+            style={{ flex: 1, fontSize: 12, color: tokens.textBody, padding: 0, margin: 0 }}
           />
           {searchQuery.length > 0 && (
             <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
@@ -326,14 +304,9 @@ export default function Sidebar() {
 
       {/* Notebook list */}
       <View style={{ flex: 1 }}>
-        <DraggableFlatList
+        <FlatList
           data={notebooks}
           keyExtractor={(item) => item.id}
-          onDragEnd={({ data }) => {
-            try {
-              reorderNotebooks(getDatabase(), data.map((n) => n.id));
-            } catch (_) {}
-          }}
           renderItem={renderNotebook}
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}

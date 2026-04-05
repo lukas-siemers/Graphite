@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, TextInput, Alert, Platform } from 'react-native';
+import { View, Text, Pressable, TextInput, Alert, Platform, FlatList } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { tokens } from '@graphite/ui';
+import { getDatabase, updateFolder } from '@graphite/db';
+import type { Folder, Note } from '@graphite/db';
+import { useFolderStore } from '../../stores/use-folder-store';
+import { useNoteStore } from '../../stores/use-note-store';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
 function webConfirmDelete(message: string, onConfirm: () => void) {
@@ -13,15 +19,6 @@ function webConfirmDelete(message: string, onConfirm: () => void) {
     ]);
   }
 }
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
-import type { RenderItemParams } from 'react-native-draggable-flatlist';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { tokens } from '@graphite/ui';
-import { getDatabase, updateFolder } from '@graphite/db';
-import type { Folder, Note } from '@graphite/db';
-import { useFolderStore } from '../../stores/use-folder-store';
-import { useNoteStore } from '../../stores/use-note-store';
-
 
 interface FolderTreeProps {
   notebookId: string;
@@ -34,23 +31,18 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
   const loadFolders = useFolderStore((s) => s.loadFolders);
-  const reorderFolders = useFolderStore((s) => s.reorderFolders);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const createNewNote = useNoteStore((s) => s.createNewNote);
-  const reorderNotes = useNoteStore((s) => s.reorderNotes);
 
   const notebookFolders = folders
     .filter((f) => f.notebookId === notebookId)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  // Load this notebook's folders on mount (when the notebook row is expanded).
-  // loadFolders merges by notebook so it never wipes folders from other open notebooks.
   useEffect(() => {
     async function loadAndExpand() {
-      // On web the DB is a no-op — skip so we don't wipe in-memory folders.
       if (Platform.OS === 'web') return;
       try {
         const db = getDatabase();
@@ -73,7 +65,6 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  // Track timestamp of last tap per folder for double-tap detection.
   // First tap fires immediately. Second tap within 300ms triggers rename.
   const lastTapRef = useRef<Map<string, number>>(new Map());
 
@@ -90,7 +81,6 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
       return;
     }
 
-    // Single tap — fire immediately, no delay.
     setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(folderId)) next.delete(folderId);
@@ -159,51 +149,44 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     );
   }
 
-  function renderNote({ item: note, drag, isActive: isDraggingNote }: RenderItemParams<Note>) {
+  function renderNote({ item: note }: { item: Note }) {
     const isActiveNote = note.id === activeNoteId;
     return (
-      <ScaleDecorator>
-        <Pressable
-          onPress={() => setActiveNote(note.id)}
-          onLongPress={() => {
-            // Cancel any pending folder single-tap before drag starts
-            drag();
-          }}
-          delayLongPress={250}
+      <Pressable
+        onPress={() => setActiveNote(note.id)}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingLeft: isActiveNote ? 46 : 48,
+          paddingRight: 14,
+          paddingVertical: 6,
+          borderLeftWidth: isActiveNote ? 2 : 0,
+          borderLeftColor: tokens.accent,
+          backgroundColor: isActiveNote ? '#2A2A2A' : 'transparent',
+        }}
+      >
+        <MaterialCommunityIcons
+          name="file-document-outline"
+          size={15}
+          color={isActiveNote ? tokens.accentLight : tokens.textMuted}
+          style={{ marginRight: 7 }}
+        />
+        <Text
           style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingLeft: isActiveNote ? 46 : 48,
-            paddingRight: 14,
-            paddingVertical: 6,
-            borderLeftWidth: isActiveNote ? 2 : 0,
-            borderLeftColor: tokens.accent,
-            backgroundColor: isDraggingNote ? tokens.bgHover : isActiveNote ? '#2A2A2A' : 'transparent',
+            fontSize: 12,
+            color: isActiveNote ? tokens.accentLight : tokens.textMuted,
+            fontWeight: isActiveNote ? '500' : '400',
+            flex: 1,
           }}
+          numberOfLines={1}
         >
-          <MaterialCommunityIcons
-            name="file-document-outline"
-            size={15}
-            color={isActiveNote ? tokens.accentLight : tokens.textMuted}
-            style={{ marginRight: 7 }}
-          />
-          <Text
-            style={{
-              fontSize: 12,
-              color: isActiveNote ? tokens.accentLight : tokens.textMuted,
-              fontWeight: isActiveNote ? '500' : '400',
-              flex: 1,
-            }}
-            numberOfLines={1}
-          >
-            {note.title || 'Untitled'}
-          </Text>
-        </Pressable>
-      </ScaleDecorator>
+          {note.title || 'Untitled'}
+        </Text>
+      </Pressable>
     );
   }
 
-  function renderFolder({ item: folder, drag, isActive: isDragging }: RenderItemParams<Folder>) {
+  function renderFolder({ item: folder }: { item: Folder }) {
     const isActiveFolder = folder.id === activeFolderId;
     const isExpanded = expandedFolders.has(folder.id);
     const isRenaming = renamingFolderId === folder.id;
@@ -217,123 +200,108 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
       })
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
-    // If searching, auto-expand folders that have matching notes
     const shouldExpand = isExpanded || (q.length > 0 && folderNotes.length > 0);
 
     return (
-      <ScaleDecorator>
-        <View>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Pressable
-              onPress={() => handleFolderPress(folder.id, folder.name)}
-              onLongPress={() => { if (!isRenaming) drag(); }}
-              delayLongPress={250}
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                paddingLeft: isActiveFolder ? 22 : 24,
-                paddingRight: 8,
-                paddingVertical: 8,
-                borderLeftWidth: isActiveFolder ? 2 : 0,
-                borderLeftColor: tokens.accent,
-                backgroundColor: isDragging ? tokens.bgHover : isActiveFolder ? '#2A2A2A' : 'transparent',
-              }}
-            >
-              <MaterialCommunityIcons
-                name={shouldExpand ? 'chevron-down' : 'chevron-right'}
-                size={16}
-                color={tokens.textHint}
-                style={{ marginRight: 4, width: 16 }}
-              />
-              <MaterialCommunityIcons
-                name={shouldExpand ? 'folder-open' : 'folder'}
-                size={16}
-                color={isActiveFolder ? tokens.accentLight : tokens.textMuted}
-                style={{ marginRight: 7 }}
-              />
+      <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable
+            onPress={() => handleFolderPress(folder.id, folder.name)}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingLeft: isActiveFolder ? 22 : 24,
+              paddingRight: 8,
+              paddingVertical: 8,
+              borderLeftWidth: isActiveFolder ? 2 : 0,
+              borderLeftColor: tokens.accent,
+              backgroundColor: isActiveFolder ? '#2A2A2A' : 'transparent',
+            }}
+          >
+            <MaterialCommunityIcons
+              name={shouldExpand ? 'chevron-down' : 'chevron-right'}
+              size={16}
+              color={tokens.textHint}
+              style={{ marginRight: 4, width: 16 }}
+            />
+            <MaterialCommunityIcons
+              name={shouldExpand ? 'folder-open' : 'folder'}
+              size={16}
+              color={isActiveFolder ? tokens.accentLight : tokens.textMuted}
+              style={{ marginRight: 7 }}
+            />
 
-              {isRenaming ? (
-                <TextInput
-                  autoFocus
-                  value={renameValue}
-                  onChangeText={setRenameValue}
-                  onSubmitEditing={() => commitFolderRename(folder.id, folder.name)}
-                  onBlur={() => commitFolderRename(folder.id, folder.name)}
-                  style={{
-                    flex: 1,
-                    fontSize: 13,
-                    color: tokens.textBody,
-                    fontWeight: '500',
-                    padding: 0,
-                    margin: 0,
-                  }}
-                  selectTextOnFocus
-                  returnKeyType="done"
-                />
-              ) : (
-                <Text
-                  style={{
-                    fontSize: 13,
-                    color: isActiveFolder ? tokens.textBody : tokens.textMuted,
-                    fontWeight: isActiveFolder ? '500' : '400',
-                    flex: 1,
-                  }}
-                  numberOfLines={1}
-                >
-                  {folder.name}
-                </Text>
-              )}
-            </Pressable>
-
-            {!isRenaming && (
-              <Pressable
-                onPress={() => handleDeleteFolder(folder.id, folder.name)}
-                hitSlop={10}
-                style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+            {isRenaming ? (
+              <TextInput
+                autoFocus
+                value={renameValue}
+                onChangeText={setRenameValue}
+                onSubmitEditing={() => commitFolderRename(folder.id, folder.name)}
+                onBlur={() => commitFolderRename(folder.id, folder.name)}
+                style={{
+                  flex: 1,
+                  fontSize: 13,
+                  color: tokens.textBody,
+                  fontWeight: '500',
+                  padding: 0,
+                  margin: 0,
+                }}
+                selectTextOnFocus
+                returnKeyType="done"
+              />
+            ) : (
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: isActiveFolder ? tokens.textBody : tokens.textMuted,
+                  fontWeight: isActiveFolder ? '500' : '400',
+                  flex: 1,
+                }}
+                numberOfLines={1}
               >
-                <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
+                {folder.name}
+              </Text>
+            )}
+          </Pressable>
+
+          {!isRenaming && (
+            <Pressable
+              onPress={() => handleDeleteFolder(folder.id, folder.name)}
+              hitSlop={10}
+              style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+            >
+              <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {shouldExpand && (
+          <View>
+            <FlatList
+              data={folderNotes}
+              keyExtractor={(note) => note.id}
+              renderItem={renderNote}
+              scrollEnabled={false}
+            />
+            {!q && (
+              <Pressable
+                onPress={() => handleCreateNewNote(folder.id)}
+                style={{ paddingLeft: 48, paddingVertical: 5 }}
+              >
+                <Text style={{ fontSize: 11, color: tokens.textHint }}>+ New Note</Text>
               </Pressable>
             )}
           </View>
-
-          {shouldExpand && (
-            <View>
-              <DraggableFlatList
-                data={folderNotes}
-                keyExtractor={(note) => note.id}
-                renderItem={renderNote}
-                onDragEnd={({ data }) => {
-                  try {
-                    reorderNotes(getDatabase(), data.map((n) => n.id));
-                  } catch (_) {}
-                }}
-                scrollEnabled={false}
-              />
-              {!q && (
-                <Pressable
-                  onPress={() => handleCreateNewNote(folder.id)}
-                  style={{ paddingLeft: 48, paddingVertical: 5 }}
-                >
-                  <Text style={{ fontSize: 11, color: tokens.textHint }}>+ New Note</Text>
-                </Pressable>
-              )}
-            </View>
-          )}
-        </View>
-      </ScaleDecorator>
+        )}
+      </View>
     );
   }
 
   return (
-    <DraggableFlatList
+    <FlatList
       data={notebookFolders}
       keyExtractor={(item) => item.id}
-      onDragEnd={({ data }) => {
-        try {
-          reorderFolders(getDatabase(), notebookId, data.map((f) => f.id));
-        } catch (_) {}
-      }}
       renderItem={renderFolder}
       scrollEnabled={false}
     />
