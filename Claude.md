@@ -353,6 +353,7 @@ Current test totals (2026-04-05): editor 24/24, db 44/44.
 - Free users never touch any network call related to sync
 - Always re-verify subscription with StoreKit on launch — never trust cache alone
 - Realtime channel scoped to `user_id`, not per-note (prevents channel explosion)
+- **Canvas-first cutover gate:** the `canvas_json` migration (see "Storage model" above) MUST land and ship before any sync code is written. Sync engine is designed against `canvas_json` only — no dual-write path against legacy `body` / `drawing_asset_id`. If the canvas cutover slips, Phase 2 slips with it.
 
 ---
 
@@ -431,6 +432,47 @@ Dev mode is working: Metro bundles the Expo app and Electron loads it via `http:
 - [ ] Sketch → Mermaid diagram conversion
 - [ ] "Chat with your notes" — RAG over personal knowledge base
 - [ ] AI writing assistant inline in the editor
+
+---
+
+## Engineering playbook
+
+### Testing strategy
+
+- **Unit (Vitest):** pure logic only — `applyFormat`, markdown transforms, DB operations against an in-memory better-sqlite3, sync delta computation. Runs on every PR via `yarn test` at repo root. Target: fast (<5s), no filesystem, no network.
+- **Integration (Vitest + better-sqlite3):** DB migrations, FTS5 rebuild, multi-operation flows (create-edit-delete). Lives in `packages/db/src/__tests__`.
+- **Editor parity (Vitest):** `packages/editor/src/live-preview/__tests__` guards the shared `editorHtml.ts` — both the iframe (web) and WebView (native) runtimes share one source of truth, and drift is a test failure.
+- **E2E (Detox):** reserved for Phase 1 close-out. Smoke path: create notebook → create folder → create note → type → draw → delete. Not yet wired; do not block feature work on it.
+- **Manual QA gate:** every PR needs the native-config audit from `feedback_qa_native_awareness` in MEMORY. No exceptions.
+- **Coverage targets:** editor and db packages must stay green on every merge. Current baseline: editor 24/24, db 44/44 (2026-04-05).
+
+### FTS5 maintenance checklist
+
+The `notes_fts` virtual table is content-linked to `notes` via `content='notes'` + `content_rowid='rowid'`. It does NOT auto-update. Any code touching `notes` must also update FTS5:
+
+- **Insert note:** `INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)` after the row insert.
+- **Update note:** emit `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', rowid, old_title, old_body)` then insert the new values. The `'delete'` command is mandatory — skipping it leaves orphan rows in the index (see the `deleteNote` bug fixed in commit `ffe6c69`).
+- **Delete note:** emit the same `'delete'` command before `DELETE FROM notes`.
+- **Bulk rebuild:** `INSERT INTO notes_fts(notes_fts) VALUES('rebuild')` — used by migrations only.
+- All FTS5 writes happen inside the same transaction as the underlying `notes` write. Never split them.
+- Tests for every note operation must assert the FTS row count matches the note count after the op.
+
+### Editor architecture
+
+- **Single source of truth:** `packages/editor/src/live-preview/editorHtml.ts` is the CodeMirror 6 bundle HTML. It is loaded by the web iframe and the native `react-native-webview` — they share one runtime. Never fork the bundle.
+- **Markdown mode:** we use CodeMirror's built-in `@codemirror/lang-markdown` + 23 statically-imported language packs for code-fence highlighting. No custom tokenizer.
+- **Line decorations only:** fence edit/render toggling uses pure line decorations. Block widgets caused cursor-jump bugs and are banned in this codebase (see commit `3455e9f`).
+- **applyFormat:** all toolbar commands (`bold`, `italic`, `code`, `h1`, `link`) go through a single `applyFormat(cmd, state)` function. New commands must ship with a Vitest parity test.
+- **Fence width cache:** per-block fence width is measured via `requestMeasure` + DOM Range and cached per fence id. Do not recompute on every keystroke — that caused the Enter-key flicker (commit `720976e`).
+- **No preview mode:** the pencil/eye preview toggle is removed. Graphite is edit-only; live preview renders inline.
+
+### Branch hygiene
+
+- One branch per logical change. Branch off `main`, never stack.
+- Name: `feat/<kebab-desc>` for features, `fix/<kebab-desc>` for bug fixes, `chore/<kebab-desc>` for tooling/docs, `refactor/<kebab-desc>` for pure refactors.
+- Rebase, don't merge, when pulling `main` into a feature branch mid-work. Merge commits only appear at the final `main` integration.
+- Delete local feature branches after merge. Keep `git branch` short.
+- Never commit directly to `main`. The merge gate lives there — see Conventions below.
 
 ---
 
