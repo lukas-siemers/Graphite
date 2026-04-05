@@ -27,14 +27,19 @@ interface ToolbarButtonProps {
   icon?: string;
   label?: string;
   active?: boolean;
+  /** Optional override — when provided, pressing dispatches this instead of `command` */
+  onPress?: () => void;
+  onLongPress?: () => void;
 }
 
-function ToolbarButton({ command, icon, label, active = false }: ToolbarButtonProps) {
+function ToolbarButton({ command, icon, label, active = false, onPress, onLongPress }: ToolbarButtonProps) {
   const dispatchCommand = useEditorStore((s) => s.dispatchCommand);
 
   return (
     <Pressable
-      onPress={() => dispatchCommand(command)}
+      onPress={() => (onPress ? onPress() : dispatchCommand(command))}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       style={({ pressed }) => ({
         width: 30,
         height: 30,
@@ -76,10 +81,31 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
   const previewMode = useEditorStore((s) => s.previewMode);
   const setPreviewMode = useEditorStore((s) => s.setPreviewMode);
   const activeFormats = useEditorStore((s) => s.activeFormats);
+  const hasSelection = useEditorStore((s) => s.hasSelection);
+  const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
+  const dispatchCommand = useEditorStore((s) => s.dispatchCommand);
 
   function isActive(cmd: FormatCommand) {
     return activeFormats.includes(cmd);
   }
+
+  // Unified Code button dispatch:
+  //   - empty selection or multi-line selection  → code-block
+  //   - single-line non-empty selection          → code-inline
+  //   - long-press                                → code-block (forced)
+  function handleCodePress() {
+    if (hasSelection && !selectionSpansLines) {
+      dispatchCommand('code-inline');
+    } else {
+      dispatchCommand('code-block');
+    }
+  }
+
+  function handleCodeLongPress() {
+    dispatchCommand('code-block');
+  }
+
+  const codeActive = isActive('code-inline') || isActive('code-block');
 
   return (
     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
@@ -104,7 +130,15 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
         <ToolbarButton command="bold" icon="format-bold" active={isActive('bold')} />
         <ToolbarButton command="italic" icon="format-italic" />
         <ToolbarButton command="strikethrough" icon="format-strikethrough-variant" active={isActive('strikethrough')} />
-        <ToolbarButton command="code-inline" icon="code-tags" active={isActive('code-inline')} />
+        {/* Unified Code button — inline vs block decided by current selection,
+            long-press forces block. Replaces the previous two buttons. */}
+        <ToolbarButton
+          command="code-inline"
+          icon="code-tags"
+          active={codeActive}
+          onPress={handleCodePress}
+          onLongPress={handleCodeLongPress}
+        />
 
         <Separator />
 
@@ -119,7 +153,6 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
         <ToolbarButton command="bullet-list" icon="format-list-bulleted" active={isActive('bullet-list')} />
         <ToolbarButton command="numbered-list" icon="format-list-numbered" active={isActive('numbered-list')} />
         <ToolbarButton command="blockquote" icon="format-quote-open" active={isActive('blockquote')} />
-        <ToolbarButton command="code-block" icon="code-braces" />
 
         <Separator />
 
