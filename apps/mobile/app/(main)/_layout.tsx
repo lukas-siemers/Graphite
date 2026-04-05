@@ -216,7 +216,7 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
         {/* Top nav bar */}
         <View
           style={{
-            height: 48,
+            height: 52,
             flexDirection: 'row',
             alignItems: 'center',
             backgroundColor: tokens.bgBase,
