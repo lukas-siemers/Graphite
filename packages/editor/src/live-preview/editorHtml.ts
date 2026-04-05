@@ -942,8 +942,7 @@ const fenceStylePlugin = ViewPlugin.fromClass(
           return { positions };
         },
         write: ({ positions }) => {
-          const BUTTON_WIDTH = 56; // approximate rendered width of "COPY"
-          const BUTTON_MARGIN = 6;
+          const BUTTON_MARGIN = 8;
           const TOP_INSET = 4;
           const seen = new Set();
           for (const p of positions) {
@@ -986,14 +985,15 @@ const fenceStylePlugin = ViewPlugin.fromClass(
             } else {
               btn.classList.remove('cm-fence-copy-btn--hidden');
             }
-            // Position: pin to the right edge of the fence box. If width
-            // hasn't been measured yet (brand-new fence, one frame early),
-            // fall back to contentLeft so the button is at least visible.
-            const right = p.fenceWidth > 0
-              ? p.contentLeft + p.fenceWidth - BUTTON_WIDTH - BUTTON_MARGIN
+            // Position: sit just OUTSIDE the fence box on the right side so
+            // the button never covers the code text. If width hasn't been
+            // measured yet (brand-new fence, one frame early), fall back to
+            // contentLeft so the button is at least visible.
+            const left = p.fenceWidth > 0
+              ? p.contentLeft + p.fenceWidth + BUTTON_MARGIN
               : p.contentLeft + BUTTON_MARGIN;
             btn.style.top = (p.top + TOP_INSET) + 'px';
-            btn.style.left = right + 'px';
+            btn.style.left = left + 'px';
           }
           // Remove stale buttons whose fence no longer exists (user deleted
           // it, or it scrolled out of the visible range).
