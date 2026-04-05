@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, TextInput, Alert } from 'react-native';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, updateFolder } from '@graphite/db';
+import type { Folder } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
@@ -12,17 +15,15 @@ const DOUBLE_TAP_MS = 500;
 
 interface FolderTreeProps {
   notebookId: string;
-  reorderMode: boolean;
 }
 
-export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps) {
+export default function FolderTree({ notebookId }: FolderTreeProps) {
   const folders = useFolderStore((s) => s.folders);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const storeUpdateFolder = useFolderStore((s) => s.updateFolder);
   const loadFolders = useFolderStore((s) => s.loadFolders);
-  const moveFolderUp = useFolderStore((s) => s.moveFolderUp);
-  const moveFolderDown = useFolderStore((s) => s.moveFolderDown);
+  const reorderFolders = useFolderStore((s) => s.reorderFolders);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
@@ -205,69 +206,57 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
     );
   }
 
-  async function handleMoveFolderUp(folderId: string) {
-    try {
-      const db = getDatabase();
-      await moveFolderUp(db, folderId, notebookId);
-    } catch (_) {
-      // db not ready yet
-    }
-  }
+  function renderFolder({ item: folder, drag }: RenderItemParams<Folder>) {
+    const isActiveFolder = folder.id === activeFolderId;
+    const isExpanded = expandedFolders.has(folder.id);
+    const isRenaming = renamingFolderId === folder.id;
+    const folderNotes = notes.filter((n) => n.folderId === folder.id);
 
-  async function handleMoveFolderDown(folderId: string) {
-    try {
-      const db = getDatabase();
-      await moveFolderDown(db, folderId, notebookId);
-    } catch (_) {
-      // db not ready yet
-    }
-  }
-
-  return (
-    <View>
-      {notebookFolders.map((folder, index) => {
-        const isActiveFolder = folder.id === activeFolderId;
-        const isExpanded = expandedFolders.has(folder.id);
-        const isRenaming = renamingFolderId === folder.id;
-        const folderNotes = notes.filter((n) => n.folderId === folder.id);
-        const isFirst = index === 0;
-        const isLast = index === notebookFolders.length - 1;
-
-        return (
-          <View key={folder.id}>
+    return (
+      <ScaleDecorator>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {/* Drag handle */}
             <Pressable
-              onPress={() => {
-                if (reorderMode) return;
-                handleFolderPress(folder.id, folder.name);
-              }}
+              onLongPress={drag}
+              delayLongPress={150}
+              hitSlop={4}
+              style={{ paddingLeft: 12, paddingRight: 4, paddingVertical: 6 }}
+            >
+              <Text style={{ fontSize: 13, color: tokens.textHint, lineHeight: 18 }}>
+                {'\u2630'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleFolderPress(folder.id, folder.name)}
               onLongPress={() => {
-                if (!isRenaming && !reorderMode) {
+                if (!isRenaming) {
                   handleFolderLongPress(folder.id, folder.name);
                 }
               }}
               style={{
+                flex: 1,
                 flexDirection: 'row',
                 alignItems: 'center',
-                paddingLeft: isActiveFolder ? 26 : 28,
+                paddingLeft: isActiveFolder ? 0 : 2,
                 paddingRight: 8,
                 paddingVertical: 6,
                 borderLeftWidth: isActiveFolder ? 2 : 0,
                 borderLeftColor: tokens.accent,
-                backgroundColor: isActiveFolder ? tokens.bgActive : 'transparent',
+                backgroundColor: isActiveFolder ? tokens.bgHover : 'transparent',
               }}
             >
-              {/* Expand/collapse arrow — hidden in reorder mode */}
-              {!reorderMode && (
-                <Text
-                  style={{
-                    fontSize: 11,
-                    color: tokens.textMuted,
-                    marginRight: 4,
-                  }}
-                >
-                  {isExpanded ? '▼' : '▶'}
-                </Text>
-              )}
+              {/* Expand/collapse arrow */}
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: tokens.textMuted,
+                  marginRight: 4,
+                }}
+              >
+                {isExpanded ? '▼' : '▶'}
+              </Text>
 
               {/* Name or rename input */}
               {isRenaming ? (
@@ -302,43 +291,8 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
                 </Text>
               )}
 
-              {/* Reorder ▲▼ buttons — shown only in reorder mode */}
-              {reorderMode && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                  <Pressable
-                    onPress={() => !isFirst && handleMoveFolderUp(folder.id)}
-                    hitSlop={6}
-                    style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: isFirst ? tokens.textHint : tokens.textMuted,
-                      }}
-                    >
-                      ▲
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => !isLast && handleMoveFolderDown(folder.id)}
-                    hitSlop={6}
-                    style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        color: isLast ? tokens.textHint : tokens.textMuted,
-                      }}
-                    >
-                      ▼
-                    </Text>
-                  </Pressable>
-                </View>
-              )}
-
-              {/* Delete × button — shown alongside the folder row when not
-                  renaming and not in reorder mode */}
-              {!reorderMode && !isRenaming && (
+              {/* Delete × button */}
+              {!isRenaming && (
                 <Pressable
                   onPress={() => handleDeleteFolder(folder.id, folder.name)}
                   hitSlop={8}
@@ -358,69 +312,85 @@ export default function FolderTree({ notebookId, reorderMode }: FolderTreeProps)
                 </Pressable>
               )}
             </Pressable>
+          </View>
 
-            {isExpanded && !reorderMode && (
-              <View>
-                {folderNotes.map((note) => {
-                  const isActiveNote = note.id === activeNoteId;
-                  return (
-                    <Pressable
-                      key={note.id}
-                      onPress={() => setActiveNote(note.id)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        paddingLeft: isActiveNote ? 42 : 44,
-                        paddingRight: 16,
-                        paddingVertical: 5,
-                        borderLeftWidth: isActiveNote ? 2 : 0,
-                        borderLeftColor: tokens.accent,
-                        backgroundColor: isActiveNote ? tokens.bgActive : 'transparent',
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="file-document-outline"
-                        size={13}
-                        color={isActiveNote ? tokens.accentLight : tokens.textMuted}
-                        style={{ marginRight: 6 }}
-                      />
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          color: isActiveNote ? tokens.accentLight : tokens.textMuted,
-                          fontWeight: isActiveNote ? '500' : '400',
-                          flex: 1,
-                        }}
-                        numberOfLines={1}
-                      >
-                        {note.title || 'Untitled'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-
-                {/* New Note row at the bottom of each folder */}
-                <Pressable
-                  onPress={() => handleCreateNewNote(folder.id)}
-                  style={{
-                    paddingLeft: 44,
-                    paddingVertical: 4,
-                  }}
-                >
-                  <Text
+          {isExpanded && (
+            <View>
+              {folderNotes.map((note) => {
+                const isActiveNote = note.id === activeNoteId;
+                return (
+                  <Pressable
+                    key={note.id}
+                    onPress={() => setActiveNote(note.id)}
                     style={{
-                      fontSize: 11,
-                      color: tokens.textHint,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingLeft: isActiveNote ? 42 : 44,
+                      paddingRight: 16,
+                      paddingVertical: 5,
+                      borderLeftWidth: isActiveNote ? 2 : 0,
+                      borderLeftColor: tokens.accent,
+                      backgroundColor: isActiveNote ? tokens.bgHover : 'transparent',
                     }}
                   >
-                    + New Note
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-        );
-      })}
-    </View>
+                    <MaterialCommunityIcons
+                      name="file-document-outline"
+                      size={13}
+                      color={isActiveNote ? tokens.accentLight : tokens.textMuted}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        color: isActiveNote ? tokens.accentLight : tokens.textMuted,
+                        fontWeight: isActiveNote ? '500' : '400',
+                        flex: 1,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {note.title || 'Untitled'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              {/* New Note row at the bottom of each folder */}
+              <Pressable
+                onPress={() => handleCreateNewNote(folder.id)}
+                style={{
+                  paddingLeft: 44,
+                  paddingVertical: 4,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: tokens.textHint,
+                  }}
+                >
+                  + New Note
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </ScaleDecorator>
+    );
+  }
+
+  return (
+    <DraggableFlatList
+      data={notebookFolders}
+      keyExtractor={(item) => item.id}
+      onDragEnd={({ data }) => {
+        try {
+          reorderFolders(getDatabase(), notebookId, data.map((f) => f.id));
+        } catch (_) {
+          // db not ready yet
+        }
+      }}
+      renderItem={renderFolder}
+      scrollEnabled={false}
+    />
   );
 }

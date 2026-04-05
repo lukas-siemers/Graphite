@@ -7,6 +7,7 @@ import {
   createNote,
   updateNote,
   deleteNote,
+  updateNoteSortOrder,
   createEmptyCanvas,
 } from '@graphite/db';
 
@@ -40,6 +41,7 @@ interface NoteState {
     silent?: boolean,
   ) => Promise<void>;
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
+  reorderNotes: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
 }
 
 export const useNoteStore = create<NoteState>((set) => ({
@@ -125,5 +127,15 @@ export const useNoteStore = create<NoteState>((set) => ({
       notes: state.notes.filter((n) => n.id !== id),
       activeNoteId: state.activeNoteId === id ? null : state.activeNoteId,
     }));
+  },
+
+  reorderNotes: async (db: SQLiteDatabase, orderedIds: string[]) => {
+    await Promise.all(orderedIds.map((id, index) => updateNoteSortOrder(db, id, index)));
+    set((s) => {
+      const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+      const updated = s.notes.map((n) => ({ ...n, sortOrder: orderMap.get(n.id) ?? n.sortOrder }));
+      updated.sort((a, b) => a.sortOrder - b.sortOrder);
+      return { notes: updated };
+    });
   },
 }));

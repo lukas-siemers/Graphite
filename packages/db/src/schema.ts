@@ -52,6 +52,11 @@ export const ADD_CANVAS_JSON = `ALTER TABLE notes ADD COLUMN canvas_json TEXT;`;
 export const ADD_NOTEBOOK_SORT_ORDER = `ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0;`;
 export const ADD_FOLDER_SORT_ORDER = `ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0;`;
 
+// Migration 7 — sort_order for note list reordering
+// Adds sort_order INTEGER DEFAULT 0 to notes so the user can reorder notes
+// via drag-and-drop in the note list. Existing rows default to 0.
+export const ADD_NOTE_SORT_ORDER = `ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0;`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -60,4 +65,5 @@ export const ALL_MIGRATIONS = [
   ADD_CANVAS_JSON,
   ADD_NOTEBOOK_SORT_ORDER,
   ADD_FOLDER_SORT_ORDER,
+  ADD_NOTE_SORT_ORDER,
 ] as const;

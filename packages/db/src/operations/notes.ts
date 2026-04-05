@@ -11,6 +11,7 @@ interface RawNote {
   drawing_asset_id: string | null;
   canvas_json: string | null;
   is_dirty: number;
+  sort_order: number;
   created_at: number;
   updated_at: number;
   synced_at: number | null;
@@ -26,6 +27,7 @@ function mapNote(row: RawNote): Note {
     drawingAssetId: row.drawing_asset_id,
     canvasJson: row.canvas_json,
     isDirty: row.is_dirty,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncedAt: row.synced_at,
@@ -65,6 +67,7 @@ export async function createNote(
     drawingAssetId: null,
     canvasJson: null,
     isDirty: 0,
+    sortOrder: 0,
     createdAt: now,
     updatedAt: now,
     syncedAt: null,
@@ -79,12 +82,12 @@ export async function getNotes(
   let rows: RawNote[];
   if (folderId === undefined || folderId === null) {
     rows = await db.getAllAsync<RawNote>(
-      'SELECT * FROM notes WHERE notebook_id = ? ORDER BY updated_at DESC',
+      'SELECT * FROM notes WHERE notebook_id = ? ORDER BY sort_order ASC, updated_at DESC',
       [notebookId],
     );
   } else {
     rows = await db.getAllAsync<RawNote>(
-      'SELECT * FROM notes WHERE notebook_id = ? AND folder_id = ? ORDER BY updated_at DESC',
+      'SELECT * FROM notes WHERE notebook_id = ? AND folder_id = ? ORDER BY sort_order ASC, updated_at DESC',
       [notebookId, folderId],
     );
   }
@@ -227,6 +230,14 @@ export async function deleteNote(
   id: string,
 ): Promise<void> {
   await db.runAsync('DELETE FROM notes WHERE id = ?', [id]);
+}
+
+export async function updateNoteSortOrder(
+  db: SQLiteDatabase,
+  id: string,
+  sortOrder: number,
+): Promise<void> {
+  await db.runAsync('UPDATE notes SET sort_order = ? WHERE id = ?', [sortOrder, id]);
 }
 
 export async function searchNotes(

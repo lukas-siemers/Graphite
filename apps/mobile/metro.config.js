@@ -32,6 +32,7 @@ config.resolver.unstable_enablePackageExports = false;
 const stubDir = path.resolve(projectRoot, 'stubs');
 
 config.resolver.extraNodeModules = {
+  'react-native-draggable-flatlist': path.join(stubDir, 'react-native-draggable-flatlist-stub.js'),
   '@shopify/react-native-skia':   path.join(stubDir, 'react-native-skia-stub.js'),
   'react-native-worklets-core':   path.join(stubDir, 'react-native-worklets-stub.js'),
   'expo-file-system':             path.join(stubDir, 'expo-file-system-stub.js'),

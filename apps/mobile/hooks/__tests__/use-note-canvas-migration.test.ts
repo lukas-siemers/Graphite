@@ -57,6 +57,7 @@ const legacyNote: Note = {
   drawingAssetId: null,
   canvasJson: null,          // not yet migrated
   isDirty: 0,
+  sortOrder: 0,
   createdAt: BASE_UPDATED_AT,
   updatedAt: BASE_UPDATED_AT,
   syncedAt: null,

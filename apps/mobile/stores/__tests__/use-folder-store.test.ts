@@ -253,4 +253,35 @@ describe('useFolderStore', () => {
     expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(0);
     expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(1);
   });
+
+  // -------------------------------------------------------------------------
+  // reorderFolders — bulk drag-and-drop reorder action (scoped to notebookId)
+  // -------------------------------------------------------------------------
+
+  it('reorderFolders assigns sequential sortOrder values matching the provided order', async () => {
+    // folderA1 at sortOrder 0, folderA2 at sortOrder 1.
+    // Supply reversed order — folderA2 first, folderA1 second.
+    useFolderStore.getState().setFolders([folderA1, folderA2]);
+    await useFolderStore.getState().reorderFolders(fakeDb, 'nb-a', ['f-a2', 'f-a1']);
+    const { folders } = useFolderStore.getState();
+    expect(folders.find((f) => f.id === 'f-a2')?.sortOrder).toBe(0);
+    expect(folders.find((f) => f.id === 'f-a1')?.sortOrder).toBe(1);
+  });
+
+  it('reorderFolders does not alter folders belonging to a different notebook', async () => {
+    // folderB1 belongs to nb-b — reordering nb-a must not touch it.
+    useFolderStore.getState().setFolders([folderA1, folderA2, folderB1]);
+    await useFolderStore.getState().reorderFolders(fakeDb, 'nb-a', ['f-a2', 'f-a1']);
+    const { folders } = useFolderStore.getState();
+    // folderB1 sortOrder must remain at its original value (0).
+    expect(folders.find((f) => f.id === 'f-b1')?.sortOrder).toBe(0);
+  });
+
+  it('reorderFolders leaves folders from other notebooks present in the store', async () => {
+    useFolderStore.getState().setFolders([folderA1, folderA2, folderB1]);
+    await useFolderStore.getState().reorderFolders(fakeDb, 'nb-a', ['f-a2', 'f-a1']);
+    const { folders } = useFolderStore.getState();
+    // nb-b folder must still be in the store.
+    expect(folders.find((f) => f.id === 'f-b1')).toBeDefined();
+  });
 });

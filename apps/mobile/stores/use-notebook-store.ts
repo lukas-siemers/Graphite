@@ -21,6 +21,7 @@ interface NotebookState {
   deleteNotebook: (db: SQLiteDatabase, id: string) => Promise<void>;
   moveNotebookUp: (db: SQLiteDatabase, id: string) => Promise<void>;
   moveNotebookDown: (db: SQLiteDatabase, id: string) => Promise<void>;
+  reorderNotebooks: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
 }
 
 export const useNotebookStore = create<NotebookState>((set, get) => ({
@@ -86,5 +87,15 @@ export const useNotebookStore = create<NotebookState>((set, get) => ({
     updated[idx] = { ...curr, sortOrder: next.sortOrder };
     updated.sort((a, b) => a.sortOrder - b.sortOrder);
     set({ notebooks: updated });
+  },
+
+  reorderNotebooks: async (db: SQLiteDatabase, orderedIds: string[]) => {
+    await Promise.all(orderedIds.map((id, index) => updateNotebookSortOrder(db, id, index)));
+    set((s) => {
+      const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+      const updated = s.notebooks.map((n) => ({ ...n, sortOrder: orderMap.get(n.id) ?? n.sortOrder }));
+      updated.sort((a, b) => a.sortOrder - b.sortOrder);
+      return { notebooks: updated };
+    });
   },
 }));
