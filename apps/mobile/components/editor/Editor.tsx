@@ -14,6 +14,7 @@ import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
+import { exportNoteAsPdf } from '../../lib/export-pdf';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -276,6 +277,31 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         >
           <MaterialCommunityIcons
             name="download-outline"
+            size={18}
+            color={tokens.textMuted}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            if (!activeNote) return;
+            void exportNoteAsPdf({
+              id: activeNote.id,
+              title: localTitle,
+              body: localBody,
+            });
+          }}
+          accessibilityLabel="Export note as PDF"
+          style={({ pressed }) => ({
+            width: 30,
+            height: 30,
+            marginLeft: 4,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: pressed ? tokens.bgHover : 'transparent',
+          })}
+        >
+          <MaterialCommunityIcons
+            name="file-pdf-box"
             size={18}
             color={tokens.textMuted}
           />
