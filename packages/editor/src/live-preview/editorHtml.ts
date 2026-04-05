@@ -538,7 +538,7 @@ function reportHeight() {
 // become normal size again; otherwise markers recede via CSS font-size.
 // ---------------------------------------------------------------------------
 
-function buildFenceDecorations(view) {
+function buildFenceDecorations(view, widthsById) {
   const ranges = [];
   // Signature captures fence identity + line ranges only (NOT the editing
   // flag). That way selection-only updates — which flip cm-fence-editing but
@@ -566,6 +566,12 @@ function buildFenceDecorations(view) {
         // collapse to zero height and cannot carry borders themselves.
         const bodyFirst = startLine + 1;
         const bodyLast = endLine - 1;
+        // Previously-measured width for this fence. Embedding it directly
+        // in the decoration's style attribute means newly-created lines
+        // (from pressing Enter, splitting a line, etc.) render at the
+        // correct width immediately — without a one-frame flash at full
+        // parent width while the async requestMeasure catches up.
+        const cachedWidth = widthsById.get(fenceId) || 0;
         for (let ln = startLine; ln <= endLine; ln++) {
           const line = view.state.doc.line(ln);
           const classes = ['cm-fence-line'];
@@ -574,13 +580,15 @@ function buildFenceDecorations(view) {
           if (ln === bodyFirst && bodyFirst <= bodyLast) classes.push('cm-fence-body-first');
           if (ln === bodyLast && bodyFirst <= bodyLast) classes.push('cm-fence-body-last');
           if (editing) classes.push('cm-fence-editing');
+          const attrs = {
+            class: classes.join(' '),
+            'data-fence-id': fenceId,
+          };
+          if (cachedWidth > 0) {
+            attrs.style = 'width:' + cachedWidth + 'px';
+          }
           ranges.push(
-            Decoration.line({
-              attributes: {
-                class: classes.join(' '),
-                'data-fence-id': fenceId,
-              },
-            }).range(line.from)
+            Decoration.line({ attributes: attrs }).range(line.from)
           );
         }
       },
@@ -595,7 +603,11 @@ function buildFenceDecorations(view) {
 const fenceStylePlugin = ViewPlugin.fromClass(
   class {
     constructor(view) {
-      const built = buildFenceDecorations(view);
+      // Map<fenceId, measured pixel width> — persists across updates so
+      // newly-created lines can be rendered at the correct width the
+      // moment they enter the DOM, eliminating the Enter-key flicker.
+      this.widthsById = new Map();
+      const built = buildFenceDecorations(view, this.widthsById);
       this.decorations = built.decorations;
       this.signature = built.signature;
       this.lastMeasuredSignature = '';
@@ -603,7 +615,7 @@ const fenceStylePlugin = ViewPlugin.fromClass(
     }
     update(update) {
       if (update.docChanged || update.selectionSet || update.viewportChanged) {
-        const built = buildFenceDecorations(update.view);
+        const built = buildFenceDecorations(update.view, this.widthsById);
         this.decorations = built.decorations;
         this.signature = built.signature;
       }
@@ -626,36 +638,81 @@ const fenceStylePlugin = ViewPlugin.fromClass(
       const signatureAtSchedule = this.signature;
       view.requestMeasure({
         read: () => {
-          // Group fence-line elements by data-fence-id and record the max
-          // scrollWidth per group. scrollWidth ignores the element's own
-          // min-width, so leftover min-width from a previous pass does not
-          // skew the measurement upward — but to be safe against future
-          // changes, we clear inline min-width before reading.
+          // Measure the actual TEXT width of each fence line using a DOM
+          // Range. We can't use el.scrollWidth here — .cm-fence-line is a
+          // block-level element, so scrollWidth returns max(contentWidth,
+          // clientWidth), and clientWidth is the parent's full width. That
+          // makes every line "measure" as full-width and defeats the whole
+          // purpose. A Range spanning the line's text content returns the
+          // true rendered text width regardless of the element's box size.
+          //
+          // We also can't use min-width to constrain the line — block
+          // elements default to width:auto which fills the parent, so
+          // min-width only sets a floor and never prevents expansion. We
+          // set style.width directly in the write phase to force the box
+          // to exactly the measured value.
+          //
+          // Since box-sizing: border-box applies (from the reset), width
+          // includes padding + border, so we add horizontal padding+border
+          // to the measured text width. Values match CSS: 16+16 padding,
+          // 1+1 border.
+          const PADDING_AND_BORDER = 16 + 16 + 1 + 1;
           const nodes = view.dom.querySelectorAll(
             '.cm-fence-line[data-fence-id]'
           );
           const byId = new Map();
-          for (const el of nodes) {
-            // Clear previous min-width so we measure natural content width.
-            el.style.minWidth = '';
-          }
+          // DO NOT clear el.style.width here. Range.getBoundingClientRect
+          // measures the actual text glyphs, not the element box, so the
+          // measurement is invariant to whatever width we set on the last
+          // pass. Clearing would cause a visible full-width flicker
+          // between read and write phases.
           for (const el of nodes) {
             const id = el.getAttribute('data-fence-id');
-            const w = el.scrollWidth;
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const rect = range.getBoundingClientRect();
+            range.detach && range.detach();
+            const textWidth = rect.width;
+            // Empty (or collapsed marker) lines have textWidth 0 — skip
+            // so they don't drag the max down. They're still included in
+            // the visual block via the body-first/last borders.
+            if (textWidth <= 0) continue;
+            const w = textWidth + PADDING_AND_BORDER;
             const prev = byId.get(id) || 0;
             if (w > prev) byId.set(id, w);
           }
           return { byId, nodes };
         },
         write: ({ byId, nodes }) => {
+          // Refresh the cache from the freshly-measured values and write
+          // them imperatively to the current DOM nodes. The cache feeds
+          // the next decoration build so newly-created lines get the
+          // width embedded in their initial style attribute.
+          let cacheChanged = false;
+          for (const [id, max] of byId) {
+            if (this.widthsById.get(id) !== max) {
+              this.widthsById.set(id, max);
+              cacheChanged = true;
+            }
+          }
           for (const el of nodes) {
             const id = el.getAttribute('data-fence-id');
             const max = byId.get(id);
             if (max && max > 0) {
-              el.style.minWidth = max + 'px';
+              const target = max + 'px';
+              if (el.style.width !== target) {
+                el.style.width = target;
+              }
             }
           }
           this.lastMeasuredSignature = signatureAtSchedule;
+          // If the cache changed, the next decoration rebuild (on the
+          // next update) will embed the new width in the style attribute.
+          // We don't force a synchronous rebuild here because the current
+          // DOM already has the correct width from the imperative write
+          // above; the cache just needs to be in sync for the NEXT new
+          // line creation.
+          void cacheChanged;
         },
       });
     }
