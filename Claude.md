@@ -270,6 +270,32 @@ Implement the canvas-first data model and `canvas_json` migration before Phase 2
 - `updated_at` stored as `Date.now()` (Unix ms)
 - `is_dirty` always `0` in Phase 1 (no sync needed yet)
 
+### Progress log
+
+**2026-04-05 — Editor unification & code block polish** (merged to main as `453992b`)
+- Unified web + native on a single CodeMirror 6 engine via iframe (web) and `react-native-webview` (native). `CodeBlock.tsx` and the segment-parsing native path were deleted.
+- Dropped ~473 lines of custom live-preview decoration code in favor of CodeMirror's native markdown mode + 23 statically-imported language packs for syntax highlighting.
+- Merged `code-inline` and `code-block` toolbar buttons into one smart Code button.
+- Added Obsidian-style fence edit/render toggle using pure line decorations (no block widgets — the previous widget-based approach caused cursor jumps).
+- Fence width is measured per-block via `requestMeasure` + DOM Range and cached to eliminate Enter-key flicker.
+- JetBrains Mono body font; idle fence bg `#252525`, editing bg `#2C2C2C`.
+- 12 Vitest unit tests for `applyFormat` code-block parity + source drift guard.
+- Removed the pencil/eye preview-mode toggle (dead UI, no review mode use case). Dropped `react-native-markdown-display` dependency.
+
+**In flight — feat/fence-copy-button** (not yet merged)
+- COPY button per fence, rendered as a plain DOM overlay inside the iframe (no CodeMirror widgets). Positioned just outside the right edge of the fence box. Hides when cursor is inside the fence.
+
+### Still open in Phase 1
+- [ ] Delete note — swipe or long-press to delete, confirmation prompt
+- [ ] Delete folder — long-press in sidebar, empty or cascade confirm
+- [ ] Delete notebook — long-press, cascade confirm
+- [ ] New note UX — investigate and fix odd creation behavior
+- [ ] Auto-delete empty notes — silent delete on navigate-away (Phase 4 item, bumped up)
+- [ ] Toggle-off code-block — cursor inside existing fence + code-block command → unwrap
+- [ ] iPad layout redesign pass (deferred, Designer-owned)
+- [ ] iOS `pod install` + Apple Pencil pass-through smoke (pre-TestFlight gate, needs Mac — no `ios/` directory in repo yet)
+- [ ] TestFlight build + App Store submission
+
 ---
 
 ## Phase 2 — Auth, sync engine & paywall (weeks 9–12)
