@@ -35,6 +35,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
   const updateNoteCanvas = useNoteStore((s) => s.updateNoteCanvas);
+  const deleteIfEmpty = useNoteStore((s) => s.deleteIfEmpty);
 
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
@@ -65,6 +66,39 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
 
   // Task 6 — auto-migrate legacy notes to CanvasDocument on open
   useNoteCanvasMigration(activeNote);
+
+  // Auto-delete empty notes when the user navigates away.
+  // Track the previous activeNoteId across renders; when it changes, run
+  // deleteIfEmpty against the previous id exactly once per transition.
+  const prevActiveNoteIdRef = useRef<string | null>(activeNoteId ?? null);
+  useEffect(() => {
+    const prevId = prevActiveNoteIdRef.current;
+    const nextId = activeNoteId ?? null;
+    if (prevId && prevId !== nextId) {
+      try {
+        const db = getDatabase();
+        void deleteIfEmpty(db, prevId);
+      } catch (_) {
+        // Best-effort cleanup — must not break navigation.
+      }
+    }
+    prevActiveNoteIdRef.current = nextId;
+  }, [activeNoteId, deleteIfEmpty]);
+
+  // On unmount (editor closed / app backgrounded), clean up the last active note.
+  useEffect(() => {
+    return () => {
+      const prevId = prevActiveNoteIdRef.current;
+      if (!prevId) return;
+      try {
+        const db = getDatabase();
+        void deleteIfEmpty(db, prevId);
+      } catch (_) {
+        // Best-effort cleanup.
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync local state when active note changes
   useEffect(() => {
