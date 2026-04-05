@@ -182,7 +182,7 @@ export default function Sidebar() {
                 style={{ marginRight: 4, width: 16 }}
               />
               <MaterialCommunityIcons
-                name={isExpanded ? 'folder-open' : 'folder'}
+                name={isExpanded ? 'notebook' : 'notebook-outline'}
                 size={17}
                 color={isActive ? tokens.accentLight : tokens.textMuted}
                 style={{ marginRight: 8 }}
