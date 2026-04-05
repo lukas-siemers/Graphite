@@ -76,143 +76,6 @@ export function buildEditorHtml(): string {
   .cm-selectionBackground { background: rgba(242,133,0,0.25) !important; }
   .cm-focused .cm-selectionBackground { background: rgba(242,133,0,0.3) !important; }
 
-  /* ── Live-preview hidden marks ── */
-  .cm-md-hidden {
-    display: none;
-  }
-
-  /* ── Heading styles (applied via line decoration) ── */
-  .cm-md-h1 { font-size: 26px !important; font-weight: 700 !important; color: #FFFFFF !important; line-height: 36px !important; }
-  .cm-md-h2 { font-size: 22px !important; font-weight: 700 !important; color: #FFFFFF !important; line-height: 30px !important; }
-  .cm-md-h3 { font-size: 18px !important; font-weight: 600 !important; color: #FFFFFF !important; line-height: 26px !important; }
-
-  /* ── Inline styles (applied via mark decoration) ── */
-  .cm-md-bold   { font-weight: 700; color: #FFFFFF; }
-  .cm-md-italic { font-style: italic; }
-  .cm-md-strike { text-decoration: line-through; color: #8A8F98; }
-  .cm-md-code   { font-family: 'Courier New', monospace; font-size: 14px; color: #FFB347; background: #141414; padding: 1px 4px; border-radius: 2px; }
-  .cm-md-link   { color: #F28500; text-decoration: underline; }
-  .cm-md-blockquote-line { border-left: 3px solid #F28500; padding-left: 12px; color: #8A8F98; }
-  .cm-md-bullet   { color: #F28500; }
-
-  /* ── Fenced code blocks (spec: docs/specs/code-block.md) ──
-     Rendered via a block widget (header) + line decorations (body lines).
-     All values come from the Digital Monolith spec — 0px radius, sharp,
-     tonal stacking, no shadows. */
-
-  /* Header widget: language pill (left) + copy button (right) */
-  .cm-graphite-codeblock__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 28px;
-    padding: 0 8px;
-    background: #252525;
-    border: 1px solid #333333;
-    border-bottom: 1px solid #333333;
-    margin-top: 16px;
-    user-select: none;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  }
-  .cm-graphite-codeblock__lang {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 6px;
-    background: #2C1800;
-    color: #FFB347;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1.8px;
-    text-transform: uppercase;
-    border: none;
-    border-radius: 0;
-  }
-  .cm-graphite-codeblock__copy {
-    display: inline-flex;
-    align-items: center;
-    height: 20px;
-    padding: 0 8px;
-    background: transparent;
-    color: #8A8F98;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 1.8px;
-    text-transform: uppercase;
-    border: none;
-    border-radius: 0;
-    cursor: pointer;
-    transition: none;
-  }
-  .cm-graphite-codeblock__copy:hover {
-    background: #2C2C2C;
-    color: #DCDDDE;
-  }
-  .cm-graphite-codeblock__copy:active {
-    background: #D4730A;
-    color: #1E1E1E;
-  }
-  .cm-graphite-codeblock__copy:focus-visible {
-    outline: 2px solid #F28500;
-    outline-offset: 0;
-    border-radius: 0;
-  }
-  .cm-graphite-codeblock__copy--copied,
-  .cm-graphite-codeblock__copy--copied:hover {
-    background: transparent;
-    color: #F28500;
-  }
-
-  /* Body lines — shared background, left/right border, Courier stack.
-     The header owns the top border (via its border-bottom acting as the
-     seam), and the last body line owns the bottom border. */
-  .cm-md-fence-line {
-    background: #141414 !important;
-    color: #DCDDDE;
-    font-family: "SF Mono", Menlo, Consolas, "Courier New", Courier, monospace !important;
-    font-size: 13px !important;
-    line-height: 20.15px !important; /* 13 * 1.55 */
-    padding: 0 16px !important;
-    border-left: 1px solid #333333;
-    border-right: 1px solid #333333;
-    white-space: pre !important;
-    overflow-x: auto;
-    overflow-y: hidden;
-    tab-size: 2;
-  }
-  .cm-md-fence-line::-webkit-scrollbar { height: 8px; }
-  .cm-md-fence-line::-webkit-scrollbar-track { background: transparent; }
-  .cm-md-fence-line::-webkit-scrollbar-thumb { background: #333333; }
-  .cm-md-fence-line::-webkit-scrollbar-thumb:hover { background: #555558; }
-
-  /* Opening fence line — extra top padding */
-  .cm-md-fence-first {
-    padding-top: 12px !important;
-  }
-  /* Closing fence line — extra bottom padding + bottom border */
-  .cm-md-fence-last {
-    padding-bottom: 12px !important;
-    border-bottom: 1px solid #333333;
-    margin-bottom: 16px;
-  }
-  /* The opening/closing triple-backtick markers must remain editable so
-     the cursor can land on them. Dim them to near-invisibility without
-     collapsing them so measure layout stays stable. */
-  .cm-md-fence-first, .cm-md-fence-last {
-    color: #555558;
-  }
-
-  /* Empty-state placeholder — shown on an otherwise blank content line
-     that sits alone between the opener and the closer. */
-  .cm-md-fence-empty::after {
-    content: "// write code here";
-    color: #555558;
-    font-style: normal;
-    pointer-events: none;
-  }
-
   /* ── Placeholder ── */
   .cm-placeholder { color: #8A8F98 !important; font-style: italic; }
 
@@ -251,9 +114,6 @@ window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 import { EditorState, Compartment } from 'https://esm.sh/@codemirror/state@6';
 import {
   EditorView,
-  ViewPlugin,
-  Decoration,
-  WidgetType,
   keymap,
   placeholder,
 } from 'https://esm.sh/@codemirror/view@6';
@@ -267,7 +127,6 @@ import {
 } from 'https://esm.sh/@codemirror/commands@6';
 import { markdown, markdownLanguage } from 'https://esm.sh/@codemirror/lang-markdown@6';
 import {
-  syntaxTree,
   HighlightStyle,
   syntaxHighlighting,
   LanguageDescription,
@@ -352,6 +211,18 @@ const graphiteHighlight = HighlightStyle.define([
   { tag: t.escape,                                                           color: '#F28500' },
   { tag: t.meta,                                                             color: '#8A8F98' },
   { tag: t.invalid,                                                          color: '#FF6B6B', textDecoration: 'underline' },
+  // Markdown token styling — applied by the markdown extension to the
+  // tokens it parses (headings, emphasis, strong, links, etc.) including
+  // content nested inside fenced code blocks.
+  { tag: t.heading1,                                                         color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.heading2,                                                         color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.heading3,                                                         color: '#FFFFFF', fontWeight: '600' },
+  { tag: t.strong,                                                           color: '#FFFFFF', fontWeight: '700' },
+  { tag: t.emphasis,                                                         fontStyle: 'italic' },
+  { tag: t.strikethrough,                                                    color: '#8A8F98', textDecoration: 'line-through' },
+  { tag: t.link,                                                             color: '#F28500', textDecoration: 'underline' },
+  { tag: t.url,                                                              color: '#F28500' },
+  { tag: t.monospace,                                                        color: '#FFB347' },
 ]);
 
 // ---------------------------------------------------------------------------
@@ -361,349 +232,6 @@ const graphiteHighlight = HighlightStyle.define([
 function post(msg) {
   window.parent.postMessage(msg, '*');
 }
-
-// ---------------------------------------------------------------------------
-// Live-preview decorations plugin
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Fence header widget — language chip + copy button rendered above each
-// fenced code block as a block decoration.
-// ---------------------------------------------------------------------------
-class FenceHeaderWidget extends WidgetType {
-  constructor(language) {
-    super();
-    this.language = language || '';
-  }
-  eq(other) {
-    // Memoization guard: ONLY compare the displayed language label. The
-    // clipboard content must not be captured in widget state — if it were,
-    // every keystroke inside the fence would bust widget equality and tear
-    // down / rebuild the DOM, causing measure glitches and making edits near
-    // the fence feel like they "ate" characters (Bug 3). Content is looked
-    // up lazily at click time by walking the document from the widget's
-    // position down to the closing fence.
-    return other.language === this.language;
-  }
-  toDOM(view) {
-    const wrap = document.createElement('div');
-    wrap.className = 'cm-graphite-codeblock__header';
-    wrap.contentEditable = 'false';
-    wrap.setAttribute('spellcheck', 'false');
-
-    // Language pill — uppercase language name or the "CODE" fallback.
-    // Unknown languages (info strings not in the registry) still display
-    // their uppercase name — per spec 5.3, only the empty / missing case
-    // falls back to "CODE".
-    const rawLang = (this.language || '').trim();
-    const displayLang = rawLang ? rawLang.toUpperCase() : 'CODE';
-    const langEl = document.createElement('span');
-    langEl.className = 'cm-graphite-codeblock__lang';
-    langEl.setAttribute('role', 'img');
-    langEl.setAttribute('aria-label', 'Language: ' + displayLang);
-    langEl.textContent = displayLang;
-
-    // COPY button on the right
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'cm-graphite-codeblock__copy';
-    btn.setAttribute('aria-label', 'Copy code to clipboard');
-    btn.textContent = 'COPY';
-
-    // Lazy content lookup: walk the document from the widget's DOM position
-    // down until we find the closing triple-backtick fence. This keeps the
-    // widget itself stateless w.r.t. fence content so typing inside the
-    // fence doesn't tear down / rebuild the widget DOM.
-    const fenceRe = /^\\s*\`\`\`/;
-    const readFenceContent = () => {
-      try {
-        const pos = view.posAtDOM(wrap);
-        const doc = view.state.doc;
-        const startLine = doc.lineAt(pos);
-        // The widget renders with side=-1 at the opener line. The opener
-        // itself is the first line at/after pos; content starts one line
-        // below, closer is the next line matching /^\\s*\`\`\`/.
-        let openerLineNum = startLine.number;
-        // If the line at pos isn't actually the opener (e.g. widget got
-        // placed just before the opener), nudge forward until we hit it.
-        while (openerLineNum <= doc.lines && !fenceRe.test(doc.line(openerLineNum).text)) {
-          openerLineNum++;
-        }
-        const lines = [];
-        for (let ln = openerLineNum + 1; ln <= doc.lines; ln++) {
-          const lineText = doc.line(ln).text;
-          if (fenceRe.test(lineText)) break;
-          lines.push(lineText);
-        }
-        return lines.join('\\n');
-      } catch (_) {
-        return '';
-      }
-    };
-
-    let resetTimer = null;
-    btn.addEventListener('mousedown', (e) => { e.preventDefault(); });
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const content = readFenceContent();
-      const done = () => {
-        btn.classList.add('cm-graphite-codeblock__copy--copied');
-        btn.textContent = 'COPIED';
-        btn.setAttribute('aria-label', 'Code copied');
-        if (resetTimer) clearTimeout(resetTimer);
-        resetTimer = setTimeout(() => {
-          btn.classList.remove('cm-graphite-codeblock__copy--copied');
-          btn.textContent = 'COPY';
-          btn.setAttribute('aria-label', 'Copy code to clipboard');
-          resetTimer = null;
-        }, 1200);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(content).then(done).catch(() => {
-          const ta = document.createElement('textarea');
-          ta.value = content;
-          document.body.appendChild(ta);
-          ta.select();
-          try { document.execCommand('copy'); done(); } catch (_) {}
-          document.body.removeChild(ta);
-        });
-      }
-    });
-
-    wrap.appendChild(langEl);
-    wrap.appendChild(btn);
-    return wrap;
-  }
-  ignoreEvent() { return false; }
-}
-
-const livePreviewPlugin = ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.decorations = this.build(view);
-  }
-  update(update) {
-    if (update.docChanged || update.selectionSet || update.viewportChanged) {
-      this.decorations = this.build(update.view);
-    }
-  }
-  build(view) {
-    const doc = view.state.doc;
-    const selection = view.state.selection.main;
-
-    // Collect all decorations; Decoration.set sorts them at the end
-    const decos = [];
-
-    syntaxTree(view.state).iterate({
-      enter(node) {
-        const { from, to, name } = node;
-
-        // Determine if cursor is on same line as this node
-        const nodeLine = doc.lineAt(from).number;
-        const cursorLine = doc.lineAt(selection.head).number;
-        const cursorOnLine = nodeLine === cursorLine;
-
-        // CodeMark is ambiguous in the markdown grammar: it's used both for
-        // INLINE code backticks (\`foo\`) and for the opening/closing fences of
-        // a FencedCode block. We only want to hide inline backticks when the
-        // cursor moves away — fence backticks must stay visible at all times
-        // because the fencePlugin styles them as part of the block chrome.
-        // Hiding fence marks made users "lose" backticks on click (Bug 1).
-        if (name === 'CodeMark') {
-          const parentName = node.node.parent && node.node.parent.name;
-          if (parentName === 'InlineCode' && !cursorOnLine) {
-            decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
-          }
-          return;
-        }
-
-        // Other marks to hide when cursor is elsewhere. These are all
-        // unambiguous (EmphasisMark is only inline emphasis, HeaderMark is
-        // only on heading lines, etc.) so the simple includes() check is safe.
-        const hiddenWhenAway = [
-          'HeaderMark',
-          'EmphasisMark',
-          'StrikethroughMark',
-          'QuoteMark',
-        ];
-
-        if (hiddenWhenAway.includes(name) && !cursorOnLine) {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
-          return;
-        }
-
-        // Link URL — hide when cursor is not on this line
-        if (name === 'URL' && !cursorOnLine) {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
-          return;
-        }
-
-        // Heading line decorations
-        if (name === 'ATXHeading1') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h1' }) });
-        } else if (name === 'ATXHeading2') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h2' }) });
-        } else if (name === 'ATXHeading3') {
-          decos.push({ from, to: from, deco: Decoration.line({ class: 'cm-md-h3' }) });
-        }
-
-        // Bold / Strong
-        if (name === 'StrongEmphasis') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-bold' }) });
-        }
-
-        // Italic / Emphasis
-        if (name === 'Emphasis') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-italic' }) });
-        }
-
-        // Strikethrough
-        if (name === 'Strikethrough') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-strike' }) });
-        }
-
-        // Inline code
-        if (name === 'InlineCode') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-code' }) });
-        }
-
-        // Link
-        if (name === 'Link') {
-          decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-link' }) });
-        }
-
-        // Blockquote lines
-        if (name === 'Blockquote') {
-          // Iterate each line in the blockquote
-          let pos = from;
-          while (pos <= to) {
-            const line = doc.lineAt(pos);
-            decos.push({ from: line.from, to: line.from, deco: Decoration.line({ class: 'cm-md-blockquote-line' }) });
-            if (line.to >= to) break;
-            pos = line.to + 1;
-          }
-        }
-
-        // Fence rendering is handled in a separate fencePlugin to keep
-        // block widgets and inline/line decorations in different providers
-        // (avoids "ranges must be added in sorted order" crashes).
-      },
-    });
-
-    // Use Decoration.set(ranges, sort=true) instead of RangeSetBuilder —
-    // it handles mixed line/mark/block-widget decorations with the correct
-    // startSide ordering automatically, avoiding "ranges must be added in
-    // sorted order" errors when block widgets overlap line decorations.
-    const ranges = decos.map(({ from, to, deco }) => deco.range(from, to));
-    return Decoration.set(ranges, true);
-  }
-}, { decorations: v => v.decorations });
-
-// ---------------------------------------------------------------------------
-// Fence plugin — renders the header widget above every fenced code block
-// and styles the content lines. Uses the FencedCode node from the markdown
-// syntax tree for closed fences, plus a small regex fallback for the
-// unclosed fence at end-of-document (so live preview renders immediately
-// when the user types the opener).
-//
-// Kept in a SEPARATE plugin from livePreviewPlugin so the block widget
-// decorations don't collide with livePreviewPlugin's line/mark decorations.
-// Both plugins return independent decoration sets; CodeMirror merges them.
-// ---------------------------------------------------------------------------
-const fencePlugin = ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.decorations = this.build(view);
-  }
-  update(update) {
-    if (update.docChanged || update.viewportChanged) {
-      this.decorations = this.build(update.view);
-    }
-  }
-  build(view) {
-    const doc = view.state.doc;
-    const decos = [];
-    // Track which line numbers are already inside a closed fence so the
-    // fallback scanner doesn't double-render them.
-    const handled = new Set();
-
-    // Closed fences via syntax tree
-    syntaxTree(view.state).iterate({
-      enter: (node) => {
-        if (node.name !== 'FencedCode') return;
-        const fromLine = doc.lineAt(node.from);
-        const toLine = doc.lineAt(node.to);
-
-        // Extract language from the first line (text after the opening fence)
-        const openText = fromLine.text;
-        const langMatch = openText.match(new RegExp('^\\\\s*' + '\`'.repeat(3) + '(.*)$'));
-        const lang = langMatch ? (langMatch[1] || '').trim() : '';
-
-        // Block widget above opener. Content is NOT passed in — the widget
-        // reads fence content lazily at COPY click time so typing inside the
-        // fence doesn't invalidate widget equality (see FenceHeaderWidget.eq).
-        decos.push({
-          pos: fromLine.from,
-          side: -1,
-          block: true,
-          deco: Decoration.widget({
-            widget: new FenceHeaderWidget(lang),
-            side: -1,
-            block: true,
-          }),
-        });
-
-        // Empty-state detection — the fence has zero content lines, or
-        // exactly one blank content line. Either way, decorate the first
-        // content line (or the closer if there is none) with the empty
-        // class so the placeholder "// write code here" renders.
-        const contentLineCount = toLine.number - fromLine.number - 1;
-        const onlyBlank = contentLineCount === 1
-          && doc.line(fromLine.number + 1).text.trim() === '';
-        const isEmptyBlock = contentLineCount <= 0 || onlyBlank;
-
-        // Line decorations for every line in the fence
-        for (let ln = fromLine.number; ln <= toLine.number; ln++) {
-          handled.add(ln);
-          const line = doc.line(ln);
-          const isFirst = ln === fromLine.number;
-          const isLast  = ln === toLine.number;
-          let cls = 'cm-md-fence-line';
-          if (isFirst) cls += ' cm-md-fence-first';
-          if (isLast)  cls += ' cm-md-fence-last';
-          // Mark the (single) blank content line for the empty placeholder.
-          if (isEmptyBlock && onlyBlank && ln === fromLine.number + 1) {
-            cls += ' cm-md-fence-empty';
-          }
-          decos.push({
-            pos: line.from,
-            side: 0,
-            block: false,
-            deco: Decoration.line({ attributes: { class: cls } }),
-          });
-        }
-      },
-    });
-
-    // Note: we intentionally do NOT render unclosed fences. Block widgets
-    // that appear/disappear while the user is typing cause cursor jumps and
-    // measure glitches. The fence snaps into place once the user types the
-    // closing triple-backtick and the FencedCode node is parsed.
-
-    // Sort: by position ascending, then block widgets (side -1) before
-    // line decorations (side 0) at the same position. This is the ordering
-    // CodeMirror's RangeSet expects.
-    decos.sort((a, b) => {
-      if (a.pos !== b.pos) return a.pos - b.pos;
-      if (a.side !== b.side) return a.side - b.side;
-      // block widgets come before inline at same pos+side
-      if (a.block !== b.block) return a.block ? -1 : 1;
-      return 0;
-    });
-
-    const ranges = decos.map(({ pos, deco }) => deco.range(pos, pos));
-    return Decoration.set(ranges, true);
-  }
-}, { decorations: v => v.decorations });
 
 // ---------------------------------------------------------------------------
 // Active format detection (for toolbar highlighting)
@@ -847,7 +375,7 @@ function applyFormat(view, command) {
       // inserting a block near the viewport edge (or via toolbar when the
       // cursor was just off-screen) could leave the user staring at the old
       // viewport with no visible change — which reads as "the button did
-      // nothing" (Bug 2).
+      // nothing".
       effects: EditorView.scrollIntoView(cursorPos, { y: 'center' }),
     });
     // Re-focus so the user can immediately type the language identifier.
@@ -948,8 +476,6 @@ const view = new EditorView({
       syntaxHighlighting(graphiteHighlight),
       placeholder('Start writing...'),
       readOnlyCompartment.of(EditorState.readOnly.of(false)),
-      livePreviewPlugin,
-      fencePlugin,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const value = update.state.doc.toString();
@@ -1020,3 +546,4 @@ post({ type: 'ready' });
 </body>
 </html>`;
 }
+
