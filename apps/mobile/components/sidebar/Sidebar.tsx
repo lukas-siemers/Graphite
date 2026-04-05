@@ -30,6 +30,7 @@ export default function Sidebar() {
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
   const loadNotes = useNoteStore((s) => s.loadNotes);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
+  const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const didAutoExpandRef = useRef(false);
@@ -130,7 +131,8 @@ export default function Sidebar() {
   }
 
   function renderNotebook({ item: notebook }: { item: Notebook }) {
-    const isActive = notebook.id === activeNotebookId;
+    // Only highlight the notebook when it's active AND no child folder is selected
+    const isActive = notebook.id === activeNotebookId && activeFolderId === null;
     const isExpanded = expandedIds.has(notebook.id);
     const isRenaming = renamingNotebookId === notebook.id;
 
