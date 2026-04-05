@@ -1,7 +1,10 @@
 /**
- * Native implementation of LivePreviewInput.
+ * Platform-dispatched barrel for LivePreviewInput.
  *
- * On iOS/Android, CodeMirror is not needed — CanvasTextInput already provides
- * the correct editing experience with Apple Pencil support untouched.
+ * At bundle time Metro picks `LivePreviewInput.native.tsx` (iOS/Android) or
+ * `LivePreviewInput.web.tsx` (web) via the platform-extension resolver. This
+ * base file exists only so TypeScript has a consistent type signature to
+ * import from `./LivePreviewInput` — the runtime implementation is never
+ * loaded from here.
  */
-export { CanvasTextInput as LivePreviewInput } from './CanvasTextInput';
+export { LivePreviewInput } from './LivePreviewInput.web';

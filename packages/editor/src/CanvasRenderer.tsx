@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef } from 'react';
 import { View, ScrollView, StyleSheet, Platform } from 'react-native';
 
 // Gesture handler is native-only — on web the ink layer is a no-op anyway
@@ -19,9 +19,7 @@ import Constants from 'expo-constants';
 import { nanoid } from 'nanoid';
 import { tokens } from '@graphite/ui';
 import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite/db';
-import { CanvasTextInput } from './CanvasTextInput';
 import { LivePreviewInput } from './LivePreviewInput';
-import { CodeBlock } from './CodeBlock';
 import type { FormatCommand } from './types';
 
 // ---------------------------------------------------------------------------
@@ -51,71 +49,14 @@ export interface CanvasRendererProps {
   readOnly?: boolean;
   /** Controls whether the text layer accepts keyboard input */
   inputMode?: 'ink' | 'scroll';
-  /** Format command dispatched from the toolbar — routed to the last-focused text segment */
+  /** Format command dispatched from the toolbar — routed to the CodeMirror host */
   pendingCommand?: FormatCommand | null;
   /** Called when the pending command has been consumed */
   onCommandApplied?: () => void;
   /** Reports which formats are active at the cursor — for toolbar highlighting */
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
-  /** Auto-focus the first text segment — set true when entering edit mode from preview */
+  /** Auto-focus the editor — set true when entering edit mode from preview */
   autoFocusFirst?: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — fenced code block parser
-// ---------------------------------------------------------------------------
-
-interface TextSegment {
-  type: 'text';
-  content: string;
-}
-
-interface CodeSegment {
-  type: 'code';
-  language: string;
-  content: string;
-}
-
-type BodySegment = TextSegment | CodeSegment;
-
-/**
- * Splits a markdown body string into alternating text and fenced-code
- * segments. Handles ``` fences with an optional language identifier.
- */
-function parseBodySegments(body: string): BodySegment[] {
-  const segments: BodySegment[] = [];
-  // Regex matches ``` optionally followed by a language tag, captures content
-  // until the closing ```. Non-greedy so nested fences are handled correctly.
-  const fenceRe = /```([^\n]*)\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = fenceRe.exec(body)) !== null) {
-    // Text before this code block
-    const before = body.slice(lastIndex, match.index);
-    if (before.length > 0) {
-      segments.push({ type: 'text', content: before });
-    }
-    segments.push({
-      type: 'code',
-      language: (match[1] ?? '').trim(),
-      content: match[2] ?? '',
-    });
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Remaining text after the last code block
-  const tail = body.slice(lastIndex);
-  if (tail.length > 0) {
-    segments.push({ type: 'text', content: tail });
-  }
-
-  // Guarantee at least one segment so the editor is always focusable
-  if (segments.length === 0) {
-    segments.push({ type: 'text', content: '' });
-  }
-
-  return segments;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,9 +65,7 @@ function parseBodySegments(body: string): BodySegment[] {
 
 interface InkLayerViewProps {
   inkLayer: InkLayer;
-  /** Must match the ScrollView content width */
   width: number;
-  /** Must match the ScrollView content height */
   height: number;
 }
 
@@ -137,17 +76,10 @@ function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
   }
 
   return (
-    <SkiaCanvas
-      style={[StyleSheet.absoluteFill, { width, height }]}
-      // Pointer events none so the content layer on top captures all touches
-    >
+    <SkiaCanvas style={[StyleSheet.absoluteFill, { width, height }]}>
       {inkLayer.strokes.map((stroke) => {
         if (stroke.points.length < 2) return null;
 
-        // Build an SVG path string from the stroke points.
-        // At each segment we scale the paint width by the average pressure of
-        // the two endpoints — this approximates pressure-sensitive rendering
-        // without per-segment Path objects (which would be expensive).
         const svgParts: string[] = [];
         const { x: x0, y: y0 } = stroke.points[0];
         svgParts.push(`M ${x0} ${y0}`);
@@ -157,7 +89,6 @@ function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
         }
         const pathStr = svgParts.join(' ');
 
-        // Average pressure across all points for a single-pass approximation
         const avgPressure =
           stroke.points.reduce((sum, p) => sum + p.pressure, 0) /
           stroke.points.length;
@@ -172,13 +103,7 @@ function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
         paint.setStrokeJoin(1 /* round */);
         paint.setAlphaf(stroke.opacity);
 
-        return (
-          <Path
-            key={stroke.id}
-            path={pathStr}
-            paint={paint}
-          />
-        );
+        return <Path key={stroke.id} path={pathStr} paint={paint} />;
       })}
     </SkiaCanvas>
   );
@@ -191,9 +116,12 @@ function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
 /**
  * Renders a CanvasDocument on a fixed-width infinite-scroll surface.
  *
- * Two layers:
- *   1. Ink (react-native-skia) — absolutely positioned behind content
- *   2. Content (text + code blocks) — on top, receives touch events
+ * Unified editor model (v1.5):
+ *   - Text layer: a single CodeMirror 6 live-preview editor hosted in a
+ *     react-native-webview (native) or <iframe> (web). Code blocks, headings,
+ *     inline formatting are all rendered by CodeMirror — no React Native
+ *     segment parsing, no separate <CodeBlock> component.
+ *   - Ink layer: Skia strokes overlaid on native, no-op on web.
  */
 export function CanvasRenderer({
   canvasDoc,
@@ -209,25 +137,19 @@ export function CanvasRenderer({
 }: CanvasRendererProps) {
   const scrollRef = useRef<ScrollView>(null);
   const contentHeightRef = useRef<number>(600);
-  // Track which text-segment index last received focus so commands route correctly
-  const [lastFocusedIndex, setLastFocusedIndex] = useState(0);
 
   // Active stroke being drawn — accumulated between pan start/change/end
   const activeStrokeRef = useRef<InkStroke | null>(null);
 
   /**
    * PanGesture captures Apple Pencil / finger strokes when inputMode === 'ink'.
-   * gesture.nativeEvent.force  → pressure (iOS, 0–1; undefined on Android/web)
-   * gesture.nativeEvent.altitudeAngle is not exposed by RNGH — tilt defaults to 0.
    */
   const inkGesture = Gesture.Pan()
     .runOnJS(true)
     .enabled(inputMode === 'ink' && !readOnly && !!onInkChange)
-    .onStart((e) => {
+    .onStart((e: any) => {
       if (!onInkChange) return;
-      const pressure: number = typeof (e as any).force === 'number'
-        ? (e as any).force
-        : 0.5;
+      const pressure: number = typeof e.force === 'number' ? e.force : 0.5;
       const point: StrokePoint = {
         x: e.x,
         y: e.y,
@@ -243,11 +165,9 @@ export function CanvasRenderer({
         opacity: 1.0,
       };
     })
-    .onUpdate((e) => {
+    .onUpdate((e: any) => {
       if (!activeStrokeRef.current || !onInkChange) return;
-      const pressure: number = typeof (e as any).force === 'number'
-        ? (e as any).force
-        : 0.5;
+      const pressure: number = typeof e.force === 'number' ? e.force : 0.5;
       const point: StrokePoint = {
         x: e.x,
         y: e.y,
@@ -255,68 +175,25 @@ export function CanvasRenderer({
         tilt: 0,
         timestamp: Date.now(),
       };
-      // Mutate ref directly — avoids object/array spread in the hot gesture path
-      // which can trigger HadesGC race on iOS 26 with Hermes.
       activeStrokeRef.current.points.push(point);
     })
     .onEnd(() => {
       if (!activeStrokeRef.current || !onInkChange) return;
       const completed = activeStrokeRef.current;
       activeStrokeRef.current = null;
-      // Use concat to avoid spread initializer (Hermes GC safety)
       const updatedLayer: InkLayer = {
         strokes: canvasDoc.inkLayer.strokes.concat(completed),
       };
       onInkChange(updatedLayer);
     });
 
-  const segments = useMemo(
-    () => parseBodySegments(canvasDoc.textContent.body),
-    [canvasDoc.textContent.body],
-  );
-
-  // Current string value for each segment position (text segments only).
-  // Rebuilt each render from the segments so it always reflects the latest doc.
-  const currentTextValues: string[] = segments.map((seg) =>
-    seg.type === 'text' ? seg.content : '',
-  );
-
-  function handleSegmentChange(segIndex: number, newText: string) {
-    if (!onTextChange) return;
-
-    // Rebuild the full body by replacing this segment's text value and
-    // re-interleaving with the code block content.
-    const updatedValues = currentTextValues.map((v, i) =>
-      i === segIndex ? newText : v,
-    );
-
-    let body = '';
-    let textIdx = 0;
-    for (const seg of segments) {
-      if (seg.type === 'text') {
-        body += updatedValues[textIdx];
-        textIdx += 1;
-      } else {
-        const fence = seg.language ? `\`\`\`${seg.language}\n` : '```\n';
-        body += `${fence}${seg.content}\`\`\``;
-      }
-    }
-
-    onTextChange(body);
-  }
-
   function handleLayout(event: { nativeEvent: { layout: { height: number } } }) {
     contentHeightRef.current = event.nativeEvent.layout.height;
   }
 
-  let textValueIndex = 0;
-
   // ── Web path ─────────────────────────────────────────────────────────────
-  // On web we render ONE CodeMirror-based live preview editor with the full
-  // body. CodeMirror's markdown mode already renders fenced code, headings,
-  // bold, etc. inline — no segment parsing, no separate CodeBlock component.
-  // Ink layer is a no-op on web (Skia stub), so we can skip the ScrollView
-  // gymnastics entirely and let the live preview component manage its own
+  // Skia ink layer is a no-op on web, so we skip the ScrollView + gesture
+  // wrapper entirely and let the live preview component manage its own
   // height and scrolling.
   if (Platform.OS === 'web') {
     return (
@@ -335,6 +212,9 @@ export function CanvasRenderer({
     );
   }
 
+  // ── Native path ──────────────────────────────────────────────────────────
+  // Same unified editor, plus the Skia ink layer rendered on top so Apple
+  // Pencil strokes visually sit above the CodeMirror-rendered text.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <GestureDetector gesture={inkGesture}>
@@ -345,48 +225,32 @@ export function CanvasRenderer({
           contentContainerStyle={{ width }}
           scrollEnabled={inputMode !== 'ink'}
         >
-          <View
-            style={{ width }}
-            onLayout={handleLayout}
-          >
-            {/* Ink layer — absolutely positioned behind everything */}
-            <InkLayerView
-              inkLayer={canvasDoc.inkLayer}
-              width={width}
-              height={contentHeightRef.current}
-            />
-
-            {/* Content layer — text segments and code blocks */}
+          <View style={{ width }} onLayout={handleLayout}>
             <View style={styles.contentLayer}>
-              {segments.map((seg, idx) => {
-                if (seg.type === 'code') {
-                  return (
-                    <CodeBlock
-                      key={`code-${idx}`}
-                      language={seg.language}
-                      code={seg.content}
-                    />
-                  );
-                }
+              <LivePreviewInput
+                value={canvasDoc.textContent.body}
+                onChange={(text) => onTextChange?.(text)}
+                inputMode={readOnly ? 'ink' : inputMode}
+                placeholder="Start writing..."
+                pendingCommand={pendingCommand}
+                onCommandApplied={onCommandApplied}
+                onActiveFormatsChange={onActiveFormatsChange}
+                autoFocus={autoFocusFirst}
+              />
+            </View>
 
-                // Text segment
-                const segTextIndex = textValueIndex;
-                textValueIndex += 1;
-                return (
-                  <CanvasTextInput
-                    key={`text-${idx}`}
-                    value={seg.content}
-                    onChange={(text) => handleSegmentChange(segTextIndex, text)}
-                    inputMode={readOnly ? 'ink' : inputMode}
-                    placeholder={idx === 0 ? 'Start writing...' : undefined}
-                    onFocus={() => setLastFocusedIndex(segTextIndex)}
-                    pendingCommand={pendingCommand && lastFocusedIndex === segTextIndex ? pendingCommand : null}
-                    onCommandApplied={onCommandApplied}
-                    onActiveFormatsChange={onActiveFormatsChange}
-                    autoFocus={autoFocusFirst && segTextIndex === 0}
-                  />
-                );
-              })}
+            {/* Ink layer — absolutely positioned ON TOP of the content.
+                Pointer events are disabled unless we're in ink mode so
+                keyboard text entry still reaches the WebView underneath. */}
+            <View
+              style={StyleSheet.absoluteFill}
+              pointerEvents={inputMode === 'ink' ? 'auto' : 'none'}
+            >
+              <InkLayerView
+                inkLayer={canvasDoc.inkLayer}
+                width={width}
+                height={contentHeightRef.current}
+              />
             </View>
           </View>
         </ScrollView>
