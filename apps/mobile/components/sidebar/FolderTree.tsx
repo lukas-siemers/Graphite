@@ -244,7 +244,13 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
                 name={shouldExpand ? 'chevron-down' : 'chevron-right'}
                 size={16}
                 color={tokens.textHint}
-                style={{ marginRight: 6, width: 16 }}
+                style={{ marginRight: 4, width: 16 }}
+              />
+              <MaterialCommunityIcons
+                name={shouldExpand ? 'folder-open' : 'folder'}
+                size={16}
+                color={isActiveFolder ? tokens.accentLight : tokens.textMuted}
+                style={{ marginRight: 7 }}
               />
 
               {isRenaming ? (
