@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, TextInput, Alert, Platform } from 'react-native';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
@@ -22,9 +22,6 @@ import type { Folder, Note } from '@graphite/db';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useNoteStore } from '../../stores/use-note-store';
 
-// Double-tap window. Long-press fires at 250ms (< this), cancels the pending
-// single-tap timer before drag starts — so expand/collapse never fires mid-drag.
-const DOUBLE_TAP_MS = 300;
 
 interface FolderTreeProps {
   notebookId: string;
@@ -76,41 +73,31 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
+  // Tap already-active folder → rename (Finder pattern, no timer needed).
+  // Tap any other folder → immediate expand/collapse + switch.
   function handleFolderPress(folderId: string, folderName: string) {
     if (renamingFolderId === folderId) return;
 
-    const pending = pendingTapRef.current.get(folderId);
-    if (pending !== undefined) {
-      clearTimeout(pending);
-      pendingTapRef.current.delete(folderId);
+    const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
+    if (isAlreadyActive) {
       startFolderRename(folderId, folderName);
       return;
     }
 
-    const timer = setTimeout(() => {
-      pendingTapRef.current.delete(folderId);
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
 
-      setExpandedFolders((prev) => {
-        const next = new Set(prev);
-        if (next.has(folderId)) next.delete(folderId);
-        else next.add(folderId);
-        return next;
-      });
+    setActiveFolder(folderId);
 
-      const isAlreadyActive = folderId === useFolderStore.getState().activeFolderId;
-      if (isAlreadyActive) return;
-      setActiveFolder(folderId);
-
-      if (Platform.OS === 'web') return;
-      try {
-        const db = getDatabase();
-        loadNotes(db, notebookId, folderId);
-      } catch (_) {}
-    }, DOUBLE_TAP_MS);
-
-    pendingTapRef.current.set(folderId, timer);
+    if (Platform.OS === 'web') return;
+    try {
+      const db = getDatabase();
+      loadNotes(db, notebookId, folderId);
+    } catch (_) {}
   }
 
   function startFolderRename(folderId: string, currentName: string) {
@@ -230,15 +217,7 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Pressable
               onPress={() => handleFolderPress(folder.id, folder.name)}
-              onLongPress={() => {
-                if (isRenaming) return;
-                const pending = pendingTapRef.current.get(folder.id);
-                if (pending !== undefined) {
-                  clearTimeout(pending);
-                  pendingTapRef.current.delete(folder.id);
-                }
-                drag();
-              }}
+              onLongPress={() => { if (!isRenaming) drag(); }}
               delayLongPress={250}
               style={{
                 flex: 1,

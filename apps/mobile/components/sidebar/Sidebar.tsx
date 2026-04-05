@@ -24,9 +24,6 @@ function webConfirmDelete(message: string, onConfirm: () => void) {
   }
 }
 
-// Double-tap window. Long-press fires at 250ms (< this), cancels the pending
-// single-tap timer before drag starts — so expand/collapse never fires mid-drag.
-const DOUBLE_TAP_MS = 300;
 
 export default function Sidebar() {
   const notebooks = useNotebookStore((s) => s.notebooks);
@@ -51,44 +48,30 @@ export default function Sidebar() {
   const renameInputRef = useRef<TextInput>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Double-tap to rename:
-  //   First tap  → schedule single-tap action at DOUBLE_TAP_MS.
-  //   Second tap → cancel timer, start rename.
-  //   Long press (250ms, fires BEFORE 300ms timer) → cancel timer, start drag.
-  const pendingTapRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
+  // Tap already-active notebook → rename (Finder pattern, no timer needed).
+  // Tap any other notebook → immediate expand/collapse + switch.
   function handleNotebookPress(notebookId: string, notebookName: string) {
     if (renamingNotebookId === notebookId) return;
 
-    const pending = pendingTapRef.current.get(notebookId);
-    if (pending !== undefined) {
-      clearTimeout(pending);
-      pendingTapRef.current.delete(notebookId);
+    if (notebookId === activeNotebookId) {
       startRename(notebookId, notebookName);
       return;
     }
 
-    const timer = setTimeout(() => {
-      pendingTapRef.current.delete(notebookId);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(notebookId)) next.delete(notebookId);
+      else next.add(notebookId);
+      return next;
+    });
 
-      setExpandedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(notebookId)) next.delete(notebookId);
-        else next.add(notebookId);
-        return next;
-      });
+    setActiveNotebook(notebookId);
 
-      if (notebookId === activeNotebookId) return;
-      setActiveNotebook(notebookId);
-
-      if (Platform.OS === 'web') return;
-      try {
-        const db = getDatabase();
-        loadNotes(db, notebookId, null);
-      } catch (_) {}
-    }, DOUBLE_TAP_MS);
-
-    pendingTapRef.current.set(notebookId, timer);
+    if (Platform.OS === 'web') return;
+    try {
+      const db = getDatabase();
+      loadNotes(db, notebookId, null);
+    } catch (_) {}
   }
 
   function startRename(notebookId: string, currentName: string) {
@@ -152,16 +135,7 @@ export default function Sidebar() {
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Pressable
               onPress={() => handleNotebookPress(notebook.id, notebook.name)}
-              onLongPress={() => {
-                if (isRenaming) return;
-                // Cancel pending single-tap so expand/collapse doesn't fire mid-drag
-                const pending = pendingTapRef.current.get(notebook.id);
-                if (pending !== undefined) {
-                  clearTimeout(pending);
-                  pendingTapRef.current.delete(notebook.id);
-                }
-                drag();
-              }}
+              onLongPress={() => { if (!isRenaming) drag(); }}
               delayLongPress={250}
               style={{
                 flex: 1,
