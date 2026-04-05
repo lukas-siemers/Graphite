@@ -5,9 +5,11 @@ import {
   TextInput,
   Pressable,
   Alert,
+  Platform,
 } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
+import { Swipeable, RectButton } from 'react-native-gesture-handler';
 import { tokens } from '@graphite/ui';
 import { getDatabase, searchNotes } from '@graphite/db';
 import type { Note } from '@graphite/db';
@@ -44,19 +46,49 @@ function formatTimestamp(ms: number): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+// Destructive red — no semantic `danger` token exists yet in @graphite/ui.
+// Flagged for a future token addition; using hardcoded hex here is intentional.
+const DELETE_RED = '#FF6B6B';
+
 interface NoteCardProps {
   note: Note;
   isActive: boolean;
   onPress: () => void;
   onLongPress: () => void;
+  onDelete: () => void;
   drag: () => void;
   showDragHandle: boolean;
 }
 
-function NoteCard({ note, isActive, onPress, onLongPress, drag, showDragHandle }: NoteCardProps) {
+function NoteCard({ note, isActive, onPress, onLongPress, onDelete, drag, showDragHandle }: NoteCardProps) {
   const preview = stripMarkdown(note.body);
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'stretch' }}>
+  const swipeableRef = useRef<Swipeable | null>(null);
+
+  // Right-action renderer — red destructive button revealed on swipe-left.
+  // Sharp edges (0px radius), flat fill, matches Digital Monolith rules.
+  function renderRightActions() {
+    return (
+      <RectButton
+        onPress={() => {
+          swipeableRef.current?.close();
+          onDelete();
+        }}
+        style={{
+          backgroundColor: DELETE_RED,
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: 88,
+        }}
+      >
+        <Text style={{ color: tokens.textPrimary, fontSize: 13, fontWeight: '600' }}>
+          Delete
+        </Text>
+      </RectButton>
+    );
+  }
+
+  const row = (
+    <View style={{ flexDirection: 'row', alignItems: 'stretch', backgroundColor: tokens.bgBase }}>
       {showDragHandle && (
         <Pressable
           onLongPress={drag}
@@ -119,6 +151,25 @@ function NoteCard({ note, isActive, onPress, onLongPress, drag, showDragHandle }
         </Text>
       </Pressable>
     </View>
+  );
+
+  // Web fallback: Swipeable (RN Gesture Handler) does not translate mouse-drag
+  // nicely in Expo Web and can misbehave with pointer input. Long-press + Alert
+  // is the supported delete path on web; native platforms get full swipe UX.
+  if (Platform.OS === 'web') {
+    return row;
+  }
+
+  return (
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      rightThreshold={40}
+    >
+      {row}
+    </Swipeable>
   );
 }
 
@@ -200,6 +251,7 @@ export default function NoteList() {
           isActive={item.id === activeNoteId}
           onPress={() => handleNotePress(item.id)}
           onLongPress={() => handleDeleteNote(item)}
+          onDelete={() => handleDeleteNote(item)}
           drag={drag}
           showDragHandle={!isSearching}
         />

@@ -163,6 +163,43 @@ describe('updateNoteCanvas', () => {
 // reorderNotes — bulk drag-and-drop reorder action
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// deleteNote — swipe / long-press delete action
+// ---------------------------------------------------------------------------
+
+describe('deleteNote', () => {
+  beforeEach(() => {
+    useNoteStore.setState({ notes: [note1, note2, note3], activeNoteId: null });
+  });
+
+  it('removes the matching note from the notes array', async () => {
+    await useNoteStore.getState().deleteNote(fakeDb, 'n-2');
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'n-2')).toBeUndefined();
+    expect(notes).toHaveLength(2);
+  });
+
+  it('clears activeNoteId when the deleted note was active', async () => {
+    useNoteStore.setState({ activeNoteId: 'n-2' });
+    await useNoteStore.getState().deleteNote(fakeDb, 'n-2');
+    expect(useNoteStore.getState().activeNoteId).toBeNull();
+  });
+
+  it('preserves activeNoteId when a different note is deleted', async () => {
+    useNoteStore.setState({ activeNoteId: 'n-1' });
+    await useNoteStore.getState().deleteNote(fakeDb, 'n-2');
+    expect(useNoteStore.getState().activeNoteId).toBe('n-1');
+  });
+
+  it('calls the DB deleteNote operation', async () => {
+    const db = await import('@graphite/db');
+    const mockDelete = db.deleteNote as unknown as ReturnType<typeof vi.fn>;
+    mockDelete.mockClear();
+    await useNoteStore.getState().deleteNote(fakeDb, 'n-1');
+    expect(mockDelete).toHaveBeenCalledWith(fakeDb, 'n-1');
+  });
+});
+
 describe('reorderNotes', () => {
   beforeEach(() => {
     useNoteStore.setState({ notes: [note1, note2, note3], activeNoteId: null });

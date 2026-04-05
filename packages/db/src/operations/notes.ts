@@ -229,6 +229,20 @@ export async function deleteNote(
   db: SQLiteDatabase,
   id: string,
 ): Promise<void> {
+  // Clean up the FTS5 entry before dropping the row. The FTS table is declared
+  // with content='notes' but we manage inserts/deletes manually (no triggers),
+  // so we must issue the FTS5 'delete' command ourselves to avoid orphan rows
+  // piling up in the index.
+  const before = await db.getFirstAsync<{ rowid: number; title: string; body: string }>(
+    'SELECT rowid, title, body FROM notes WHERE id = ?',
+    [id],
+  );
+  if (before) {
+    await db.runAsync(
+      `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)`,
+      [before.rowid, before.title, before.body],
+    );
+  }
   await db.runAsync('DELETE FROM notes WHERE id = ?', [id]);
 }
 
