@@ -235,3 +235,71 @@ describe('reorderNotes', () => {
     expect(notes.find((n) => n.id === 'n-2')?.sortOrder).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// createNewNote — reproduction for "odd behavior when creating a new note"
+//
+// Root cause under test:
+//   createNewNote unconditionally prepends the newly created note to the
+//   in-memory `notes` array, regardless of whether that note belongs to the
+//   currently viewed folder. In Sidebar FolderTree, each folder row has its
+//   own "+ New Note" button that calls createNewNote(db, notebookId, folderId)
+//   for THAT folder, not the currently active one. If the user is viewing
+//   folder A and clicks the "+ New Note" button on folder B, the note is
+//   written under folder B in SQLite but also injected at position 0 of
+//   folder A's in-memory list — and activeNoteId is set to it, so the Editor
+//   opens a note whose folder the sidebar does not have selected. From the
+//   user's perspective the new note appears "under the wrong folder".
+//
+// The fix belongs in createNewNote (or its callers): it must only insert the
+// created note into `notes` when its folderId matches the currently viewed
+// folder filter, or it should switch the active folder before prepending.
+// ---------------------------------------------------------------------------
+
+describe('createNewNote', () => {
+  beforeEach(async () => {
+    useNoteStore.setState({ notes: [], activeNoteId: null });
+    const db = await import('@graphite/db');
+    const mockCreate = db.createNote as unknown as ReturnType<typeof vi.fn>;
+    mockCreate.mockReset();
+  });
+
+  it('does not pollute the active folder list when creating a note for a different folder', async () => {
+    // Arrange: user is currently viewing folder A; its notes are loaded.
+    const folderANote: Note = {
+      ...note1,
+      id: 'note-in-A',
+      folderId: 'folder-A',
+    };
+    useNoteStore.setState({ notes: [folderANote], activeNoteId: 'note-in-A' });
+
+    // The user clicks the "+ New Note" button on folder B in the sidebar.
+    // createNote (DB op) returns a note whose folderId is folder-B.
+    const db = await import('@graphite/db');
+    const mockCreate = db.createNote as unknown as ReturnType<typeof vi.fn>;
+    mockCreate.mockResolvedValue({
+      id: 'note-in-B',
+      folderId: 'folder-B',
+      notebookId: 'nb-1',
+      title: 'Untitled',
+      body: '',
+      drawingAssetId: null,
+      canvasJson: null,
+      isDirty: 0,
+      sortOrder: 0,
+      createdAt: 1700000100000,
+      updatedAt: 1700000100000,
+      syncedAt: null,
+    } as Note);
+
+    // Act: create the new note for folder B while folder A is still active.
+    await useNoteStore.getState().createNewNote(fakeDb, 'nb-1', 'folder-B');
+
+    // Assert: the folder-A note list must not contain a note whose folderId
+    // is something other than folder-A. The bug under test causes the new
+    // folder-B note to be prepended into the folder-A list.
+    const { notes } = useNoteStore.getState();
+    const strayNotes = notes.filter((n) => n.folderId !== 'folder-A');
+    expect(strayNotes).toEqual([]);
+  });
+});
