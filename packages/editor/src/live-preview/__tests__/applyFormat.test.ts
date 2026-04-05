@@ -40,11 +40,9 @@
  *    expected position" is approximated by a regex fence detector. This is
  *    sufficient for Phase 1 gate: the output is a literal substring the
  *    parser cannot fail to recognise.
- *  - Toggle-off (cursor inside an existing fence → strip markers) is NOT
- *    implemented in the shipped applyFormat branch. The corresponding test
- *    documents current behaviour rather than asserting an unshipped feature.
- *    See `describe('toggle off')` below — this is a known gap flagged in
- *    the merge gate report.
+ *  - Toggle-off (cursor inside an existing fence → strip markers) IS now
+ *    implemented. See `describe('toggle off')` below for the asserted
+ *    behaviour and the paired drift-guard entry for `findEnclosingFence`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -77,7 +75,56 @@ function lineBoundsAt(doc: string, pos: number): { from: number; to: number } {
   return { from, to };
 }
 
+/**
+ * Pure port of the `findEnclosingFence` helper in editorHtml.ts. Walks every
+ * line, collects fence-marker lines (text starts with ```), pairs them in
+ * document order, and returns the pair whose span contains `pos`.
+ */
+function findEnclosingFence(
+  doc: string,
+  pos: number,
+): { opener: { from: number; to: number }; closer: { from: number; to: number } } | null {
+  const fenceLines: Array<{ from: number; to: number }> = [];
+  let lineStart = 0;
+  while (lineStart <= doc.length) {
+    const nl = doc.indexOf('\n', lineStart);
+    const lineEnd = nl === -1 ? doc.length : nl;
+    const text = doc.slice(lineStart, lineEnd);
+    if (text.startsWith('```')) fenceLines.push({ from: lineStart, to: lineEnd });
+    if (nl === -1) break;
+    lineStart = nl + 1;
+  }
+  for (let i = 0; i + 1 < fenceLines.length; i += 2) {
+    const opener = fenceLines[i];
+    const closer = fenceLines[i + 1];
+    if (pos >= opener.from && pos <= closer.to) return { opener, closer };
+  }
+  return null;
+}
+
 function applyCodeBlock({ doc, from, to }: DocSel): ApplyResult {
+  // Toggle-off path: cursor inside (or on the marker lines of) an existing
+  // fence → unwrap. Selection `to` is used as the cursor-head analogue so
+  // the test port mirrors the live editor, which passes `sel.head`.
+  const enclosing = findEnclosingFence(doc, to);
+  if (enclosing) {
+    const { opener, closer } = enclosing;
+    const bodyStart = opener.to + 1;
+    const bodyEnd = closer.from - 1;
+    const body = bodyEnd >= bodyStart ? doc.slice(bodyStart, bodyEnd) : '';
+
+    let newHead: number;
+    if (bodyEnd < bodyStart) {
+      newHead = opener.from;
+    } else {
+      const clamped = Math.min(Math.max(to, bodyStart), bodyEnd);
+      newHead = opener.from + (clamped - bodyStart);
+    }
+
+    const nextDoc = doc.slice(0, opener.from) + body + doc.slice(closer.to);
+    return { doc: nextDoc, cursor: newHead, insert: body };
+  }
+
   const startLine = lineBoundsAt(doc, from);
   const endLine = lineBoundsAt(doc, to);
   const atLineStart = from === startLine.from;
@@ -317,25 +364,64 @@ describe('applyFormat — copy-code-block source drift guard', () => {
   });
 });
 
-describe('applyFormat — code-block toggle off (KNOWN GAP)', () => {
-  it('does NOT currently toggle off when the cursor is inside an existing fence', () => {
-    // Spec asked for: cursor inside an existing fence + code-block command
-    //                 → removes the fence markers.
-    // Shipped reality: the command re-inserts a nested fence. This test
-    // pins the current behavior so it cannot regress silently, and flags
-    // the missing feature to the merge gate report.
+describe('applyFormat — code-block toggle off (cursor inside fence unwraps)', () => {
+  it('unwraps a 3-line fence when the cursor sits on the middle body line', () => {
+    // Layout: `\`\`\`\nfoo\n\`\`\`` — opener@0..3, body "foo"@4..7, closer@8..11.
     const doc = '```\nfoo\n```';
-    // Cursor sits on the "foo" line, at offset 6 (inside the body)
-    const result = applyCodeBlock({ doc, from: 6, to: 6 });
+    // Cursor mid-body at offset 5 (the "o" in "foo")
+    const result = applyCodeBlock({ doc, from: 5, to: 5 });
 
-    // Current behavior: inserts another fence around nothing, producing a
-    // nested structure. The outer fence remains intact — toggle-off was
-    // NOT implemented by SWE-2 in this branch.
-    expect(result.doc).not.toBe('foo'); // would be the toggled-off result
-    expect(result.doc.includes('```')).toBe(true);
-    // Count of fence markers grew from 2 to 4
+    // Fence markers are gone; body line remains.
+    expect(result.doc).toBe('foo');
+    expect(result.doc.includes('```')).toBe(false);
+
+    // Cursor stays on the content line at the same column. Original body
+    // started at offset 4; cursor at 5 → new offset 0 + (5 - 4) = 1.
+    expect(result.cursor).toBe(1);
+  });
+
+  it('unwraps an empty fence to an empty line with cursor preserved at origin', () => {
+    // Layout: `\`\`\`\n\`\`\`` — opener@0..3, closer@4..7. No body lines.
+    const doc = '```\n```';
+    const result = applyCodeBlock({ doc, from: 0, to: 0 });
+
+    // Whole fence collapses to an empty document.
+    expect(result.doc).toBe('');
+    expect(result.cursor).toBe(0);
+  });
+
+  it('unwraps when the cursor is on the opener line itself (defensive)', () => {
+    const doc = '```\nfoo\n```';
+    // Cursor anywhere on the opener line — use the 2nd backtick
+    const result = applyCodeBlock({ doc, from: 1, to: 1 });
+
+    expect(result.doc).toBe('foo');
+    // Defensive: cursor clamps to the start of the first body line
+    expect(result.cursor).toBe(0);
+  });
+
+  it('unwraps when the cursor is on the closer line itself (defensive)', () => {
+    const doc = '```\nfoo\n```';
+    // Cursor on the closer line — position 9 (first ` of closer)
+    const result = applyCodeBlock({ doc, from: 9, to: 9 });
+
+    expect(result.doc).toBe('foo');
+    // Defensive: cursor clamps to the end of the last body line (after "foo")
+    expect(result.cursor).toBe(3);
+  });
+
+  it('leaves unrelated fence unchanged when cursor is OUTSIDE any fence (falls through to insert)', () => {
+    // Two-fence-marker layout: cursor sits between a closer and a later
+    // opener — i.e. not inside the pair. Regular insert path should run.
+    const doc = '```\nfoo\n```\nhello';
+    // Cursor at "hello" → offset 15 (the 'o' in hello at end)
+    const result = applyCodeBlock({ doc, from: 15, to: 15 });
+
+    // Should not have unwrapped — the original fence is still present.
+    expect(result.doc.startsWith('```\nfoo\n```')).toBe(true);
+    // A new fence was inserted at the cursor (insert path).
     const fenceCount = (result.doc.match(/```/g) || []).length;
-    expect(fenceCount).toBe(4);
+    expect(fenceCount).toBe(4); // original 2 + new 2
   });
 });
 
@@ -377,5 +463,12 @@ describe('applyFormat — source drift guard', () => {
     expect(source).toContain('const openerEnd = sel.from + leadingBreak.length + opening.length');
     expect(source).toContain('const bodyStart = openerEnd + 1');
     expect(source).toMatch(/body\.length === 0\s*\?\s*openerEnd\s*:\s*bodyStart \+ body\.length/);
+  });
+
+  it('defines findEnclosingFence and calls it before the insert path', () => {
+    // Helper exists …
+    expect(source).toContain('function findEnclosingFence(doc, pos)');
+    // … and is invoked from the code-block branch to gate the unwrap.
+    expect(source).toContain('findEnclosingFence(doc, sel.head)');
   });
 });
