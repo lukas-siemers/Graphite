@@ -231,6 +231,92 @@ describe('applyFormat — code-block branch (byte-parity toolbar vs manual typin
   });
 });
 
+// ---------------------------------------------------------------------------
+// Port of the copy-code-block branch — pure function mirror.
+// Same strategy as applyCodeBlock above: reproduce the shipped logic in pure
+// TS so it's testable in Node without CodeMirror / jsdom clipboard shims.
+// ---------------------------------------------------------------------------
+
+function extractFenceBodyAt(doc: string, cursor: number): string | null {
+  const lines = doc.split('\n');
+  // 1-indexed line numbers to match CodeMirror's doc.line(n) API.
+  let offset = 0;
+  let currentLineNum = 1;
+  for (let i = 0; i < lines.length; i++) {
+    const lineEnd = offset + lines[i].length;
+    if (cursor >= offset && cursor <= lineEnd) {
+      currentLineNum = i + 1;
+      break;
+    }
+    offset = lineEnd + 1; // +1 for the '\n'
+  }
+  const fenceRe = /^\s*```/;
+  let openerLine = -1;
+  for (let i = currentLineNum; i >= 1; i--) {
+    if (fenceRe.test(lines[i - 1])) { openerLine = i; break; }
+  }
+  if (openerLine === -1) return null;
+  let closerLine = lines.length + 1;
+  for (let i = openerLine + 1; i <= lines.length; i++) {
+    if (fenceRe.test(lines[i - 1])) { closerLine = i; break; }
+  }
+  const bodyLines: string[] = [];
+  for (let i = openerLine + 1; i < closerLine; i++) {
+    bodyLines.push(lines[i - 1]);
+  }
+  return bodyLines.join('\n');
+}
+
+describe('applyFormat — copy-code-block branch (fence body extraction)', () => {
+  it('extracts the single body line of a 3-line fence when cursor is on the body', () => {
+    // Doc:  ```
+    //       hello world
+    //       ```
+    const doc = '```\nhello world\n```';
+    // Cursor on the body line (offset 4 = start of "hello world")
+    const body = extractFenceBodyAt(doc, 6);
+    expect(body).toBe('hello world');
+  });
+
+  it('extracts multi-line body preserving internal newlines', () => {
+    const doc = '```js\nconst a = 1;\nconst b = 2;\n```';
+    // Cursor somewhere on the second body line
+    const body = extractFenceBodyAt(doc, 20);
+    expect(body).toBe('const a = 1;\nconst b = 2;');
+  });
+
+  it('returns null when the cursor is not inside any fence', () => {
+    const body = extractFenceBodyAt('just some prose\nnothing here', 5);
+    expect(body).toBeNull();
+  });
+
+  it('handles unclosed fence by treating EOF as the closer', () => {
+    const doc = '```\nline1\nline2';
+    const body = extractFenceBodyAt(doc, 6);
+    expect(body).toBe('line1\nline2');
+  });
+});
+
+describe('applyFormat — copy-code-block source drift guard', () => {
+  const source = readFileSync(
+    resolve(__dirname, '..', 'editorHtml.ts'),
+    'utf8',
+  );
+
+  it('editorHtml.ts contains the copy-code-block branch', () => {
+    expect(source).toContain("if (command === 'copy-code-block')");
+  });
+
+  it('uses navigator.clipboard.writeText with a fallback path', () => {
+    expect(source).toContain('navigator.clipboard.writeText');
+    expect(source).toContain("document.execCommand('copy')");
+  });
+
+  it('posts an error when the cursor is not inside a fence', () => {
+    expect(source).toContain("message: 'Not inside a code block'");
+  });
+});
+
 describe('applyFormat — code-block toggle off (KNOWN GAP)', () => {
   it('does NOT currently toggle off when the cursor is inside an existing fence', () => {
     // Spec asked for: cursor inside an existing fence + code-block command
