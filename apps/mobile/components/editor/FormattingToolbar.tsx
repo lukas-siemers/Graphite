@@ -78,8 +78,6 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
 }
 
 export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: FormattingToolbarProps) {
-  const previewMode = useEditorStore((s) => s.previewMode);
-  const setPreviewMode = useEditorStore((s) => s.setPreviewMode);
   const activeFormats = useEditorStore((s) => s.activeFormats);
   const hasSelection = useEditorStore((s) => s.hasSelection);
   const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
@@ -169,30 +167,6 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
           gap: 2,
         }}
       >
-        {/* Preview toggle */}
-        <Pressable
-          onPress={() => setPreviewMode(!previewMode)}
-          style={({ pressed }) => ({
-            width: 30,
-            height: 30,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: !previewMode
-              ? tokens.bgHover
-              : pressed
-              ? tokens.bgBright
-              : 'transparent',
-            borderBottomWidth: !previewMode ? 2 : 0,
-            borderBottomColor: tokens.accent,
-          })}
-        >
-          <MaterialCommunityIcons
-            name={previewMode ? 'eye-outline' : 'pencil-outline'}
-            size={16}
-            color={!previewMode ? tokens.accentLight : tokens.textMuted}
-          />
-        </Pressable>
-
         {/* Draw toggle — iPad / native only */}
         {Platform.OS !== 'web' && (
           <Pressable

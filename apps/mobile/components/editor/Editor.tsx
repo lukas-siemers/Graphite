@@ -8,7 +8,6 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import Markdown from 'react-native-markdown-display';
 import { tokens } from '@graphite/ui';
 import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
@@ -31,139 +30,6 @@ interface EditorProps {
   drawingOpen?: boolean;
 }
 
-/** Design-token styles passed to react-native-markdown-display */
-const markdownStyles = {
-  body: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: tokens.textBody,
-    backgroundColor: tokens.bgBase,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
-  heading1: {
-    fontSize: 26,
-    fontWeight: '700' as const,
-    color: tokens.textPrimary,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  heading2: {
-    fontSize: 22,
-    fontWeight: '700' as const,
-    color: tokens.textPrimary,
-    marginTop: 16,
-    marginBottom: 6,
-  },
-  heading3: {
-    fontSize: 18,
-    fontWeight: '600' as const,
-    color: tokens.textPrimary,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  paragraph: {
-    color: tokens.textBody,
-    marginTop: 0,
-    marginBottom: 12,
-  },
-  strong: {
-    color: tokens.textPrimary,
-    fontWeight: '700' as const,
-  },
-  em: {
-    color: tokens.textBody,
-    fontStyle: 'italic' as const,
-  },
-  link: {
-    color: tokens.accent,
-    textDecorationLine: 'underline' as const,
-  },
-  blockquote: {
-    backgroundColor: tokens.bgSidebar,
-    borderLeftWidth: 3,
-    borderLeftColor: tokens.accent,
-    paddingLeft: 12,
-    marginVertical: 8,
-  },
-  code_inline: {
-    fontFamily: 'Courier',
-    fontSize: 14,
-    color: tokens.accentLight,
-    backgroundColor: tokens.bgCode,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  fence: {
-    backgroundColor: tokens.bgCode,
-    borderWidth: 1,
-    borderColor: tokens.border,
-    borderRadius: 0,
-    padding: 16,
-    marginVertical: 12,
-  },
-  code_block: {
-    fontFamily: 'Courier',
-    fontSize: 13,
-    lineHeight: 20,
-    color: tokens.accentLight,
-    backgroundColor: tokens.bgCode,
-  },
-  bullet_list: {
-    marginBottom: 8,
-  },
-  ordered_list: {
-    marginBottom: 8,
-  },
-  list_item: {
-    color: tokens.textBody,
-    marginBottom: 4,
-  },
-  hr: {
-    backgroundColor: tokens.border,
-    height: 1,
-    marginVertical: 16,
-  },
-};
-
-/**
- * Custom rule for fenced code blocks — adds a language label in textHint
- * above the code content.
- */
-function buildMarkdownRules() {
-  return {
-    fence: (
-      node: any,
-      children: any,
-      _parent: any,
-      styles: any,
-    ) => {
-      const lang: string = node.sourceInfo ? node.sourceInfo.trim() : '';
-      return (
-        <View key={node.key} style={styles.fence}>
-          {lang.length > 0 && (
-            <Text
-              style={{
-                fontFamily: 'Courier',
-                fontSize: 10,
-                color: tokens.textHint,
-                letterSpacing: 0.8,
-                textTransform: 'uppercase',
-                marginBottom: 8,
-              }}
-            >
-              {lang}
-            </Text>
-          )}
-          <Text style={styles.code_block}>
-            {node.content}
-          </Text>
-        </View>
-      );
-    },
-  };
-}
-
 export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen: _drawingOpen }: EditorProps) {
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
@@ -180,8 +46,6 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const { width: windowWidth } = useWindowDimensions();
   const { inputMode, handleTouchStart } = usePencilDetection();
 
-  const previewMode = useEditorStore((s) => s.previewMode);
-  const setPreviewMode = useEditorStore((s) => s.setPreviewMode);
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
@@ -202,7 +66,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   // Task 6 — auto-migrate legacy notes to CanvasDocument on open
   useNoteCanvasMigration(activeNote);
 
-  // Sync local state when active note changes; exit preview when switching notes
+  // Sync local state when active note changes
   useEffect(() => {
     if (activeNote) {
       setLocalTitle(activeNote.title);
@@ -219,7 +83,6 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         : activeNote.body;
       setLocalBody(displayBody);
       setSaveStatus('Saved');
-      setPreviewMode(false);
     }
   }, [activeNoteId]);
 
@@ -294,7 +157,6 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
     .join(' \u203A ');
 
   const wordCount = countWords(localBody);
-  const markdownRules = buildMarkdownRules();
 
   // Derive the CanvasDocument to pass to CanvasRenderer
   let activeCanvasDoc: CanvasDocument | null = null;
@@ -344,7 +206,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
           onChangeText={handleTitleChange}
           placeholder="Untitled"
           placeholderTextColor={tokens.textHint}
-          editable={!previewMode && inputMode !== 'ink'}
+          editable={inputMode !== 'ink'}
           style={{
             fontSize: 28,
             fontWeight: '700',
@@ -365,15 +227,8 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
         </View>
       )}
 
-      {/* Content area — always editable, reading view is optional via toolbar */}
-      {previewMode ? (
-        /* ── Reading view (triggered only from toolbar eye icon) ── */
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          <Markdown style={markdownStyles} rules={markdownRules}>
-            {localBody.length > 0 ? localBody : ' '}
-          </Markdown>
-        </ScrollView>
-      ) : activeCanvasDoc !== null ? (
+      {/* Content area — live-preview canvas is always on */}
+      {activeCanvasDoc !== null ? (
         /* ── Primary surface — always open for writing ── */
         <View style={{ flex: 1 }}>
           <CanvasRenderer
