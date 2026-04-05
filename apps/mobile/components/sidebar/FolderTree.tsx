@@ -202,7 +202,7 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
           hitSlop={10}
           style={{ paddingHorizontal: 10, paddingVertical: 6 }}
         >
-          <Text style={{ fontSize: 16, color: tokens.textHint, lineHeight: 20 }}>×</Text>
+          <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>×</Text>
         </Pressable>
       </View>
     );

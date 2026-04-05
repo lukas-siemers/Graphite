@@ -69,6 +69,8 @@ export default function Sidebar() {
 
     if (notebookId === activeNotebookId) return;
     setActiveNotebook(notebookId);
+    // Clear active folder so a folder from the previous notebook doesn't stay highlighted
+    useFolderStore.getState().setActiveFolder(null);
 
     if (Platform.OS === 'web') return;
     try {
@@ -201,7 +203,7 @@ export default function Sidebar() {
                 hitSlop={10}
                 style={{ paddingHorizontal: 6 }}
               >
-                <Text style={{ fontSize: 16, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
+                <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
               </Pressable>
             )}
           </Pressable>
@@ -298,7 +300,7 @@ export default function Sidebar() {
           Notebooks
         </Text>
         <Pressable onPress={handleCreateNewNotebook} hitSlop={10} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
-          <Text style={{ fontSize: 20, color: tokens.textMuted, lineHeight: 22 }}>+</Text>
+          <Text style={{ fontSize: 18, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
         </Pressable>
       </View>
 
