@@ -371,18 +371,21 @@ function post(msg) {
 // fenced code block as a block decoration.
 // ---------------------------------------------------------------------------
 class FenceHeaderWidget extends WidgetType {
-  constructor(language, content) {
+  constructor(language) {
     super();
     this.language = language || '';
-    this.content = content || '';
   }
   eq(other) {
-    // Memoization guard: only rebuild the DOM when the displayed language
-    // label or the clipboard content actually change. This avoids measure
-    // glitches on every keystroke inside an unrelated part of the document.
-    return other.language === this.language && other.content === this.content;
+    // Memoization guard: ONLY compare the displayed language label. The
+    // clipboard content must not be captured in widget state — if it were,
+    // every keystroke inside the fence would bust widget equality and tear
+    // down / rebuild the DOM, causing measure glitches and making edits near
+    // the fence feel like they "ate" characters (Bug 3). Content is looked
+    // up lazily at click time by walking the document from the widget's
+    // position down to the closing fence.
+    return other.language === this.language;
   }
-  toDOM() {
+  toDOM(view) {
     const wrap = document.createElement('div');
     wrap.className = 'cm-graphite-codeblock__header';
     wrap.contentEditable = 'false';
@@ -407,12 +410,43 @@ class FenceHeaderWidget extends WidgetType {
     btn.setAttribute('aria-label', 'Copy code to clipboard');
     btn.textContent = 'COPY';
 
-    const content = this.content;
+    // Lazy content lookup: walk the document from the widget's DOM position
+    // down until we find the closing triple-backtick fence. This keeps the
+    // widget itself stateless w.r.t. fence content so typing inside the
+    // fence doesn't tear down / rebuild the widget DOM.
+    const fenceRe = /^\\s*\`\`\`/;
+    const readFenceContent = () => {
+      try {
+        const pos = view.posAtDOM(wrap);
+        const doc = view.state.doc;
+        const startLine = doc.lineAt(pos);
+        // The widget renders with side=-1 at the opener line. The opener
+        // itself is the first line at/after pos; content starts one line
+        // below, closer is the next line matching /^\\s*\`\`\`/.
+        let openerLineNum = startLine.number;
+        // If the line at pos isn't actually the opener (e.g. widget got
+        // placed just before the opener), nudge forward until we hit it.
+        while (openerLineNum <= doc.lines && !fenceRe.test(doc.line(openerLineNum).text)) {
+          openerLineNum++;
+        }
+        const lines = [];
+        for (let ln = openerLineNum + 1; ln <= doc.lines; ln++) {
+          const lineText = doc.line(ln).text;
+          if (fenceRe.test(lineText)) break;
+          lines.push(lineText);
+        }
+        return lines.join('\\n');
+      } catch (_) {
+        return '';
+      }
+    };
+
     let resetTimer = null;
     btn.addEventListener('mousedown', (e) => { e.preventDefault(); });
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      const content = readFenceContent();
       const done = () => {
         btn.classList.add('cm-graphite-codeblock__copy--copied');
         btn.textContent = 'COPIED';
@@ -469,11 +503,26 @@ const livePreviewPlugin = ViewPlugin.fromClass(class {
         const cursorLine = doc.lineAt(selection.head).number;
         const cursorOnLine = nodeLine === cursorLine;
 
-        // Marks to hide when cursor is elsewhere
+        // CodeMark is ambiguous in the markdown grammar: it's used both for
+        // INLINE code backticks (\`foo\`) and for the opening/closing fences of
+        // a FencedCode block. We only want to hide inline backticks when the
+        // cursor moves away — fence backticks must stay visible at all times
+        // because the fencePlugin styles them as part of the block chrome.
+        // Hiding fence marks made users "lose" backticks on click (Bug 1).
+        if (name === 'CodeMark') {
+          const parentName = node.node.parent && node.node.parent.name;
+          if (parentName === 'InlineCode' && !cursorOnLine) {
+            decos.push({ from, to, deco: Decoration.mark({ class: 'cm-md-hidden' }) });
+          }
+          return;
+        }
+
+        // Other marks to hide when cursor is elsewhere. These are all
+        // unambiguous (EmphasisMark is only inline emphasis, HeaderMark is
+        // only on heading lines, etc.) so the simple includes() check is safe.
         const hiddenWhenAway = [
           'HeaderMark',
           'EmphasisMark',
-          'CodeMark',
           'StrikethroughMark',
           'QuoteMark',
         ];
@@ -589,20 +638,15 @@ const fencePlugin = ViewPlugin.fromClass(class {
         const langMatch = openText.match(new RegExp('^\\\\s*' + '\`'.repeat(3) + '(.*)$'));
         const lang = langMatch ? (langMatch[1] || '').trim() : '';
 
-        // Collect content lines (between opener and closer) for copy
-        const contentLines = [];
-        for (let ln = fromLine.number + 1; ln < toLine.number; ln++) {
-          contentLines.push(doc.line(ln).text);
-        }
-        const codeContent = contentLines.join('\\n');
-
-        // Block widget above opener
+        // Block widget above opener. Content is NOT passed in — the widget
+        // reads fence content lazily at COPY click time so typing inside the
+        // fence doesn't invalidate widget equality (see FenceHeaderWidget.eq).
         decos.push({
           pos: fromLine.from,
           side: -1,
           block: true,
           deco: Decoration.widget({
-            widget: new FenceHeaderWidget(lang, codeContent),
+            widget: new FenceHeaderWidget(lang),
             side: -1,
             block: true,
           }),
@@ -799,7 +843,15 @@ function applyFormat(view, command) {
     view.dispatch({
       changes: { from: sel.from, to: sel.to, insert: fence },
       selection: { anchor: cursorPos },
+      // Ensure the newly inserted fence is actually visible. Without this,
+      // inserting a block near the viewport edge (or via toolbar when the
+      // cursor was just off-screen) could leave the user staring at the old
+      // viewport with no visible change — which reads as "the button did
+      // nothing" (Bug 2).
+      effects: EditorView.scrollIntoView(cursorPos, { y: 'center' }),
     });
+    // Re-focus so the user can immediately type the language identifier.
+    view.focus();
     post({ type: 'command-applied' });
     return;
   }
