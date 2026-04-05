@@ -1,7 +1,7 @@
 {
   "name": "@graphite/sync",
-  "version": "0.1.0",
-  "description": "Graphite sync engine — Phase 2 (requires Supabase subscription)",
+  "version": "0.0.1",
+  "private": true,
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
