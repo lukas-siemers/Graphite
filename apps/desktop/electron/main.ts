@@ -7,34 +7,82 @@
  * - Expose functionality to the renderer ONLY via contextBridge IPC.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, protocol, net } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import fs from 'fs';
+import http from 'http';
 import Database from 'better-sqlite3';
 import { autoUpdater } from 'electron-updater';
 
 // ---------------------------------------------------------------------------
-// Custom protocol for serving the Expo web export in production.
+// Local static server for serving the Expo web export in production.
 //
-// Expo Router reads window.location.pathname to resolve routes. When loaded
-// via file:// the pathname is the full filesystem path (C:/Users/...) which
-// matches no route. Serving through a custom protocol gives Expo Router
-// clean paths (/ for root, /(main) for the main layout, etc.).
-//
-// Must be registered BEFORE app.whenReady().
+// Expo Router reads window.location.pathname to resolve routes. Loading
+// via file:// gives it the full filesystem path which matches no route.
+// A local HTTP server gives Expo Router clean paths and correct MIME types
+// for all assets (JS, CSS, fonts, images).
 // ---------------------------------------------------------------------------
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'graphite-app',
-    privileges: {
-      secure: true,
-      standard: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
-]);
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'application/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.ttf':  'font/ttf',
+  '.woff': 'font/woff',
+  '.woff2':'font/woff2',
+  '.otf':  'font/otf',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+  '.webp': 'image/webp',
+  '.map':  'application/json',
+};
+
+let staticServerPort = 0;
+
+function startStaticServer(distDir: string): Promise<number> {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const urlPath = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname);
+      let filePath = path.join(distDir, urlPath);
+
+      // Directory → index.html
+      try {
+        if (fs.statSync(filePath).isDirectory()) {
+          filePath = path.join(filePath, 'index.html');
+        }
+      } catch { /* not a directory */ }
+
+      // Fallback: if file doesn't exist, serve root index.html (SPA fallback)
+      if (!fs.existsSync(filePath)) {
+        filePath = path.join(distDir, 'index.html');
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const mime = MIME_TYPES[ext] || 'application/octet-stream';
+
+      try {
+        const content = fs.readFileSync(filePath);
+        res.writeHead(200, { 'Content-Type': mime });
+        res.end(content);
+      } catch {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+
+    // Listen on a random available port on loopback only (not exposed to network)
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      staticServerPort = port;
+      resolve(port);
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Database
@@ -247,9 +295,9 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:8081');
     mainWindow.webContents.openDevTools();
   } else {
-    // Load via the custom graphite-app:// protocol so Expo Router sees
-    // clean URL paths (/) instead of file:// filesystem paths.
-    mainWindow.loadURL('graphite-app://app/');
+    // Load from the local static server so Expo Router sees clean paths
+    // and all assets (JS, fonts, images) have correct MIME types.
+    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}/`);
   }
 
   mainWindow.on('closed', () => {
@@ -313,21 +361,13 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(() => {
-  // Register the custom protocol handler that serves static files from
-  // the Expo web export directory (dist/). This runs AFTER ready but the
-  // scheme was registered as privileged above (before ready).
-  const distDir = path.join(__dirname, '..');
-  protocol.handle('graphite-app', (request) => {
-    const url = new URL(request.url);
-    let filePath = decodeURIComponent(url.pathname);
-    // Root → index.html
-    if (filePath === '/' || filePath === '') filePath = '/index.html';
-    // Route paths like /(main) → /(main)/index.html
-    if (!path.extname(filePath)) filePath += '/index.html';
-    const fullPath = path.join(distDir, filePath);
-    return net.fetch(pathToFileURL(fullPath).href);
-  });
+app.whenReady().then(async () => {
+  // Start the local static server for production builds. __dirname is
+  // dist/electron/ — the web export lives one level up at dist/.
+  if (process.env.NODE_ENV !== 'development') {
+    const distDir = path.join(__dirname, '..');
+    await startStaticServer(distDir);
+  }
 
   initDatabase();
   registerIpcHandlers();
