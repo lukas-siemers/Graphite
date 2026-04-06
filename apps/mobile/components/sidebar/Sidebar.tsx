@@ -8,6 +8,7 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
+import TagList from './TagList';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
 function webConfirmDelete(
@@ -339,7 +340,7 @@ export default function Sidebar() {
         </Pressable>
       </View>
 
-      {/* Notebook list */}
+      {/* Notebook list + Tags */}
       <View style={{ flex: 1 }}>
         <FlatList
           data={notebooks}
@@ -347,6 +348,7 @@ export default function Sidebar() {
           renderItem={renderNotebook}
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
+          ListFooterComponent={<TagList />}
         />
       </View>
 

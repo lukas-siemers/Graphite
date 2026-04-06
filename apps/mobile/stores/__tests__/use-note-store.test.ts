@@ -18,6 +18,7 @@ vi.mock('@graphite/db', async (importOriginal) => {
     moveNoteToNotebook: vi.fn().mockResolvedValue(undefined),
     extractTags: vi.fn().mockReturnValue([]),
     syncNoteTags: vi.fn().mockResolvedValue(undefined),
+    getAllTags: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -342,7 +343,7 @@ describe('deleteIfEmpty', () => {
 });
 
 // ---------------------------------------------------------------------------
-// moveNoteToNotebook -- move note between notebooks
+// moveNoteToNotebook — move note between notebooks
 // ---------------------------------------------------------------------------
 
 describe('moveNoteToNotebook', () => {
@@ -371,7 +372,7 @@ describe('moveNoteToNotebook', () => {
 
   it('calls the DB moveNoteToNotebook operation', async () => {
     const db = await import('@graphite/db');
-    const mockMove = db.moveNoteToNotebook;
+    const mockMove = db.moveNoteToNotebook as unknown as ReturnType<typeof vi.fn>;
     mockMove.mockClear();
     await useNoteStore.getState().moveNoteToNotebook(fakeDb, 'n-1', 'nb-other', 'folder-x');
     expect(mockMove).toHaveBeenCalledWith(fakeDb, 'n-1', 'nb-other', 'folder-x');

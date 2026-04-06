@@ -11,6 +11,8 @@ import {
   moveNoteToNotebook as dbMoveNoteToNotebook,
   createEmptyCanvas,
   moveNote as dbMoveNote,
+  extractTags,
+  syncNoteTags,
 } from '@graphite/db';
 // NOTE: imported for cross-store read only. We access via getState() inside
 // actions (never at module scope) to avoid circular-init issues.
@@ -139,6 +141,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         n.id === id ? { ...n, ...patch, updatedAt: now } : n,
       ),
     }));
+    // Sync tags extracted from the body text
+    if (patch.body !== undefined) {
+      const tags = extractTags(patch.body);
+      await syncNoteTags(db, id, tags);
+      const { useTagStore } = await import('./use-tag-store');
+      await useTagStore.getState().loadTags(db);
+    }
   },
 
   updateNoteCanvas: async (
@@ -160,14 +169,26 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           : n,
       ),
     }));
+    // Sync tags from canvas body text
+    const bodyText = canvasDoc.textContent?.body ?? '';
+    if (bodyText) {
+      const tags = extractTags(bodyText);
+      await syncNoteTags(db, id, tags);
+      const { useTagStore } = await import('./use-tag-store');
+      await useTagStore.getState().loadTags(db);
+    }
   },
 
   deleteNote: async (db: SQLiteDatabase, id: string) => {
+    // syncNoteTags with empty array removes all links and GCs orphaned tags
+    await syncNoteTags(db, id, []);
     await deleteNote(db, id);
     set((state) => ({
       notes: state.notes.filter((n) => n.id !== id),
       activeNoteId: state.activeNoteId === id ? null : state.activeNoteId,
     }));
+    const { useTagStore } = await import('./use-tag-store');
+    await useTagStore.getState().loadTags(db);
   },
 
   /**
@@ -270,6 +291,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       return { notes: updated };
     });
   },
+
 
   moveNoteToNotebook: async (
     db: SQLiteDatabase,

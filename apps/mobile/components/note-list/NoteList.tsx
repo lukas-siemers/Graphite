@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,14 @@ import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatli
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { Swipeable, RectButton } from 'react-native-gesture-handler';
 import { tokens } from '@graphite/ui';
-import { getDatabase, searchNotes } from '@graphite/db';
+import { getDatabase, searchNotes, getNotesForTag } from '@graphite/db';
 import type { Note } from '@graphite/db';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useTagStore } from '../../stores/use-tag-store';
 import MoveNoteModal from './MoveNoteModal';
+import MoveToNotebookModal from './MoveToNotebookModal';
 
 function stripMarkdown(text: string): string {
   return text
@@ -182,14 +184,36 @@ export default function NoteList() {
   const reorderNotes = useNoteStore((s) => s.reorderNotes);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const folders = useFolderStore((s) => s.folders);
+  const activeTag = useTagStore((s) => s.activeTag);
 
   const [moveTargetNote, setMoveTargetNote] = useState<Note | null>(null);
   const [displayedNotes, setDisplayedNotes] = useState<Note[] | null>(null);
+  const [tagFilteredNotes, setTagFilteredNotes] = useState<Note[] | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [moveModalNoteId, setMoveModalNoteId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const shownNotes = displayedNotes ?? notes;
+  // Load tag-filtered notes when activeTag changes
+  useEffect(() => {
+    if (!activeTag) {
+      setTagFilteredNotes(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = getDatabase();
+        const results = await getNotesForTag(db, activeTag);
+        if (!cancelled) setTagFilteredNotes(results);
+      } catch (_) {
+        if (!cancelled) setTagFilteredNotes(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTag, notes]);
+
+  const baseNotes = tagFilteredNotes ?? notes;
+  const shownNotes = displayedNotes ?? baseNotes;
   const isSearching = searchQuery.trim().length > 0;
 
   const handleSearch = useCallback(
@@ -248,7 +272,6 @@ export default function NoteList() {
     );
   }
 
-  // Long-press on a note card opens an action sheet with move + delete options.
   function handleLongPressNote(note: Note) {
     Alert.alert(
       note.title || 'Untitled',
@@ -317,11 +340,11 @@ export default function NoteList() {
           style={{
             fontSize: 11,
             fontWeight: '600',
-            color: tokens.textMuted,
+            color: activeTag ? tokens.accentLight : tokens.textMuted,
             letterSpacing: 1,
           }}
         >
-          NOTES
+          {activeTag ? `# ${activeTag}` : 'NOTES'}
         </Text>
         <Text style={{ fontSize: 11, color: tokens.textHint }}>
           {shownNotes.length}
@@ -379,7 +402,12 @@ export default function NoteList() {
         onCancel={() => setMoveTargetNote(null)}
       />
       {moveModalNoteId !== null && activeNotebookId !== null && (
-        <MoveToNotebookModal visible noteId={moveModalNoteId} currentNotebookId={activeNotebookId} onClose={() => setMoveModalNoteId(null)} />
+        <MoveToNotebookModal
+          visible
+          noteId={moveModalNoteId}
+          currentNotebookId={activeNotebookId}
+          onClose={() => setMoveModalNoteId(null)}
+        />
       )}
     </View>
   );

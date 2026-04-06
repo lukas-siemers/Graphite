@@ -57,6 +57,23 @@ export const ADD_FOLDER_SORT_ORDER = `ALTER TABLE folders ADD COLUMN sort_order 
 // via drag-and-drop in the note list. Existing rows default to 0.
 export const ADD_NOTE_SORT_ORDER = `ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0;`;
 
+// Migration 8 — tag system
+// Tags are auto-extracted from note body (#tag syntax). The tags table stores
+// unique tag names; note_tags is the many-to-many join table.
+export const CREATE_TAGS = `
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);`;
+
+export const CREATE_NOTE_TAGS = `
+CREATE TABLE IF NOT EXISTS note_tags (
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (note_id, tag_id)
+);`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -66,4 +83,6 @@ export const ALL_MIGRATIONS = [
   ADD_NOTEBOOK_SORT_ORDER,
   ADD_FOLDER_SORT_ORDER,
   ADD_NOTE_SORT_ORDER,
+  CREATE_TAGS,
+  CREATE_NOTE_TAGS,
 ] as const;
