@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { nanoid } from 'nanoid/non-secure';
 import type { Note } from '../types';
+import { fuzzyScore } from '../fuzzy-score';
 
 interface RawNote {
   id: string;
@@ -285,4 +286,53 @@ export async function searchNotes(
     [ftsQuery, notebookId],
   );
   return rows.map(mapNote);
+}
+
+/**
+ * Enhanced three-tier search:
+ *   1. FTS5 prefix match (fast)
+ *   2. LIKE substring fallback when FTS5 returns nothing
+ *   3. Client-side fuzzy scoring on all results for relevance ranking
+ */
+export async function searchNotesEnhanced(
+  db: SQLiteDatabase,
+  notebookId: string,
+  query: string,
+): Promise<Note[]> {
+  if (!query.trim()) return [];
+
+  const trimmed = query.trim();
+
+  // Tier 1: FTS5 prefix match
+  const escaped = trimmed.replace(/["]/g, '""');
+  const ftsQuery = `"${escaped}"*`;
+  let rows = await db.getAllAsync<RawNote>(
+    `SELECT n.* FROM notes n
+     JOIN notes_fts ON notes_fts.rowid = n.rowid
+     WHERE notes_fts MATCH ? AND n.notebook_id = ?
+     ORDER BY rank`,
+    [ftsQuery, notebookId],
+  );
+
+  // Tier 2: LIKE substring fallback
+  if (rows.length === 0) {
+    const likePattern = `%${trimmed}%`;
+    rows = await db.getAllAsync<RawNote>(
+      `SELECT * FROM notes
+       WHERE notebook_id = ? AND (title LIKE ? OR body LIKE ?)
+       ORDER BY updated_at DESC LIMIT 50`,
+      [notebookId, likePattern, likePattern],
+    );
+  }
+
+  const notes = rows.map(mapNote);
+
+  // Tier 3: fuzzy score and sort
+  const scored = notes.map((note) => ({
+    note,
+    score: fuzzyScore(trimmed, note.title + ' ' + note.body),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.map((s) => s.note);
 }

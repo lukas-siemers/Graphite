@@ -9,14 +9,20 @@ import {
   deleteNote,
   updateNoteSortOrder,
   createEmptyCanvas,
+  searchNotesEnhanced,
 } from '@graphite/db';
 // NOTE: imported for cross-store read only. We access via getState() inside
 // actions (never at module scope) to avoid circular-init issues.
 import { useFolderStore } from './use-folder-store';
 
+// Module-scoped debounce timer for search (ref-based, no library).
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
 interface NoteState {
   notes: Note[];
   activeNoteId: string | null;
+  searchResults: Note[];
+  isSearching: boolean;
   setNotes: (notes: Note[]) => void;
   setActiveNote: (id: string | null) => void;
   addNote: (note: Note) => void;
@@ -27,6 +33,12 @@ interface NoteState {
     notebookId: string,
     folderId?: string | null,
   ) => Promise<void>;
+  searchNotes: (
+    db: SQLiteDatabase,
+    notebookId: string,
+    query: string,
+  ) => void;
+  clearSearch: () => void;
   createNewNote: (
     db: SQLiteDatabase,
     notebookId: string,
@@ -51,6 +63,8 @@ interface NoteState {
 export const useNoteStore = create<NoteState>((set, get) => ({
   notes: [],
   activeNoteId: null,
+  searchResults: [],
+  isSearching: false,
   setNotes: (notes) => set({ notes }),
   setActiveNote: (id) => set({ activeNoteId: id }),
   addNote: (note) =>
@@ -69,6 +83,28 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   ) => {
     const notes = await getNotes(db, notebookId, folderId);
     set({ notes });
+  },
+
+  searchNotes: (
+    db: SQLiteDatabase,
+    notebookId: string,
+    query: string,
+  ) => {
+    if (searchTimer) clearTimeout(searchTimer);
+    if (!query.trim()) {
+      set({ searchResults: [], isSearching: false });
+      return;
+    }
+    set({ isSearching: true });
+    searchTimer = setTimeout(async () => {
+      const results = await searchNotesEnhanced(db, notebookId, query);
+      set({ searchResults: results, isSearching: false });
+    }, 150);
+  },
+
+  clearSearch: () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    set({ searchResults: [], isSearching: false });
   },
 
   createNewNote: async (
