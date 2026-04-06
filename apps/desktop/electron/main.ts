@@ -9,8 +9,80 @@
 
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
+import fs from 'fs';
+import http from 'http';
 import Database from 'better-sqlite3';
 import { autoUpdater } from 'electron-updater';
+
+// ---------------------------------------------------------------------------
+// Local static server for serving the Expo web export in production.
+//
+// Expo Router reads window.location.pathname to resolve routes. Loading
+// via file:// gives it the full filesystem path which matches no route.
+// A local HTTP server gives Expo Router clean paths and correct MIME types
+// for all assets (JS, CSS, fonts, images).
+// ---------------------------------------------------------------------------
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'application/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.ttf':  'font/ttf',
+  '.woff': 'font/woff',
+  '.woff2':'font/woff2',
+  '.otf':  'font/otf',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+  '.webp': 'image/webp',
+  '.map':  'application/json',
+};
+
+let staticServerPort = 0;
+
+function startStaticServer(distDir: string): Promise<number> {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const urlPath = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname);
+      let filePath = path.join(distDir, urlPath);
+
+      // Directory → index.html
+      try {
+        if (fs.statSync(filePath).isDirectory()) {
+          filePath = path.join(filePath, 'index.html');
+        }
+      } catch { /* not a directory */ }
+
+      // Fallback: if file doesn't exist, serve root index.html (SPA fallback)
+      if (!fs.existsSync(filePath)) {
+        filePath = path.join(distDir, 'index.html');
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const mime = MIME_TYPES[ext] || 'application/octet-stream';
+
+      try {
+        const content = fs.readFileSync(filePath);
+        res.writeHead(200, { 'Content-Type': mime });
+        res.end(content);
+      } catch {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+
+    // Listen on a random available port on loopback only (not exposed to network)
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      staticServerPort = port;
+      resolve(port);
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Database
@@ -223,8 +295,9 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:8081');
     mainWindow.webContents.openDevTools();
   } else {
-    // __dirname is dist/electron/ — web export lands one level up at dist/
-    mainWindow.loadFile(path.join(__dirname, '../index.html'));
+    // Load from the local static server so Expo Router sees clean paths
+    // and all assets (JS, fonts, images) have correct MIME types.
+    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}/`);
   }
 
   mainWindow.on('closed', () => {
@@ -288,7 +361,14 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Start the local static server for production builds. __dirname is
+  // dist/electron/ — the web export lives one level up at dist/.
+  if (process.env.NODE_ENV !== 'development') {
+    const distDir = path.join(__dirname, '..');
+    await startStaticServer(distDir);
+  }
+
   initDatabase();
   registerIpcHandlers();
   createWindow();
