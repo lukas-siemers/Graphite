@@ -12,11 +12,20 @@ vi.mock('@graphite/db', async (importOriginal) => {
     updateNote: vi.fn().mockResolvedValue(undefined),
     getNotes: vi.fn().mockResolvedValue([]),
     createNote: vi.fn(),
-    deleteNote: vi.fn(),
+    deleteNote: vi.fn().mockResolvedValue(undefined),
     updateNoteSortOrder: vi.fn().mockResolvedValue(undefined),
     moveNote: vi.fn().mockResolvedValue(undefined),
+    moveNoteToNotebook: vi.fn().mockResolvedValue(undefined),
+    extractTags: vi.fn().mockReturnValue([]),
+    syncNoteTags: vi.fn().mockResolvedValue(undefined),
   };
 });
+
+vi.mock('../use-tag-store', () => ({
+  useTagStore: {
+    getState: () => ({ loadTags: vi.fn().mockResolvedValue(undefined) }),
+  },
+}));
 
 // Fixed test fixture
 const note1: Note = {
@@ -329,6 +338,43 @@ describe('deleteIfEmpty', () => {
     useNoteStore.setState({ notes: [note] });
     const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-7');
     expect(deleted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// moveNoteToNotebook -- move note between notebooks
+// ---------------------------------------------------------------------------
+
+describe('moveNoteToNotebook', () => {
+  beforeEach(() => {
+    useNoteStore.setState({ notes: [note1, note2, note3], activeNoteId: null });
+  });
+
+  it('removes the note from the in-memory notes array', async () => {
+    await useNoteStore.getState().moveNoteToNotebook(fakeDb, 'n-2', 'nb-other', null);
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'n-2')).toBeUndefined();
+    expect(notes).toHaveLength(2);
+  });
+
+  it('clears activeNoteId when the moved note was active', async () => {
+    useNoteStore.setState({ activeNoteId: 'n-1' });
+    await useNoteStore.getState().moveNoteToNotebook(fakeDb, 'n-1', 'nb-other', null);
+    expect(useNoteStore.getState().activeNoteId).toBeNull();
+  });
+
+  it('preserves activeNoteId when a different note is moved', async () => {
+    useNoteStore.setState({ activeNoteId: 'n-1' });
+    await useNoteStore.getState().moveNoteToNotebook(fakeDb, 'n-2', 'nb-other', null);
+    expect(useNoteStore.getState().activeNoteId).toBe('n-1');
+  });
+
+  it('calls the DB moveNoteToNotebook operation', async () => {
+    const db = await import('@graphite/db');
+    const mockMove = db.moveNoteToNotebook;
+    mockMove.mockClear();
+    await useNoteStore.getState().moveNoteToNotebook(fakeDb, 'n-1', 'nb-other', 'folder-x');
+    expect(mockMove).toHaveBeenCalledWith(fakeDb, 'n-1', 'nb-other', 'folder-x');
   });
 });
 

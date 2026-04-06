@@ -186,6 +186,7 @@ export default function NoteList() {
   const [moveTargetNote, setMoveTargetNote] = useState<Note | null>(null);
   const [displayedNotes, setDisplayedNotes] = useState<Note[] | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [moveModalNoteId, setMoveModalNoteId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shownNotes = displayedNotes ?? notes;
@@ -247,9 +248,7 @@ export default function NoteList() {
     );
   }
 
-  // Long-press on a note card opens an action sheet. Alert.alert with multiple
-  // buttons is the supported cross-platform sheet on both iOS and web. The
-  // Delete branch defers to the existing confirmation flow.
+  // Long-press on a note card opens an action sheet with move + delete options.
   function handleLongPressNote(note: Note) {
     Alert.alert(
       note.title || 'Untitled',
@@ -258,6 +257,10 @@ export default function NoteList() {
         {
           text: 'Move to folder...',
           onPress: () => setMoveTargetNote(note),
+        },
+        {
+          text: 'Move to notebook...',
+          onPress: () => setMoveModalNoteId(note.id),
         },
         {
           text: 'Delete',
@@ -375,6 +378,9 @@ export default function NoteList() {
         onSelect={handleMoveConfirm}
         onCancel={() => setMoveTargetNote(null)}
       />
+      {moveModalNoteId !== null && activeNotebookId !== null && (
+        <MoveToNotebookModal visible noteId={moveModalNoteId} currentNotebookId={activeNotebookId} onClose={() => setMoveModalNoteId(null)} />
+      )}
     </View>
   );
 }

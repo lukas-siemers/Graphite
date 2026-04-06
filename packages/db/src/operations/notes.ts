@@ -303,3 +303,26 @@ export async function searchNotes(
   );
   return rows.map(mapNote);
 }
+
+export async function moveNoteToNotebook(
+  db: SQLiteDatabase,
+  noteId: string,
+  targetNotebookId: string,
+  targetFolderId: string | null = null,
+): Promise<void> {
+  const updatedAt = Date.now();
+  const maxRow = targetFolderId === null
+    ? await db.getFirstAsync<{ next: number }>(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM notes WHERE notebook_id = ? AND folder_id IS NULL',
+        [targetNotebookId],
+      )
+    : await db.getFirstAsync<{ next: number }>(
+        'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM notes WHERE notebook_id = ? AND folder_id = ?',
+        [targetNotebookId, targetFolderId],
+      );
+  const sortOrder = (maxRow as any)?.next ?? 0;
+  await db.runAsync(
+    'UPDATE notes SET notebook_id = ?, folder_id = ?, sort_order = ?, updated_at = ? WHERE id = ?',
+    [targetNotebookId, targetFolderId, sortOrder, updatedAt, noteId],
+  );
+}
