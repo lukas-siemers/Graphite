@@ -7,10 +7,34 @@
  * - Expose functionality to the renderer ONLY via contextBridge IPC.
  */
 
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, protocol, net } from 'electron';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import Database from 'better-sqlite3';
 import { autoUpdater } from 'electron-updater';
+
+// ---------------------------------------------------------------------------
+// Custom protocol for serving the Expo web export in production.
+//
+// Expo Router reads window.location.pathname to resolve routes. When loaded
+// via file:// the pathname is the full filesystem path (C:/Users/...) which
+// matches no route. Serving through a custom protocol gives Expo Router
+// clean paths (/ for root, /(main) for the main layout, etc.).
+//
+// Must be registered BEFORE app.whenReady().
+// ---------------------------------------------------------------------------
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'graphite-app',
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 
 // ---------------------------------------------------------------------------
 // Database
@@ -223,8 +247,9 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:8081');
     mainWindow.webContents.openDevTools();
   } else {
-    // __dirname is dist/electron/ — web export lands one level up at dist/
-    mainWindow.loadFile(path.join(__dirname, '../index.html'));
+    // Load via the custom graphite-app:// protocol so Expo Router sees
+    // clean URL paths (/) instead of file:// filesystem paths.
+    mainWindow.loadURL('graphite-app://app/');
   }
 
   mainWindow.on('closed', () => {
@@ -289,6 +314,21 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+  // Register the custom protocol handler that serves static files from
+  // the Expo web export directory (dist/). This runs AFTER ready but the
+  // scheme was registered as privileged above (before ready).
+  const distDir = path.join(__dirname, '..');
+  protocol.handle('graphite-app', (request) => {
+    const url = new URL(request.url);
+    let filePath = decodeURIComponent(url.pathname);
+    // Root → index.html
+    if (filePath === '/' || filePath === '') filePath = '/index.html';
+    // Route paths like /(main) → /(main)/index.html
+    if (!path.extname(filePath)) filePath += '/index.html';
+    const fullPath = path.join(distDir, filePath);
+    return net.fetch(pathToFileURL(fullPath).href);
+  });
+
   initDatabase();
   registerIpcHandlers();
   createWindow();
