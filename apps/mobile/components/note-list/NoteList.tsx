@@ -3,12 +3,11 @@ import {
   View,
   Text,
   TextInput,
+  FlatList,
   Pressable,
   Alert,
   Platform,
 } from 'react-native';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
-import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import { Swipeable, RectButton } from 'react-native-gesture-handler';
 import { tokens } from '@graphite/ui';
 import { getDatabase, searchNotes, getNotesForTag } from '@graphite/db';
@@ -60,11 +59,9 @@ interface NoteCardProps {
   onPress: () => void;
   onLongPress: () => void;
   onDelete: () => void;
-  drag: () => void;
-  showDragHandle: boolean;
 }
 
-function NoteCard({ note, isActive, onPress, onLongPress, onDelete, drag, showDragHandle }: NoteCardProps) {
+function NoteCard({ note, isActive, onPress, onLongPress, onDelete }: NoteCardProps) {
   const preview = stripMarkdown(note.body);
   const swipeableRef = useRef<Swipeable | null>(null);
 
@@ -93,22 +90,6 @@ function NoteCard({ note, isActive, onPress, onLongPress, onDelete, drag, showDr
 
   const row = (
     <View style={{ flexDirection: 'row', alignItems: 'stretch', backgroundColor: tokens.bgBase }}>
-      {showDragHandle && (
-        <Pressable
-          onLongPress={drag}
-          delayLongPress={150}
-          hitSlop={4}
-          style={{
-            justifyContent: 'center',
-            paddingHorizontal: 8,
-            paddingVertical: 12,
-          }}
-        >
-          <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>
-            {'\u2630'}
-          </Text>
-        </Pressable>
-      )}
       <Pressable
         onPress={onPress}
         onLongPress={onLongPress}
@@ -181,7 +162,6 @@ export default function NoteList() {
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
-  const reorderNotes = useNoteStore((s) => s.reorderNotes);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
   const folders = useFolderStore((s) => s.folders);
   const activeTag = useTagStore((s) => s.activeTag);
@@ -307,19 +287,15 @@ export default function NoteList() {
     }
   }
 
-  function renderNote({ item, drag }: RenderItemParams<Note>) {
+  function renderNote({ item }: { item: Note }) {
     return (
-      <ScaleDecorator>
-        <NoteCard
-          note={item}
-          isActive={item.id === activeNoteId}
-          onPress={() => handleNotePress(item.id)}
-          onLongPress={() => handleLongPressNote(item)}
-          onDelete={() => handleDeleteNote(item)}
-          drag={drag}
-          showDragHandle={!isSearching}
-        />
-      </ScaleDecorator>
+      <NoteCard
+        note={item}
+        isActive={item.id === activeNoteId}
+        onPress={() => handleNotePress(item.id)}
+        onLongPress={() => handleLongPressNote(item)}
+        onDelete={() => handleDeleteNote(item)}
+      />
     );
   }
 
@@ -371,20 +347,10 @@ export default function NoteList() {
         />
       </View>
 
-      {/* Note list — DraggableFlatList enables long-press drag reorder.
-          Drag handle is hidden when a search query is active because search
-          results have no persisted order. */}
-      <DraggableFlatList
+      {/* Note list */}
+      <FlatList
         data={shownNotes}
         keyExtractor={(item) => item.id}
-        onDragEnd={({ data }) => {
-          if (isSearching) return;
-          try {
-            reorderNotes(getDatabase(), data.map((n) => n.id));
-          } catch (_) {
-            // db not ready yet
-          }
-        }}
         renderItem={renderNote}
         ItemSeparatorComponent={null}
         style={{ flex: 1 }}

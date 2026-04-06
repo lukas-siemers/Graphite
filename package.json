@@ -28,6 +28,11 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "resolutions": {
+    "react-native": "0.81.5",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
