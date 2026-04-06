@@ -5,8 +5,22 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL;');
   await db.execAsync('PRAGMA foreign_keys = ON;');
 
-  for (const sql of ALL_MIGRATIONS) {
-    await db.execAsync(sql);
+  // Track which migrations have already been applied via PRAGMA user_version.
+  // Each migration increments the version by 1. On subsequent launches, only
+  // NEW migrations (index >= current version) are executed, avoiding the
+  // "duplicate column name" crash from re-running ALTER TABLE statements.
+  const versionRow = await db.getFirstAsync<{ user_version: number }>(
+    'PRAGMA user_version',
+  );
+  const currentVersion = versionRow?.user_version ?? 0;
+
+  for (let i = currentVersion; i < ALL_MIGRATIONS.length; i++) {
+    await db.execAsync(ALL_MIGRATIONS[i]);
+  }
+
+  // Stamp the new version so the next launch skips these migrations.
+  if (ALL_MIGRATIONS.length > currentVersion) {
+    await db.execAsync(`PRAGMA user_version = ${ALL_MIGRATIONS.length}`);
   }
 }
 
