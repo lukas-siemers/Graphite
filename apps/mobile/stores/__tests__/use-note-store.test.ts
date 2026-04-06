@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Note } from '../../../../packages/db/src/types';
 import type { CanvasDocument } from '../../../../packages/db/src/canvas-types';
 import { useNoteStore } from '../use-note-store';
+import { useFolderStore } from '../use-folder-store';
 
 // Mock the @graphite/db module so updateNote never hits SQLite in unit tests.
 vi.mock('@graphite/db', async (importOriginal) => {
@@ -13,6 +14,7 @@ vi.mock('@graphite/db', async (importOriginal) => {
     createNote: vi.fn(),
     deleteNote: vi.fn(),
     updateNoteSortOrder: vi.fn().mockResolvedValue(undefined),
+    moveNote: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -343,6 +345,85 @@ describe('deleteIfEmpty', () => {
 // folder and reload that folder's notes before setting the new note active,
 // so sidebar selection, note list, and editor all stay in sync.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// moveNote — move a note between folders within the same notebook
+// ---------------------------------------------------------------------------
+
+describe('moveNote', () => {
+  beforeEach(async () => {
+    useNoteStore.setState({ notes: [], activeNoteId: null });
+    useFolderStore.setState({ activeFolderId: null });
+    const db = await import('@graphite/db');
+    (db.moveNote as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (db.moveNote as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  });
+
+  it('movedOut: removes note from list when it leaves the active folder', async () => {
+    const inFolderA: Note = { ...note1, id: 'm-1', folderId: 'folder-A' };
+    useFolderStore.setState({ activeFolderId: 'folder-A' });
+    useNoteStore.setState({ notes: [inFolderA] });
+
+    await useNoteStore.getState().moveNote(fakeDb, 'm-1', 'folder-B');
+
+    const { notes } = useNoteStore.getState();
+    expect(notes.find((n) => n.id === 'm-1')).toBeUndefined();
+  });
+
+  it('movedIn: prepends note to the list when it enters the active folder', async () => {
+    const other: Note = { ...note1, id: 'm-other', folderId: 'folder-A' };
+    const incoming: Note = { ...note1, id: 'm-2', folderId: 'folder-B' };
+    useFolderStore.setState({ activeFolderId: 'folder-A' });
+    useNoteStore.setState({ notes: [other, incoming] });
+
+    await useNoteStore.getState().moveNote(fakeDb, 'm-2', 'folder-A');
+
+    const { notes } = useNoteStore.getState();
+    expect(notes[0].id).toBe('m-2');
+    expect(notes[0].folderId).toBe('folder-A');
+  });
+
+  it('inPlace: patches folderId when neither source nor target is the active view', async () => {
+    const unrelated: Note = { ...note1, id: 'm-3', folderId: 'folder-B' };
+    useFolderStore.setState({ activeFolderId: 'folder-X' });
+    useNoteStore.setState({ notes: [unrelated] });
+
+    await useNoteStore.getState().moveNote(fakeDb, 'm-3', 'folder-C');
+
+    const { notes } = useNoteStore.getState();
+    expect(notes).toHaveLength(1);
+    expect(notes[0].id).toBe('m-3');
+    expect(notes[0].folderId).toBe('folder-C');
+  });
+
+  it('noop: same-folder move skips DB write and state update', async () => {
+    const stable: Note = { ...note1, id: 'm-4', folderId: 'folder-A' };
+    useFolderStore.setState({ activeFolderId: 'folder-A' });
+    useNoteStore.setState({ notes: [stable] });
+
+    const db = await import('@graphite/db');
+    const mockMove = db.moveNote as unknown as ReturnType<typeof vi.fn>;
+    mockMove.mockClear();
+
+    await useNoteStore.getState().moveNote(fakeDb, 'm-4', 'folder-A');
+
+    expect(mockMove).not.toHaveBeenCalled();
+    const { notes } = useNoteStore.getState();
+    expect(notes[0]).toBe(stable); // Reference equality: no re-render.
+  });
+
+  it('calls the DB moveNote operation with (db, noteId, targetFolderId)', async () => {
+    const inFolderA: Note = { ...note1, id: 'm-5', folderId: 'folder-A' };
+    useNoteStore.setState({ notes: [inFolderA] });
+    const db = await import('@graphite/db');
+    const mockMove = db.moveNote as unknown as ReturnType<typeof vi.fn>;
+    mockMove.mockClear();
+
+    await useNoteStore.getState().moveNote(fakeDb, 'm-5', null);
+
+    expect(mockMove).toHaveBeenCalledWith(fakeDb, 'm-5', null);
+  });
+});
 
 describe('createNewNote', () => {
   beforeEach(async () => {
