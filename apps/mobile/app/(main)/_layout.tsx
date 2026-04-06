@@ -11,6 +11,9 @@ import {
   createFolder,
   createNote,
   updateNote,
+  getSetting,
+  setSetting,
+  seedSampleNotebook,
 } from '@graphite/db';
 import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
@@ -22,6 +25,7 @@ import Editor from '../../components/editor/Editor';
 import { FormattingToolbar } from '../../components/editor/FormattingToolbar';
 import { DrawingCanvas } from '../../components/drawing';
 import type { Stroke } from '../../components/drawing';
+import WelcomeScreen from '../../components/onboarding/WelcomeScreen';
 
 // ---------------------------------------------------------------------------
 // Drawing persistence helpers (Phase 1 — local filesystem via expo-file-system)
@@ -310,6 +314,8 @@ export default function MainLayout() {
   const isIPad = width >= 768;
   const [dbReady, setDbReady] = useState(false);
   const [drawingOpen, setDrawingOpen] = useState(false);
+  // null = loading, false = show onboarding, true = skip
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
   const setNotebooks = useNotebookStore((s) => s.setNotebooks);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
@@ -322,47 +328,67 @@ export default function MainLayout() {
   useEffect(() => {
     initDatabase()
       .then(async (db) => {
-        let notebooks = await getNotebooks(db);
-
-        if (notebooks.length === 0) {
-          // Seed default data
-          const nb = await createNotebook(db, 'My Notebook');
-          const folder = await createFolder(db, nb.id, 'General');
-          const note = await createNote(db, nb.id, folder.id);
-          await updateNote(db, note.id, {
-            title: 'Welcome to Graphite',
-            body: '# Welcome\n\nStart writing your notes here.',
-          });
-
-          notebooks = await getNotebooks(db);
-          const folders = await getFolders(db, nb.id);
-          const notes = await getNotes(db, nb.id, folder.id);
-
-          setNotebooks(notebooks);
-          setFolders(folders);
-          setNotes(notes);
-          setActiveNotebook(nb.id);
-          setActiveFolder(folder.id);
-          if (notes.length > 0) setActiveNote(notes[0].id);
-        } else {
-          // Load existing data
-          const nb = notebooks[0];
-          const folders = await getFolders(db, nb.id);
-          const activeFolderId = folders.length > 0 ? folders[0].id : undefined;
-          const notes = await getNotes(db, nb.id, activeFolderId ?? null);
-
-          setNotebooks(notebooks);
-          setFolders(folders);
-          setNotes(notes);
-          setActiveNotebook(nb.id);
-          if (activeFolderId) setActiveFolder(activeFolderId);
-          if (notes.length > 0) setActiveNote(notes[0].id);
+        // Check onboarding flag
+        const onboardingFlag = await getSetting(db, 'onboarding_completed');
+        if (onboardingFlag !== '1') {
+          setOnboardingDone(false);
+          setDbReady(true);
+          return;
         }
 
+        setOnboardingDone(true);
+        await loadAppData(db);
         setDbReady(true);
       })
       .catch(console.error);
   }, []);
+
+  async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
+    let notebooks = await getNotebooks(db);
+
+    if (notebooks.length === 0) {
+      // Seed default data
+      const nb = await createNotebook(db, 'My Notebook');
+      const folder = await createFolder(db, nb.id, 'General');
+      const note = await createNote(db, nb.id, folder.id);
+      await updateNote(db, note.id, {
+        title: 'Welcome to Graphite',
+        body: '# Welcome\n\nStart writing your notes here.',
+      });
+
+      notebooks = await getNotebooks(db);
+      const folders = await getFolders(db, nb.id);
+      const notes = await getNotes(db, nb.id, folder.id);
+
+      setNotebooks(notebooks);
+      setFolders(folders);
+      setNotes(notes);
+      setActiveNotebook(nb.id);
+      setActiveFolder(folder.id);
+      if (notes.length > 0) setActiveNote(notes[0].id);
+    } else {
+      // Load existing data
+      const nb = notebooks[0];
+      const folders = await getFolders(db, nb.id);
+      const activeFolderId = folders.length > 0 ? folders[0].id : undefined;
+      const notes = await getNotes(db, nb.id, activeFolderId ?? null);
+
+      setNotebooks(notebooks);
+      setFolders(folders);
+      setNotes(notes);
+      setActiveNotebook(nb.id);
+      if (activeFolderId) setActiveFolder(activeFolderId);
+      if (notes.length > 0) setActiveNote(notes[0].id);
+    }
+  }
+
+  async function handleOnboardingComplete() {
+    const db = getDatabase();
+    await seedSampleNotebook(db);
+    await setSetting(db, 'onboarding_completed', '1');
+    setOnboardingDone(true);
+    await loadAppData(db);
+  }
 
   if (!dbReady) {
     return (
@@ -374,6 +400,10 @@ export default function MainLayout() {
         </Text>
       </View>
     );
+  }
+
+  if (onboardingDone === false) {
+    return <WelcomeScreen onComplete={handleOnboardingComplete} />;
   }
 
   if (isIPad) {

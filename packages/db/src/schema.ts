@@ -57,6 +57,15 @@ export const ADD_FOLDER_SORT_ORDER = `ALTER TABLE folders ADD COLUMN sort_order 
 // via drag-and-drop in the note list. Existing rows default to 0.
 export const ADD_NOTE_SORT_ORDER = `ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0;`;
 
+// Migration 8 — settings key-value store
+// Used for app-level flags such as onboarding_completed. Each row is a
+// unique key with a text value.
+export const CREATE_SETTINGS = `
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -66,4 +75,5 @@ export const ALL_MIGRATIONS = [
   ADD_NOTEBOOK_SORT_ORDER,
   ADD_FOLDER_SORT_ORDER,
   ADD_NOTE_SORT_ORDER,
+  CREATE_SETTINGS,
 ] as const;
