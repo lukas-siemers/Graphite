@@ -60,13 +60,3 @@ export function buildExport(note: ExportNoteInput): ExportPayload {
     content,
   };
 }
-
-// The runtime entry point is overridden by .native.ts / .web.ts.
-// This fallback throws so any misconfigured bundler fails loudly instead of
-// silently no-op-ing a user action.
-export async function exportNoteAsMarkdown(_note: ExportNoteInput): Promise<void> {
-  throw new Error(
-    'exportNoteAsMarkdown: no platform implementation resolved. ' +
-      'Expected export-markdown.native.ts or export-markdown.web.ts to be picked up by the bundler.',
-  );
-}

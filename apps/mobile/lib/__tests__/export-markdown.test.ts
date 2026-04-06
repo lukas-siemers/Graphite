@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slugify, buildExport } from '../export-markdown';
+import { slugify, buildExport } from '../export-markdown-utils';
 
 describe('slugify', () => {
   it('converts "Hello World" to "hello-world"', () => {
