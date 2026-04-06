@@ -309,13 +309,33 @@ Implement the canvas-first data model and `canvas_json` migration before Phase 2
 **2026-04-05 — Delete folder + notebook** (merged to main as `f812773`)
 - Long-press cascade delete in the sidebar (`a75015a`). Fixed two pre-existing bugs: subtree walking for nested folders, and a cross-notebook store wipe where the note list for an unrelated notebook was being cleared on delete.
 
-Current test totals (2026-04-05): editor 24/24, db 44/44.
+**2026-04-05 — Phase 1 completion batch** (merged to main)
+- Auto-delete empty notes on navigate-away (`a2f5ec9`). Drawing-only notes preserved.
+- Inline rename for folders + notebooks via double-tap (`4acd10b`). Long-press delete unaffected.
+- Markdown export via share sheet (native) / download (web) (`472af94`).
+- New note UX bug fix (`670ca9e`): QA diagnosed cross-folder note creation bug; `createNewNote` now switches folder context. Also fixed hardcoded `sortOrder: 0` collision.
+- Root `yarn test` workspace config fix (`10c555c`): was crashing on Vitest 3 API used against Vitest 1.6.1.
+- CLAUDE.md audit (`4c061cd`): 8 new subsections (testing strategy, FTS5 checklist, editor architecture, branch hygiene).
+
+**2026-04-05 — Phase 3 + 4 features** (merged to main as `9fec421`)
+- Electron production build pipeline: local HTTP server for serving Expo web export (fixes routing + icon font loading vs file:// protocol). Desktop installer builds via `npm run dist`.
+- PDF export via `expo-print` (native) / `window.print()` (web).
+- Move note between folders (long-press action sheet + folder picker modal).
+- Move note between notebooks (long-press + notebook picker modal).
+- Tag system: `#tag` auto-extraction from body (excludes code fences), `tags` + `note_tags` tables, sidebar TagList with counts, note list filtering by active tag, orphan tag GC.
+- Fuzzy search: three-tier search (FTS5 prefix → LIKE substring fallback → client-side fuzzy scoring at 150ms debounce).
+- Onboarding: welcome screen on first launch + sample "Getting Started" notebook with 3 notes. `settings` table for persistence.
+- `packages/sync` scaffold: types, `SyncEngine` stubs (throws `NotImplementedError`), real `resolveByLastWrite` conflict resolver. Zero Supabase imports.
+- Reading time estimate in editor status bar (`N WORDS · M MIN READ · SAVED`).
+
+Current test totals (2026-04-05 end of day): **269 tests across 20 test files, all green.**
 
 ### Still open in Phase 1
-- [ ] New note UX — investigate and fix odd creation behavior
-- [ ] Auto-delete empty notes — silent delete on navigate-away (Phase 4 item, bumped up)
+- [x] ~~New note UX~~ — fixed
+- [x] ~~Auto-delete empty notes~~ — shipped
+- [x] ~~Delete note / folder / notebook~~ — shipped
 - [ ] iPad layout redesign pass (deferred, Designer-owned)
-- [ ] iOS `pod install` + Apple Pencil pass-through smoke (pre-TestFlight gate, needs Mac — no `ios/` directory in repo yet)
+- [ ] iOS `pod install` + Apple Pencil pass-through smoke (pre-TestFlight gate, needs Mac)
 - [ ] TestFlight build + App Store submission
 
 ---
