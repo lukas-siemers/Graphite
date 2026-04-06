@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS note_tags (
   PRIMARY KEY (note_id, tag_id)
 );`;
 
+// Migration 9 — settings key-value store
+// Used for app-level flags such as onboarding_completed. Each row is a
+// unique key with a text value.
+export const CREATE_SETTINGS = `
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -85,4 +94,5 @@ export const ALL_MIGRATIONS = [
   ADD_NOTE_SORT_ORDER,
   CREATE_TAGS,
   CREATE_NOTE_TAGS,
+  CREATE_SETTINGS,
 ] as const;

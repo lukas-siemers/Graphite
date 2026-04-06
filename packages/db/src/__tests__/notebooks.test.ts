@@ -6,8 +6,9 @@ import {
   updateNotebook,
   renameNotebook,
   deleteNotebook,
+  seedSampleNotebook,
 } from '../operations/notebooks';
-import { createNote } from '../operations/notes';
+import { createNote, getNotes } from '../operations/notes';
 
 describe('notebooks operations', () => {
   let db: ReturnType<typeof createExpoCompatibleDb>;
@@ -113,5 +114,35 @@ describe('notebooks operations', () => {
       [notebook.id],
     );
     expect(notes).toHaveLength(0);
+  });
+
+  it('seedSampleNotebook creates 1 notebook and 3 notes', async () => {
+    const nb = await seedSampleNotebook(db);
+
+    expect(nb.name).toBe('Getting Started');
+
+    const notes = await getNotes(db, nb.id);
+    expect(notes).toHaveLength(3);
+  });
+
+  it('seedSampleNotebook is idempotent — calling twice does not duplicate', async () => {
+    const nb1 = await seedSampleNotebook(db);
+    const nb2 = await seedSampleNotebook(db);
+
+    expect(nb1.id).toBe(nb2.id);
+
+    const notebooks = await getNotebooks(db);
+    const gettingStarted = notebooks.filter((n) => n.name === 'Getting Started');
+    expect(gettingStarted).toHaveLength(1);
+  });
+
+  it('seedSampleNotebook notes have valid markdown bodies', async () => {
+    const nb = await seedSampleNotebook(db);
+    const notes = await getNotes(db, nb.id);
+
+    for (const note of notes) {
+      expect(note.body.length).toBeGreaterThan(0);
+      expect(note.body).toContain('#');
+    }
   });
 });

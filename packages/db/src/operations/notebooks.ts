@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { nanoid } from 'nanoid/non-secure';
-import type { Notebook } from '../types';
+import type { Notebook, Note } from '../types';
 
 interface RawNotebook {
   id: string;
@@ -140,4 +140,102 @@ export async function deleteNotebook(
   });
 
   return { deletedFolderIds, deletedNoteIds };
+}
+
+// ---------------------------------------------------------------------------
+// Sample notebook seeding (onboarding)
+// ---------------------------------------------------------------------------
+
+const SAMPLE_NOTES: Array<{ title: string; body: string }> = [
+  {
+    title: 'Welcome to Graphite',
+    body: `# Welcome to Graphite
+
+Graphite is a markdown note-taking app built for speed and simplicity.
+
+- Write in **Markdown** with live syntax highlighting
+- Organize notes in **notebooks** and **folders**
+- Draw with **Apple Pencil** on iPad
+- Export notes as **Markdown** or **PDF**
+
+This is your first notebook. Feel free to edit or delete these sample notes.`,
+  },
+  {
+    title: 'Markdown Cheatsheet',
+    body: `# Markdown Cheatsheet
+
+## Text formatting
+- **Bold** with double asterisks
+- *Italic* with single asterisks
+- ~~Strikethrough~~ with double tildes
+
+## Headings
+Use # for H1, ## for H2, ### for H3
+
+## Code
+Inline code with single backticks
+
+## Lists
+- Bullet lists with dashes
+1. Numbered lists with numbers
+
+## Links
+[Link text](https://example.com)`,
+  },
+  {
+    title: 'Tips and Tricks',
+    body: `# Tips and Tricks
+
+- **Double-tap** a folder or notebook name to rename it
+- **Swipe left** on a note to delete it
+- **Long-press** a note to move it between folders
+- Use **#tags** in your notes to organize by topic
+- The search bar supports **fuzzy matching** — typos are OK
+- Export any note as Markdown or PDF from the editor header`,
+  },
+];
+
+/**
+ * Seed a "Getting Started" notebook with 3 sample notes.
+ * Idempotent — if a notebook named "Getting Started" already exists,
+ * this function is a no-op and returns the existing notebook.
+ */
+export async function seedSampleNotebook(
+  db: SQLiteDatabase,
+): Promise<Notebook> {
+  // Idempotency: check if already seeded
+  const existing = await db.getFirstAsync<RawNotebook>(
+    'SELECT * FROM notebooks WHERE name = ?',
+    ['Getting Started'],
+  );
+  if (existing) {
+    return mapNotebook(existing);
+  }
+
+  const nb = await createNotebook(db, 'Getting Started');
+  const now = Date.now();
+
+  for (let i = 0; i < SAMPLE_NOTES.length; i++) {
+    const { title, body } = SAMPLE_NOTES[i];
+    const noteId = nanoid();
+    await db.runAsync(
+      `INSERT INTO notes
+         (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, sort_order, created_at, updated_at, synced_at)
+       VALUES (?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?, NULL)`,
+      [noteId, nb.id, title, body, i, now, now],
+    );
+    // Populate FTS index
+    const inserted = await db.getFirstAsync<{ rowid: number }>(
+      'SELECT rowid FROM notes WHERE id = ?',
+      [noteId],
+    );
+    if (inserted) {
+      await db.runAsync(
+        'INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)',
+        [inserted.rowid, title, body],
+      );
+    }
+  }
+
+  return nb;
 }
