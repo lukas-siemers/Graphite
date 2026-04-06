@@ -6,9 +6,9 @@
 // Metro and the TypeScript "react-native" resolver pick the correct file via
 // the .native.ts / .web.ts suffix automatically.
 
-import { slugify, type ExportNoteInput } from './export-markdown';
+import { slugify, type ExportNoteInput } from './export-markdown-utils';
 
-export type { ExportNoteInput } from './export-markdown';
+export type { ExportNoteInput } from './export-markdown-utils';
 
 export interface PdfPayload {
   filename: string;
