@@ -182,12 +182,32 @@ export default function Sidebar() {
     } catch (_) {}
   }
 
+  async function handleSearchResultPress(note: Note) {
+    // Search results may come from any folder in the notebook. Switch the
+    // folder context so the note list loads the right folder and the editor
+    // finds the note in its in-memory array.
+    const targetFolderId = note.folderId ?? null;
+    if (targetFolderId !== activeFolderId) {
+      useFolderStore.getState().setActiveFolder(targetFolderId);
+    }
+    try {
+      const db = getDatabase();
+      await loadNotes(db, note.notebookId, targetFolderId);
+    } catch (_) {
+      // db not ready
+    }
+    setActiveNote(note.id);
+    // Clear search so the user sees the note list for that folder
+    setSearchQuery('');
+    clearSearch();
+  }
+
   function renderSearchResult({ item: note }: { item: Note }) {
     const isActive = note.id === activeNoteId;
     const preview = (note.body || '').slice(0, 60).replace(/\n/g, ' ');
     return (
       <Pressable
-        onPress={() => setActiveNote(note.id)}
+        onPress={() => handleSearchResultPress(note)}
         style={{
           flexDirection: 'row',
           alignItems: 'center',
