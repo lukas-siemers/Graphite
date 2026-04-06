@@ -2,6 +2,8 @@
   "name": "@graphite/desktop",
   "version": "0.1.0",
   "description": "Graphite desktop app (Electron) — Phase 3",
+  "repository": "github:lukas-siemers/Graphite",
+  "author": "Lukas Siemers",
   "main": "dist/electron/main.js",
   "scripts": {
     "compile": "tsc --project tsconfig.json",
@@ -64,6 +66,11 @@
     },
     "linux": {
       "target": ["AppImage"]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "lukas-siemers",
+      "repo": "Graphite"
     }
   }
 }
