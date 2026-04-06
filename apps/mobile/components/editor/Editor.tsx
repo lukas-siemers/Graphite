@@ -14,6 +14,7 @@ import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
+import { computeReadingTime } from '../../lib/reading-time';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -357,7 +358,7 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
             textTransform: 'uppercase',
           }}
         >
-          {wordCount} WORDS \u00B7 {saveStatus.toUpperCase()}
+          {wordCount} WORDS {'\u00B7'} {computeReadingTime(wordCount).toUpperCase()} {'\u00B7'} {saveStatus.toUpperCase()}
         </Text>
       </View>
     </View>
