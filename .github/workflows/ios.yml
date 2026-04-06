@@ -1,0 +1,154 @@
+name: iOS Build
+
+# Manual trigger only — click "Run workflow" in the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Build profile (development = device testing, appstore = TestFlight)'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - appstore
+
+jobs:
+  build:
+    name: Build iOS (${{ inputs.profile }})
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # Install Apple certificate and provisioning profile from GitHub Secrets.
+      # See README section "iOS Build Setup" for how to create these secrets.
+      - name: Install Apple signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          # Create a temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo -n "$CERTIFICATE_P12" | base64 --decode -o $CERT_PATH
+          security import $CERT_PATH -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # Install provisioning profile
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo -n "$PROVISIONING_PROFILE" | base64 --decode -o $PROFILE_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      # Generate the native ios/ directory from the Expo project.
+      - name: Expo prebuild
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform ios --clean
+
+      # Install CocoaPods dependencies.
+      - name: Pod install
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      # Build the app with xcodebuild.
+      # For development: build an unsigned .app for Simulator or ad-hoc .ipa.
+      # For appstore: build a signed .ipa for TestFlight upload.
+      - name: Build with xcodebuild
+        working-directory: apps/mobile/ios
+        run: |
+          SCHEME="Graphite"
+          WORKSPACE="Graphite.xcworkspace"
+
+          if [ "${{ inputs.profile }}" = "appstore" ]; then
+            xcodebuild \
+              -workspace "$WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -archivePath $RUNNER_TEMP/Graphite.xcarchive \
+              -sdk iphoneos \
+              -allowProvisioningUpdates \
+              archive \
+              CODE_SIGN_STYLE=Manual \
+              | tail -20
+
+            # Export the archive to an .ipa
+            cat > $RUNNER_TEMP/ExportOptions.plist << 'PLIST'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            </dict>
+            </plist>
+            PLIST
+
+            xcodebuild -exportArchive \
+              -archivePath $RUNNER_TEMP/Graphite.xcarchive \
+              -exportPath $RUNNER_TEMP/export \
+              -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
+
+          else
+            # Development: build for simulator (no signing needed)
+            xcodebuild \
+              -workspace "$WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration Debug \
+              -sdk iphonesimulator \
+              -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
+              build \
+              CODE_SIGNING_ALLOWED=NO \
+              | tail -20
+          fi
+
+      # Upload TestFlight build (appstore profile only).
+      - name: Upload to TestFlight
+        if: inputs.profile == 'appstore'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/export/Graphite.ipa \
+            -u "$APPLE_ID" \
+            -p "$APPLE_APP_SPECIFIC_PASSWORD" \
+            -t ios
+
+      # Upload artifacts for download.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphite-ios-${{ inputs.profile }}
+          path: |
+            ${{ runner.temp }}/export/*.ipa
+            ${{ runner.temp }}/Graphite.xcarchive
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Cleanup keychain
+      - name: Cleanup
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
