@@ -3,7 +3,7 @@ import {
   buildPdfHtml,
   escapeHtml,
   markdownToHtml,
-} from '../export-pdf';
+} from '../export-pdf-utils';
 
 describe('escapeHtml', () => {
   it('escapes the five HTML entities', () => {
