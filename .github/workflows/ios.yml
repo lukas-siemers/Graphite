@@ -76,52 +76,17 @@ jobs:
       # For appstore: build a signed .ipa for TestFlight upload.
       - name: Build with xcodebuild
         working-directory: apps/mobile/ios
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           SCHEME="Graphite"
           WORKSPACE="Graphite.xcworkspace"
-
           if [ "${{ inputs.profile }}" = "appstore" ]; then
-            xcodebuild \
-              -workspace "$WORKSPACE" \
-              -scheme "$SCHEME" \
-              -configuration Release \
-              -archivePath $RUNNER_TEMP/Graphite.xcarchive \
-              -sdk iphoneos \
-              -allowProvisioningUpdates \
-              archive \
-              CODE_SIGN_STYLE=Manual \
-              | tail -20
-
-            # Export the archive to an .ipa
-            cat > $RUNNER_TEMP/ExportOptions.plist << 'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>method</key>
-              <string>app-store</string>
-              <key>teamID</key>
-              <string>${{ secrets.APPLE_TEAM_ID }}</string>
-            </dict>
-            </plist>
-            PLIST
-
-            xcodebuild -exportArchive \
-              -archivePath $RUNNER_TEMP/Graphite.xcarchive \
-              -exportPath $RUNNER_TEMP/export \
-              -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
-
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos -allowProvisioningUpdates archive CODE_SIGN_STYLE=Manual | tail -50
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>method</key>\n<string>app-store</string>\n<key>teamID</key>\n<string>%s</string>\n</dict>\n</plist>' "$APPLE_TEAM_ID" > "$RUNNER_TEMP/ExportOptions.plist"
+            xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
           else
-            # Development: build for simulator (no signing needed)
-            xcodebuild \
-              -workspace "$WORKSPACE" \
-              -scheme "$SCHEME" \
-              -configuration Debug \
-              -sdk iphonesimulator \
-              -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' \
-              build \
-              CODE_SIGNING_ALLOWED=NO \
-              | tail -20
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Debug -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' build CODE_SIGNING_ALLOWED=NO | tail -50
           fi
 
       # Upload TestFlight build (appstore profile only).
