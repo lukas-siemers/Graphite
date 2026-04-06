@@ -182,6 +182,7 @@ export default function NoteList() {
 
   const [displayedNotes, setDisplayedNotes] = useState<Note[] | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [moveModalNoteId, setMoveModalNoteId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const shownNotes = displayedNotes ?? notes;
@@ -243,6 +244,14 @@ export default function NoteList() {
     );
   }
 
+  function handleNoteLongPress(note: Note) {
+    Alert.alert(note.title || 'Untitled', undefined, [
+      { text: 'Move to notebook…', onPress: () => setMoveModalNoteId(note.id) },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteNote(note) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
   function renderNote({ item, drag }: RenderItemParams<Note>) {
     return (
       <ScaleDecorator>
@@ -250,7 +259,7 @@ export default function NoteList() {
           note={item}
           isActive={item.id === activeNoteId}
           onPress={() => handleNotePress(item.id)}
-          onLongPress={() => handleDeleteNote(item)}
+          onLongPress={() => handleNoteLongPress(item)}
           onDelete={() => handleDeleteNote(item)}
           drag={drag}
           showDragHandle={!isSearching}
@@ -325,6 +334,9 @@ export default function NoteList() {
         ItemSeparatorComponent={null}
         style={{ flex: 1 }}
       />
+      {moveModalNoteId !== null && activeNotebookId !== null && (
+        <MoveToNotebookModal visible noteId={moveModalNoteId} currentNotebookId={activeNotebookId} onClose={() => setMoveModalNoteId(null)} />
+      )}
     </View>
   );
 }

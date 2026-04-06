@@ -8,6 +8,7 @@ import {
   updateNote,
   deleteNote,
   updateNoteSortOrder,
+  moveNoteToNotebook as dbMoveNoteToNotebook,
   createEmptyCanvas,
 } from '@graphite/db';
 // NOTE: imported for cross-store read only. We access via getState() inside
@@ -46,6 +47,12 @@ interface NoteState {
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
   deleteIfEmpty: (db: SQLiteDatabase, id: string) => Promise<boolean>;
   reorderNotes: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
+  moveNoteToNotebook: (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetNotebookId: string,
+    targetFolderId?: string | null,
+  ) => Promise<void>;
 }
 
 export const useNoteStore = create<NoteState>((set, get) => ({
@@ -203,5 +210,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       updated.sort((a, b) => a.sortOrder - b.sortOrder);
       return { notes: updated };
     });
+  },
+
+  moveNoteToNotebook: async (
+    db: SQLiteDatabase,
+    noteId: string,
+    targetNotebookId: string,
+    targetFolderId: string | null = null,
+  ) => {
+    await dbMoveNoteToNotebook(db, noteId, targetNotebookId, targetFolderId);
+    set((s) => ({
+      notes: s.notes.filter((n) => n.id !== noteId),
+      activeNoteId: s.activeNoteId === noteId ? null : s.activeNoteId,
+    }));
   },
 }));

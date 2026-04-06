@@ -9,6 +9,7 @@ import {
   updateNote,
   deleteNote,
   searchNotes,
+  moveNoteToNotebook,
 } from '../operations/notes';
 
 describe('notes operations', () => {
@@ -204,5 +205,50 @@ describe('notes operations', () => {
     const results = await searchNotes(db, notebook.id, 'xylophone');
 
     expect(results).toEqual([]);
+  });
+
+  it('moveNoteToNotebook updates notebook_id, folder_id, sort_order, and updated_at', async () => {
+    const nbA = await createNotebook(db, 'A');
+    const nbB = await createNotebook(db, 'B');
+    const note = await createNote(db, nbA.id);
+    vi.setSystemTime(new Date('2024-06-01'));
+    await moveNoteToNotebook(db, note.id, nbB.id, null);
+    const moved = await getNote(db, note.id);
+    expect(moved).not.toBeNull();
+    expect(moved!.notebookId).toBe(nbB.id);
+    expect(moved!.folderId).toBeNull();
+    expect(moved!.sortOrder).toBe(0);
+    expect(moved!.updatedAt).toBe(new Date('2024-06-01').getTime());
+  });
+
+  it('moveNoteToNotebook to root (null folder) works', async () => {
+    const nbA = await createNotebook(db, 'A');
+    const nbB = await createNotebook(db, 'B');
+    const folder = await createFolder(db, nbA.id, 'Src');
+    const note = await createNote(db, nbA.id, folder.id);
+    await moveNoteToNotebook(db, note.id, nbB.id, null);
+    const moved = await getNote(db, note.id);
+    expect(moved!.notebookId).toBe(nbB.id);
+    expect(moved!.folderId).toBeNull();
+  });
+
+  it('moveNoteToNotebook assigns correct sort_order (MAX+1)', async () => {
+    const nbA = await createNotebook(db, 'A');
+    const nbB = await createNotebook(db, 'B');
+    await createNote(db, nbB.id);
+    await createNote(db, nbB.id);
+    const note = await createNote(db, nbA.id);
+    await moveNoteToNotebook(db, note.id, nbB.id, null);
+    const moved = await getNote(db, note.id);
+    expect(moved!.sortOrder).toBe(2);
+  });
+
+  it('moveNoteToNotebook to same notebook does not crash', async () => {
+    const nb = await createNotebook(db, 'Same');
+    const note = await createNote(db, nb.id);
+    await moveNoteToNotebook(db, note.id, nb.id, null);
+    const same = await getNote(db, note.id);
+    expect(same).not.toBeNull();
+    expect(same!.notebookId).toBe(nb.id);
   });
 });
