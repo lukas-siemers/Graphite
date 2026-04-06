@@ -305,7 +305,6 @@ export async function searchNotes(
   return rows.map(mapNote);
 }
 
-<<<<<<< HEAD
 export async function moveNoteToNotebook(
   db: SQLiteDatabase,
   noteId: string,
@@ -327,7 +326,8 @@ export async function moveNoteToNotebook(
     'UPDATE notes SET notebook_id = ?, folder_id = ?, sort_order = ?, updated_at = ? WHERE id = ?',
     [targetNotebookId, targetFolderId, sortOrder, updatedAt, noteId],
   );
-=======
+}
+
 /**
  * Enhanced three-tier search:
  *   1. FTS5 prefix match (fast)
@@ -375,5 +375,4 @@ export async function searchNotesEnhanced(
   scored.sort((a, b) => b.score - a.score);
 
   return scored.map((s) => s.note);
->>>>>>> feat/fuzzy-search
 }
