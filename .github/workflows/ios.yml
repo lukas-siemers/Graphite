@@ -55,11 +55,13 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-          # Install provisioning profile
+          # Install provisioning profile and extract its UUID
           PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
           echo -n "$PROVISIONING_PROFILE" | base64 --decode -o $PROFILE_PATH
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(/usr/bin/security cms -D -i $PROFILE_PATH))
+          cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
+          echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
 
       # Generate the native ios/ directory from the Expo project.
       - name: Expo prebuild
@@ -82,8 +84,8 @@ jobs:
           SCHEME="Graphite"
           WORKSPACE="Graphite.xcworkspace"
           if [ "${{ inputs.profile }}" = "appstore" ]; then
-            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos -allowProvisioningUpdates archive CODE_SIGN_STYLE=Manual | tail -50
-            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>method</key>\n<string>app-store</string>\n<key>teamID</key>\n<string>%s</string>\n</dict>\n</plist>' "$APPLE_TEAM_ID" > "$RUNNER_TEMP/ExportOptions.plist"
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos archive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE="$PROFILE_UUID" | tail -50
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>method</key>\n<string>app-store</string>\n<key>teamID</key>\n<string>%s</string>\n<key>signingStyle</key>\n<string>manual</string>\n<key>provisioningProfiles</key>\n<dict>\n<key>com.graphite.app</key>\n<string>%s</string>\n</dict>\n</dict>\n</plist>' "$APPLE_TEAM_ID" "$PROFILE_UUID" > "$RUNNER_TEMP/ExportOptions.plist"
             xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
           else
             xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Debug -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' build CODE_SIGNING_ALLOWED=NO | tail -50
