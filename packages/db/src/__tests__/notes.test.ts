@@ -11,6 +11,7 @@ import {
   searchNotes,
   moveNote,
   moveNoteToNotebook,
+  searchNotesEnhanced,
 } from '../operations/notes';
 
 describe('notes operations', () => {
@@ -275,5 +276,69 @@ describe('notes operations', () => {
     const same = await getNote(db, note.id);
     expect(same).not.toBeNull();
     expect(same!.notebookId).toBe(nb.id);
+  });
+
+  describe('searchNotesEnhanced', () => {
+    it('tier 1: FTS5 prefix match returns results', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      await updateNote(db, note.id, {
+        title: 'Chocolate cake',
+        body: 'A delicious recipe for chocolate cake',
+      });
+
+      const results = await searchNotesEnhanced(db, notebook.id, 'choc');
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].id).toBe(note.id);
+    });
+
+    it('tier 2: LIKE substring fallback when FTS5 returns nothing', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      await updateNote(db, note.id, {
+        title: 'Meeting notes',
+        body: 'Discussed the xylophone acquisition strategy',
+      });
+
+      // FTS5 prefix search for a mid-word substring will fail,
+      // but LIKE %xylo% should match.
+      const results = await searchNotesEnhanced(db, notebook.id, 'xylo');
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].id).toBe(note.id);
+    });
+
+    it('tier 3: results are sorted by fuzzy score descending', async () => {
+      const notebook = await createNotebook(db, 'Work');
+
+      const strongMatch = await createNote(db, notebook.id);
+      await updateNote(db, strongMatch.id, {
+        title: 'function overview',
+        body: 'All functions documented here',
+      });
+
+      const weakMatch = await createNote(db, notebook.id);
+      await updateNote(db, weakMatch.id, {
+        title: 'Affinity notes',
+        body: 'Some affinity data',
+      });
+
+      // "function" starts with "func" — strong FTS5 hit; both contain "f"
+      const results = await searchNotesEnhanced(db, notebook.id, 'function');
+
+      expect(results.length).toBeGreaterThan(0);
+      // The note titled "function overview" should rank first.
+      expect(results[0].id).toBe(strongMatch.id);
+    });
+
+    it('returns empty array for empty query', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      await createNote(db, notebook.id);
+
+      const results = await searchNotesEnhanced(db, notebook.id, '   ');
+
+      expect(results).toEqual([]);
+    });
   });
 });

@@ -1,9 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, TextInput, Image, Alert, Platform, FlatList } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, countNotebookContents } from '@graphite/db';
-import type { Notebook } from '@graphite/db';
+import type { Notebook, Note } from '@graphite/db';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
@@ -35,6 +35,11 @@ export default function Sidebar() {
   const renameNotebookAction = useNotebookStore((s) => s.renameNotebook);
   const createNewNotebook = useNotebookStore((s) => s.createNewNotebook);
   const loadNotes = useNoteStore((s) => s.loadNotes);
+  const searchNotesAction = useNoteStore((s) => s.searchNotes);
+  const clearSearch = useNoteStore((s) => s.clearSearch);
+  const searchResults = useNoteStore((s) => s.searchResults);
+  const activeNoteId = useNoteStore((s) => s.activeNoteId);
+  const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const createNewFolder = useFolderStore((s) => s.createNewFolder);
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
@@ -50,6 +55,27 @@ export default function Sidebar() {
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<TextInput>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text);
+      if (!text.trim()) {
+        clearSearch();
+        return;
+      }
+      if (!activeNotebookId || Platform.OS === 'web') return;
+      try {
+        const db = getDatabase();
+        searchNotesAction(db, activeNotebookId, text);
+      } catch (_) {}
+    },
+    [activeNotebookId, searchNotesAction, clearSearch],
+  );
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+    clearSearch();
+  }, [clearSearch]);
 
   // First tap fires immediately. Second tap within 300ms triggers rename.
   const lastTapRef = useRef<Map<string, number>>(new Map());
@@ -154,6 +180,53 @@ export default function Sidebar() {
         } catch (_) {}
       });
     } catch (_) {}
+  }
+
+  function renderSearchResult({ item: note }: { item: Note }) {
+    const isActive = note.id === activeNoteId;
+    const preview = (note.body || '').slice(0, 60).replace(/\n/g, ' ');
+    return (
+      <Pressable
+        onPress={() => setActiveNote(note.id)}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: 8,
+          paddingLeft: isActive ? 12 : 14,
+          paddingRight: 8,
+          borderLeftWidth: isActive ? 2 : 0,
+          borderLeftColor: tokens.accent,
+          backgroundColor: isActive ? tokens.bgHover : 'transparent',
+        }}
+      >
+        <MaterialCommunityIcons
+          name="file-document-outline"
+          size={15}
+          color={isActive ? tokens.accentLight : tokens.textMuted}
+          style={{ marginRight: 7 }}
+        />
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              fontSize: 12,
+              fontWeight: isActive ? '600' : '400',
+              color: isActive ? tokens.accentLight : tokens.textBody,
+            }}
+            numberOfLines={1}
+          >
+            {note.title || 'Untitled'}
+          </Text>
+          {preview.length > 0 && (
+            <Text
+              style={{ fontSize: 11, color: tokens.textMuted, marginTop: 1 }}
+              numberOfLines={1}
+            >
+              {preview}
+            </Text>
+          )}
+        </View>
+      </Pressable>
+    );
   }
 
   function renderNotebook({ item: notebook }: { item: Notebook }) {
@@ -299,13 +372,13 @@ export default function Sidebar() {
           <MaterialCommunityIcons name="magnify" size={15} color={tokens.textHint} style={{ marginRight: 6 }} />
           <TextInput
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={handleSearchChange}
             placeholder="Search notes..."
             placeholderTextColor={tokens.textHint}
             style={{ flex: 1, fontSize: 12, color: tokens.textBody, padding: 0, margin: 0 }}
           />
           {searchQuery.length > 0 && (
-            <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Pressable onPress={handleClearSearch} hitSlop={8}>
               <Text style={{ fontSize: 14, color: tokens.textHint, lineHeight: 18 }}>×</Text>
             </Pressable>
           )}
@@ -340,16 +413,38 @@ export default function Sidebar() {
         </Pressable>
       </View>
 
-      {/* Notebook list + Tags */}
+      {/* Notebook list / Search results + Tags */}
       <View style={{ flex: 1 }}>
-        <FlatList
-          data={notebooks}
-          keyExtractor={(item) => item.id}
-          renderItem={renderNotebook}
-          style={{ flex: 1 }}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={<TagList />}
-        />
+        {searchQuery.trim().length > 0 ? (
+          <FlatList
+            data={searchResults}
+            keyExtractor={(item) => item.id}
+            renderItem={renderSearchResult}
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: tokens.textHint,
+                  textAlign: 'center',
+                  paddingTop: 24,
+                }}
+              >
+                No results
+              </Text>
+            }
+          />
+        ) : (
+          <FlatList
+            data={notebooks}
+            keyExtractor={(item) => item.id}
+            renderItem={renderNotebook}
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            ListFooterComponent={<TagList />}
+          />
+        )}
       </View>
 
       {/* Footer */}
