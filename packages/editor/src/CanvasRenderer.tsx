@@ -266,12 +266,15 @@ export function CanvasRenderer({
   );
 
   if (inputMode === 'ink') {
+    // GestureHandlerRootView is already provided by Expo Router at the app
+    // root. Nesting a second one crashes on iOS (duplicate gesture handler
+    // registry). Use a plain View wrapper instead.
     return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
         <GestureDetector gesture={inkGesture}>
           {scrollContent}
         </GestureDetector>
-      </GestureHandlerRootView>
+      </View>
     );
   }
 
