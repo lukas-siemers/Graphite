@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   initDatabase,
@@ -95,7 +96,7 @@ function PhoneLayout() {
     screen === 'sidebar' ? 'Graphite' : screen === 'list' ? 'Notes' : 'Editor';
 
   return (
-    <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       {/* Phone header */}
       <View
         style={{
@@ -184,7 +185,7 @@ function PhoneLayout() {
           </View>
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -199,100 +200,102 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
   const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
 
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
-      {/* Sidebar — collapses via width */}
-      <View
-        style={{
-          width: sidebarVisible ? 260 : 0,
-          overflow: 'hidden',
-          backgroundColor: tokens.bgSidebar,
-          borderRightWidth: sidebarVisible ? 1 : 0,
-          borderRightColor: tokens.border,
-        }}
-      >
-        <Sidebar />
-      </View>
-
-      {/* Editor column */}
-      <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgBase }}>
-        {/* Top nav bar */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
+        {/* Sidebar — collapses via width */}
         <View
           style={{
-            height: 52,
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: tokens.bgBase,
-            borderBottomWidth: 1,
-            borderBottomColor: tokens.border,
-            paddingLeft: 8,
+            width: sidebarVisible ? 260 : 0,
+            overflow: 'hidden',
+            backgroundColor: tokens.bgSidebar,
+            borderRightWidth: sidebarVisible ? 1 : 0,
+            borderRightColor: tokens.border,
           }}
         >
-          {/* Sidebar toggle */}
-          <Pressable
-            onPress={() => setSidebarVisible((v) => !v)}
-            style={{
-              width: 36,
-              height: 36,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: 4,
-            }}
-          >
-            <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
-          </Pressable>
-
-          {/* Formatting toolbar */}
-          <FormattingToolbar
-            onToggleDrawing={() => setDrawingOpen((v) => !v)}
-            drawingOpen={drawingOpen}
-          />
+          <Sidebar />
         </View>
 
-        {/* Editor area */}
-        <View style={{ flex: 1, position: 'relative' }}>
-          <Editor
-            onToggleDrawing={() => setDrawingOpen((v) => !v)}
-            drawingOpen={drawingOpen}
-          />
-          {/* FAB — iPad/native only; hidden on web */}
-          {Platform.OS !== 'web' && <Pressable
-            onPress={async () => {
-              if (!drawingOpen && activeNoteId) {
-                const strokes = await loadStrokes(activeNoteId);
-                setInitialStrokes(strokes);
-              }
-              setDrawingOpen((v) => !v);
-            }}
-            style={({ pressed }) => ({
-              position: 'absolute',
-              bottom: 24,
-              right: 24,
-              width: 48,
-              height: 48,
-              borderRadius: 0,
-              backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+        {/* Editor column */}
+        <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgBase }}>
+          {/* Top nav bar */}
+          <View
+            style={{
+              height: 52,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-            })}
+              backgroundColor: tokens.bgBase,
+              borderBottomWidth: 1,
+              borderBottomColor: tokens.border,
+              paddingLeft: 8,
+            }}
           >
-            <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-          </Pressable>}
-          {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
-            <DrawingCanvas
-              noteId={activeNoteId}
-              initialStrokes={initialStrokes}
-              onClose={() => setDrawingOpen(false)}
-              onSave={async (strokes) => {
-                const path = await saveStrokes(activeNoteId, strokes);
-                const db = getDatabase();
-                await updateNote(db, activeNoteId, { drawingAssetId: path });
-                setDrawingOpen(false);
+            {/* Sidebar toggle */}
+            <Pressable
+              onPress={() => setSidebarVisible((v) => !v)}
+              style={{
+                width: 36,
+                height: 36,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 4,
               }}
+            >
+              <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
+            </Pressable>
+
+            {/* Formatting toolbar */}
+            <FormattingToolbar
+              onToggleDrawing={() => setDrawingOpen((v) => !v)}
+              drawingOpen={drawingOpen}
             />
-          )}
+          </View>
+
+          {/* Editor area */}
+          <View style={{ flex: 1, position: 'relative' }}>
+            <Editor
+              onToggleDrawing={() => setDrawingOpen((v) => !v)}
+              drawingOpen={drawingOpen}
+            />
+            {/* FAB — iPad/native only; hidden on web */}
+            {Platform.OS !== 'web' && <Pressable
+              onPress={async () => {
+                if (!drawingOpen && activeNoteId) {
+                  const strokes = await loadStrokes(activeNoteId);
+                  setInitialStrokes(strokes);
+                }
+                setDrawingOpen((v) => !v);
+              }}
+              style={({ pressed }) => ({
+                position: 'absolute',
+                bottom: 24,
+                right: 24,
+                width: 48,
+                height: 48,
+                borderRadius: 0,
+                backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+                alignItems: 'center',
+                justifyContent: 'center',
+              })}
+            >
+              <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
+            </Pressable>}
+            {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
+              <DrawingCanvas
+                noteId={activeNoteId}
+                initialStrokes={initialStrokes}
+                onClose={() => setDrawingOpen(false)}
+                onSave={async (strokes) => {
+                  const path = await saveStrokes(activeNoteId, strokes);
+                  const db = getDatabase();
+                  await updateNote(db, activeNoteId, { drawingAssetId: path });
+                  setDrawingOpen(false);
+                }}
+              />
+            )}
+          </View>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

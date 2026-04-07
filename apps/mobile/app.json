@@ -3,7 +3,7 @@
     "name": "Graphite",
     "slug": "graphite",
     "scheme": "graphite",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#131313",
