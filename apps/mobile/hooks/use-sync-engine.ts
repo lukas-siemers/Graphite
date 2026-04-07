@@ -54,9 +54,26 @@ export function useSyncEngine(
       const db = getDatabase();
 
       // Collect dirty records from all three tables.
-      const dirtyNotes = await getDirtyNotes(db);
-      const dirtyNotebooks = await getDirtyNotebooks(db);
-      const dirtyFolders = await getDirtyFolders(db);
+      let dirtyNotes = await getDirtyNotes(db);
+      let dirtyNotebooks = await getDirtyNotebooks(db);
+      let dirtyFolders = await getDirtyFolders(db);
+
+      // Web/Electron fallback: noopDb returns empty for everything, but
+      // the Zustand stores hold the real in-memory data. Push all store
+      // records that haven't been synced yet (syncedAt is null).
+      if (dirtyNotes.length === 0 && dirtyNotebooks.length === 0 && dirtyFolders.length === 0) {
+        const { useNoteStore } = await import('../stores/use-note-store');
+        const { useNotebookStore } = await import('../stores/use-notebook-store');
+        const { useFolderStore } = await import('../stores/use-folder-store');
+        const storeNotes = useNoteStore.getState().notes;
+        const storeNotebooks = useNotebookStore.getState().notebooks;
+        const storeFolders = useFolderStore.getState().folders;
+        if (storeNotes.length > 0 || storeNotebooks.length > 0 || storeFolders.length > 0) {
+          dirtyNotes = storeNotes;
+          dirtyNotebooks = storeNotebooks;
+          dirtyFolders = storeFolders;
+        }
+      }
 
       const records = [
         ...dirtyNotebooks.map((nb) => ({
@@ -160,7 +177,18 @@ export function useSyncEngine(
       if (state === 'active') void pushDirty();
     });
 
+    // Also push periodically (every 5 seconds) to catch changes made
+    // during the current session. On web/Electron where AppState doesn't
+    // fire reliably, this is the primary push mechanism.
+    const interval = setInterval(() => {
+      void pushDirty();
+    }, 5000);
+
+    // Initial push on startup
+    void pushDirty();
+
     return () => {
+      clearInterval(interval);
       subscription.remove();
       engine
         .stop()
