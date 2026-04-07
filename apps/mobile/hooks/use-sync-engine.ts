@@ -8,18 +8,21 @@ import {
   markNoteClean,
   applyRemoteNote,
   deleteNote,
+  getNotes,
 } from '@graphite/db';
 import {
   getDirtyNotebooks,
   markNotebookClean,
   applyRemoteNotebook,
   deleteNotebook,
+  getNotebooks,
 } from '@graphite/db';
 import {
   getDirtyFolders,
   markFolderClean,
   applyRemoteFolder,
   deleteFolder,
+  getFolders,
 } from '@graphite/db';
 
 export interface UseSyncEngineResult {
@@ -164,12 +167,60 @@ export function useSyncEngine(
 
     engineRef.current = engine;
 
+    // Wire up the onRemoteChange callback so that Realtime events and
+    // pull() results are applied to the local DB AND refresh the Zustand
+    // stores. Without this, remote data lands in the engine but the UI
+    // never sees it.
+    engine.onRemoteChange = async (table, event, newRecord, _oldRecord) => {
+      try {
+        const db = getDatabase();
+        if (event === 'DELETE') {
+          if (table === 'notes' && newRecord?.id) await deleteNote(db, newRecord.id as string);
+          if (table === 'folders' && newRecord?.id) await deleteFolder(db, newRecord.id as string);
+          if (table === 'notebooks' && newRecord?.id) await deleteNotebook(db, newRecord.id as string);
+        } else if (newRecord) {
+          if (table === 'notes') await applyRemoteNote(db, newRecord as any);
+          if (table === 'folders') await applyRemoteFolder(db, newRecord as any);
+          if (table === 'notebooks') await applyRemoteNotebook(db, newRecord as any);
+        }
+
+        // Reload Zustand stores so the UI reflects the remote changes.
+        const { useNotebookStore } = await import('../stores/use-notebook-store');
+        const { useFolderStore } = await import('../stores/use-folder-store');
+        const { useNoteStore } = await import('../stores/use-note-store');
+
+        const notebooks = await getNotebooks(db);
+        useNotebookStore.getState().setNotebooks(notebooks);
+
+        const activeNotebookId = useNotebookStore.getState().activeNotebookId;
+        if (activeNotebookId) {
+          const folders = await getFolders(db, activeNotebookId);
+          useFolderStore.getState().setFolders(folders);
+
+          const notes = await getNotes(db, activeNotebookId);
+          useNoteStore.getState().setNotes(notes);
+        }
+      } catch (_) {
+        // Best-effort — remote changes that fail to apply will be retried
+        // on the next pull cycle.
+      }
+    };
+
     // Attempt to start the engine. In Phase 2 this will connect to
     // Supabase Realtime. The current scaffold throws NotImplementedError,
     // so we catch and set state to offline.
     engine
       .start()
-      .then(() => setSyncState(engine.state))
+      .then(async () => {
+        setSyncState(engine.state);
+        // Initial pull on startup — fetch all remote data (sinceMs=0) so
+        // notes created on other devices appear immediately.
+        try {
+          await engine.pull(0);
+        } catch (_) {
+          // Non-fatal — Realtime subscription will catch future changes.
+        }
+      })
       .catch(() => setSyncState('offline'));
 
     // Push dirty records when the app comes to the foreground.
