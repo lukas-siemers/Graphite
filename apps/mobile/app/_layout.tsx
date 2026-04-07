@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import AuthGate from '../components/auth/AuthGate';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   constructor(props: { children: React.ReactNode }) {
@@ -32,7 +33,9 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <StatusBar style="light" backgroundColor="transparent" translucent />
-      <Stack screenOptions={{ headerShown: false }} />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthGate>
     </ErrorBoundary>
   );
 }
