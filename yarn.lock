@@ -2567,14 +2567,6 @@
   resolved "https://registry.npmjs.org/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.60.1.tgz"
   integrity sha512-lWMnixq/QzxyhTV6NjQJ4SFo1J6PvOX8vUx5Wb4bBPsEb+8xZ89Bz6kOXpfXj9ak9AHTQVQzlgzBEc1SyM27xQ==
 
-"@shopify/react-native-skia@2.2.12":
-  version "2.2.12"
-  resolved "https://registry.npmjs.org/@shopify/react-native-skia/-/react-native-skia-2.2.12.tgz"
-  integrity sha512-P5wZSMPTp00hM0do+awNFtb5aPh5hSpodMGwy7NaxK90AV+SmUu7wZe6NGevzQIwgFa89Epn6xK3j4jKWdQi+A==
-  dependencies:
-    canvaskit-wasm "0.40.0"
-    react-reconciler "0.31.0"
-
 "@sinclair/typebox@^0.27.8":
   version "0.27.10"
   resolved "https://registry.npmjs.org/@sinclair/typebox/-/typebox-0.27.10.tgz"
@@ -3233,11 +3225,6 @@
     estree-walker "^3.0.3"
     loupe "^2.3.7"
     pretty-format "^29.7.0"
-
-"@webgpu/types@0.1.21":
-  version "0.1.21"
-  resolved "https://registry.npmjs.org/@webgpu/types/-/types-0.1.21.tgz"
-  integrity sha512-pUrWq3V5PiSGFLeLxoGqReTZmiiXwY3jRkIG5sLLKjyqNxrwm/04b4nw7LSmGWJcKk59XOM/YRTUwOzo4MMlow==
 
 "@xmldom/xmldom@^0.8.8":
   version "0.8.12"
@@ -3922,13 +3909,6 @@ caniuse-lite@^1.0.30001782:
   version "1.0.30001784"
   resolved "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30001784.tgz"
   integrity sha512-WU346nBTklUV9YfUl60fqRbU5ZqyXlqvo1SgigE1OAXK5bFL8LL9q1K7aap3N739l4BvNqnkm3YrGHiY9sfUQw==
-
-canvaskit-wasm@0.40.0:
-  version "0.40.0"
-  resolved "https://registry.npmjs.org/canvaskit-wasm/-/canvaskit-wasm-0.40.0.tgz"
-  integrity sha512-Od2o+ZmoEw9PBdN/yCGvzfu0WVqlufBPEWNG452wY7E9aT8RBE+ChpZF526doOlg7zumO4iCS+RAeht4P0Gbpw==
-  dependencies:
-    "@webgpu/types" "0.1.21"
 
 chai@^4.3.10:
   version "4.5.0"
@@ -7522,13 +7502,6 @@ react-native@0.81.5:
     ws "^6.2.3"
     yargs "^17.6.2"
 
-react-reconciler@0.31.0:
-  version "0.31.0"
-  resolved "https://registry.npmjs.org/react-reconciler/-/react-reconciler-0.31.0.tgz"
-  integrity sha512-7Ob7Z+URmesIsIVRjnLoDGwBEG/tVitidU0nMsqX/eeJaLY89RISO/10ERe0MqmzuKUUB1rmY+h1itMbUHg9BQ==
-  dependencies:
-    scheduler "^0.25.0"
-
 react-refresh@^0.14.0, react-refresh@^0.14.2:
   version "0.14.2"
   resolved "https://registry.npmjs.org/react-refresh/-/react-refresh-0.14.2.tgz"
@@ -7809,11 +7782,6 @@ scheduler@0.26.0, scheduler@^0.26.0:
   version "0.26.0"
   resolved "https://registry.npmjs.org/scheduler/-/scheduler-0.26.0.tgz"
   integrity sha512-NlHwttCI/l5gCPR3D1nNXtWABUmBwvZpEQiD4IXSbIDq8BzLIK/7Ir5gTFSGZDUu37K5cMNp0hFtzO38sC7gWA==
-
-scheduler@^0.25.0:
-  version "0.25.0"
-  resolved "https://registry.npmjs.org/scheduler/-/scheduler-0.25.0.tgz"
-  integrity sha512-xFVuu11jh+xcO7JOAGJNOXld8/TcEHK/4CituBUeUb5hqxJLj9YuemAEuvm9gQ/+pgXYfbQuqAkiYu+u7YEsNA==
 
 semver-compare@^1.0.0:
   version "1.0.0"
