@@ -45,6 +45,13 @@ jobs:
         working-directory: apps/desktop
         run: yarn rebuild-native
 
+      # Write Supabase env vars for the Expo web bundle.
+      - name: Configure environment
+        working-directory: apps/mobile
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}" > .env.local
+          echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}" >> .env.local
+
       # Export the Expo web bundle into apps/desktop/dist.
       # Must run from apps/mobile so that Metro / @expo/cli can resolve all
       # Expo and React Native packages that live in that workspace.

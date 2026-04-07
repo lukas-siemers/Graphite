@@ -70,6 +70,13 @@ jobs:
           cp $PROFILE_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
           echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
 
+      # Write Supabase env vars so Expo inlines them at build time.
+      - name: Configure environment
+        working-directory: apps/mobile
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}" > .env.local
+          echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}" >> .env.local
+
       # Generate the native ios/ directory from the Expo project.
       - name: Expo prebuild
         working-directory: apps/mobile
