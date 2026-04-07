@@ -13,6 +13,7 @@
     "@graphite/editor": "*",
     "@graphite/ui": "*",
     "expo": "~54.0.0",
+    "expo-build-properties": "~1.0.10",
     "expo-clipboard": "~7.0.0",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.20",

@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "11",
+      "buildNumber": "12",
       "requiresFullScreen": true,
             "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -32,7 +32,16 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "newArchEnabled": true,
+            "flipper": false
+          }
+        }
+      ]
     ],
     "newArchEnabled": true,
     "web": {
