@@ -10,15 +10,19 @@ export interface DirtyRecord {
   table: SyncTable;
   updatedAt: number;
   /**
-   * The canvas_json blob for notes (null for notebooks / folders).
-   * Phase 2 canvas-first storage — do NOT reference legacy body / drawing_asset_id.
+   * Full row data to upsert to Supabase (excluding user_id, which the
+   * engine injects automatically).
    */
-  canvasJson?: string | null;
-  /** Title string for notes; name for notebooks / folders. */
-  label?: string | null;
-  /** Soft-delete marker. */
-  deletedAt?: number | null;
+  data: Record<string, unknown>;
 }
+
+/** Callback signature for realtime change events from Supabase. */
+export type RemoteChangeCallback = (
+  table: SyncTable,
+  event: 'INSERT' | 'UPDATE' | 'DELETE',
+  newRecord: Record<string, unknown> | null,
+  oldRecord: Record<string, unknown> | null,
+) => void;
 
 /** The result of attempting to resolve a conflict between local and remote. */
 export type ConflictResolution<T> =
