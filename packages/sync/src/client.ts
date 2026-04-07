@@ -9,13 +9,16 @@ let client: SupabaseClient | null = null;
 export function getSupabaseClient(): SupabaseClient {
   if (client) return client;
 
-  const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
   if (!url || !key) {
-    throw new Error(
-      'Supabase credentials not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.',
-    );
+    // Return a dummy client that will fail on actual API calls but won't
+    // crash the app on startup. This lets the app run in offline-only mode
+    // when credentials aren't configured (e.g. missing env vars in CI).
+    console.warn('Supabase credentials not configured — sync disabled.');
+    client = createClient('https://placeholder.supabase.co', 'placeholder');
+    return client;
   }
 
   client = createClient(url, key);
