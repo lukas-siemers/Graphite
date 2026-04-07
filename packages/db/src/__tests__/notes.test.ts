@@ -12,6 +12,9 @@ import {
   moveNote,
   moveNoteToNotebook,
   searchNotesEnhanced,
+  getDirtyNotes,
+  markNoteClean,
+  applyRemoteNote,
 } from '../operations/notes';
 
 describe('notes operations', () => {
@@ -38,11 +41,11 @@ describe('notes operations', () => {
     expect(note.id.length).toBeGreaterThan(0);
   });
 
-  it('createNote sets isDirty to 0', async () => {
+  it('createNote sets isDirty to 1', async () => {
     const notebook = await createNotebook(db, 'Work');
     const note = await createNote(db, notebook.id);
 
-    expect(note.isDirty).toBe(0);
+    expect(note.isDirty).toBe(1);
   });
 
   it('getNotes returns notes for the correct notebook', async () => {
@@ -339,6 +342,164 @@ describe('notes operations', () => {
       const results = await searchNotesEnhanced(db, notebook.id, '   ');
 
       expect(results).toEqual([]);
+    });
+  });
+
+  describe('sync helpers', () => {
+    it('updateNote sets is_dirty to 1', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      // Clean the note first so we can verify updateNote dirties it.
+      await markNoteClean(db, note.id);
+      const clean = await getNote(db, note.id);
+      expect(clean!.isDirty).toBe(0);
+
+      await updateNote(db, note.id, { title: 'Changed' });
+      const updated = await getNote(db, note.id);
+      expect(updated!.isDirty).toBe(1);
+    });
+
+    it('getDirtyNotes returns only dirty rows', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note1 = await createNote(db, notebook.id);
+      const note2 = await createNote(db, notebook.id);
+      // Clean note1, leave note2 dirty.
+      await markNoteClean(db, note1.id);
+
+      const dirty = await getDirtyNotes(db);
+      expect(dirty).toHaveLength(1);
+      expect(dirty[0].id).toBe(note2.id);
+    });
+
+    it('markNoteClean clears dirty and sets synced_at', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      expect(note.isDirty).toBe(1);
+
+      vi.setSystemTime(new Date('2024-06-01'));
+      const expectedSync = new Date('2024-06-01').getTime();
+      await markNoteClean(db, note.id);
+
+      const cleaned = await getNote(db, note.id);
+      expect(cleaned!.isDirty).toBe(0);
+      expect(cleaned!.syncedAt).toBe(expectedSync);
+    });
+
+    it('applyRemoteNote inserts a new remote note', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const remoteId = 'remote-note-123';
+      const now = Date.now();
+
+      await applyRemoteNote(db, {
+        id: remoteId,
+        folder_id: null,
+        notebook_id: notebook.id,
+        title: 'From Remote',
+        body: 'Remote body',
+        created_at: now,
+        updated_at: now,
+      });
+
+      const fetched = await getNote(db, remoteId);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.title).toBe('From Remote');
+      expect(fetched!.body).toBe('Remote body');
+      expect(fetched!.isDirty).toBe(0);
+      expect(fetched!.syncedAt).not.toBeNull();
+    });
+
+    it('applyRemoteNote resolves conflict — remote newer wins', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      await updateNote(db, note.id, { title: 'Local Title', body: 'Local body' });
+
+      // Remote has a later timestamp.
+      vi.setSystemTime(new Date('2025-01-01'));
+      const remoteUpdatedAt = new Date('2025-01-01').getTime();
+
+      await applyRemoteNote(db, {
+        id: note.id,
+        folder_id: null,
+        notebook_id: notebook.id,
+        title: 'Remote Title',
+        body: 'Remote body',
+        created_at: note.createdAt,
+        updated_at: remoteUpdatedAt,
+      });
+
+      const result = await getNote(db, note.id);
+      expect(result!.title).toBe('Remote Title');
+      expect(result!.body).toBe('Remote body');
+      expect(result!.isDirty).toBe(0);
+    });
+
+    it('applyRemoteNote resolves conflict — local newer preserved', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+
+      vi.setSystemTime(new Date('2025-01-01'));
+      await updateNote(db, note.id, { title: 'Local Title', body: 'Local body' });
+
+      // Remote has an older timestamp than the local update.
+      const olderTimestamp = new Date('2024-06-01').getTime();
+
+      await applyRemoteNote(db, {
+        id: note.id,
+        folder_id: null,
+        notebook_id: notebook.id,
+        title: 'Old Remote Title',
+        body: 'Old Remote body',
+        created_at: note.createdAt,
+        updated_at: olderTimestamp,
+      });
+
+      const result = await getNote(db, note.id);
+      expect(result!.title).toBe('Local Title');
+      expect(result!.body).toBe('Local body');
+      expect(result!.isDirty).toBe(1);
+    });
+
+    it('applyRemoteNote maintains FTS index for new inserts', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const remoteId = 'remote-fts-note';
+      const now = Date.now();
+
+      await applyRemoteNote(db, {
+        id: remoteId,
+        folder_id: null,
+        notebook_id: notebook.id,
+        title: 'Searchable Remote',
+        body: 'Unique xylophone content',
+        created_at: now,
+        updated_at: now,
+      });
+
+      const results = await searchNotes(db, notebook.id, 'xylophone');
+      expect(results.length).toBe(1);
+      expect(results[0].id).toBe(remoteId);
+    });
+
+    it('moveNote sets is_dirty to 1', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const folderA = await createFolder(db, notebook.id, 'A');
+      const folderB = await createFolder(db, notebook.id, 'B');
+      const note = await createNote(db, notebook.id, folderA.id);
+      await markNoteClean(db, note.id);
+
+      await moveNote(db, note.id, folderB.id);
+      const moved = await getNote(db, note.id);
+      expect(moved!.isDirty).toBe(1);
+    });
+
+    it('moveNoteToNotebook sets is_dirty to 1', async () => {
+      const nbA = await createNotebook(db, 'A');
+      const nbB = await createNotebook(db, 'B');
+      const note = await createNote(db, nbA.id);
+      await markNoteClean(db, note.id);
+
+      await moveNoteToNotebook(db, note.id, nbB.id, null);
+      const moved = await getNote(db, note.id);
+      expect(moved!.isDirty).toBe(1);
     });
   });
 });

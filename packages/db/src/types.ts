@@ -1,6 +1,7 @@
 export interface Notebook {
   id: string;
   name: string;
+  isDirty: number;
   createdAt: number;
   updatedAt: number;
   syncedAt: number | null;
@@ -12,8 +13,10 @@ export interface Folder {
   notebookId: string;
   parentId: string | null;
   name: string;
+  isDirty: number;
   createdAt: number;
   updatedAt: number;
+  syncedAt: number | null;
   sortOrder: number;
 }
 

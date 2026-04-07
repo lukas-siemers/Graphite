@@ -79,6 +79,7 @@ Design vibe: sharp, flat, developer-tool-like (Linear + VS Code). No gradients, 
 CREATE TABLE notebooks (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  is_dirty INTEGER DEFAULT 0,        -- migration 10
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   synced_at INTEGER,
@@ -90,8 +91,10 @@ CREATE TABLE folders (
   notebook_id TEXT NOT NULL REFERENCES notebooks(id),
   parent_id TEXT REFERENCES folders(id),
   name TEXT NOT NULL,
+  is_dirty INTEGER DEFAULT 0,        -- migration 10
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  synced_at INTEGER,                 -- migration 10
   sort_order INTEGER DEFAULT 0       -- migration 6
 );
 
@@ -119,7 +122,7 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
 );
 ```
 
-Migrations live in `packages/db/src/schema.ts` (`ALL_MIGRATIONS`). Current migration count: 8. All IDs use nanoid. All timestamps are Unix ms integers.
+Migrations live in `packages/db/src/schema.ts` (`ALL_MIGRATIONS`). Current migration count: 14. All IDs use nanoid. All timestamps are Unix ms integers.
 
 **FTS5 maintenance rule.** The `notes_fts` index is maintained *manually* inside `updateNote()` / `deleteNote()` — there are no SQLite triggers. Any new write path that touches `notes.title` or `notes.body` MUST emit the matching `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ...)` + re-insert pair, or search will silently drift / return orphaned rows. When `canvas_json` is present, `updateNote()` extracts `$.textContent.body` via `json_extract` and concatenates it into the FTS `body` column so canvas prose is searchable.
 
