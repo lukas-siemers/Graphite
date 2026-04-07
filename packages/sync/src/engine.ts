@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
+// Lazy-loaded to avoid module-scope crash in Hermes production on iOS 26
 import { resolveByLastWrite } from './conflict';
 import type {
   SyncEngineConfig,
@@ -22,8 +22,8 @@ const SYNC_TABLES: SyncTable[] = ['notebooks', 'folders', 'notes'];
  * and the onRemoteChange callback.
  */
 export class SyncEngine {
-  private supabase: SupabaseClient;
-  private channel: RealtimeChannel | null = null;
+  private supabase: any;
+  private channel: any = null;
   private _state: SyncState = 'disabled';
   private userId: string;
   private _onRemoteChange: RemoteChangeCallback | null = null;
@@ -33,6 +33,8 @@ export class SyncEngine {
       throw new Error('SyncEngine requires a userId from an authenticated session');
     }
     this.userId = config.userId;
+    // Lazy-load supabase to avoid module-scope crash
+    const { createClient } = require('@supabase/supabase-js');
     this.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
   }
 
