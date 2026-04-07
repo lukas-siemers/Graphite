@@ -82,27 +82,6 @@ jobs:
         working-directory: apps/mobile
         run: npx expo prebuild --platform ios --clean
 
-      # Patch podspecs that incorrectly require New Architecture.
-      # We use JSC + old arch because Hermes has a GC crash on iOS 26.
-      # Reanimated and Worklets are peer deps of Skia but we don't use
-      # their new-arch features — removing the assertion lets them build
-      # with the old architecture.
-      - name: Patch podspecs for old architecture
-        working-directory: apps/mobile
-        run: |
-          # Remove the New Architecture assertion from reanimated
-          REANIMATED_PODSPEC="node_modules/react-native-reanimated/RNReanimated.podspec"
-          if [ -f "$REANIMATED_PODSPEC" ]; then
-            sed -i.bak 's/assert_new_architecture_enabled($new_arch_enabled)/# assertion removed for JSC compatibility/' "$REANIMATED_PODSPEC"
-            echo "Patched reanimated podspec"
-          fi
-          # Remove the New Architecture assertion from worklets
-          WORKLETS_PODSPEC="node_modules/react-native-worklets/RNWorklets.podspec"
-          if [ -f "$WORKLETS_PODSPEC" ]; then
-            sed -i.bak 's/worklets_assert_new_architecture_enabled($new_arch_enabled)/# assertion removed for JSC compatibility/' "$WORKLETS_PODSPEC"
-            echo "Patched worklets podspec"
-          fi
-
       # Install CocoaPods dependencies.
       - name: Pod install
         working-directory: apps/mobile/ios
