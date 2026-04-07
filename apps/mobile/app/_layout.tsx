@@ -10,7 +10,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     this.state = { error: null };
   }
   static getDerivedStateFromError(error: Error) {
-    return { error: error.message + '\n' + error.stack };
+    return { error: (error?.message || 'Unknown error') + (error?.stack ? '\n' + error.stack : '') };
   }
   render() {
     if (this.state.error) {
@@ -19,7 +19,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
           <Text style={{ color: '#F28500', fontSize: 16, fontWeight: '700', marginBottom: 12 }}>
             Render Error
           </Text>
-          <Text style={{ color: '#DCDDDE', fontSize: 12, fontFamily: 'monospace' }}>
+          <Text style={{ color: '#DCDDDE', fontSize: 12 }}>
             {this.state.error}
           </Text>
         </View>
