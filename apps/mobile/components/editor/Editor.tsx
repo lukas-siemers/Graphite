@@ -49,6 +49,7 @@ export default function Editor() {
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
+  const syncState = useEditorStore((s) => s.syncState);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -393,6 +394,40 @@ export default function Editor() {
         >
           {wordCount} WORDS {'\u00B7'} {computeReadingTime(wordCount).toUpperCase()} {'\u00B7'} {saveStatus.toUpperCase()}
         </Text>
+        {syncState !== 'disabled' && (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 3,
+                marginRight: 4,
+                backgroundColor:
+                  syncState === 'idle'
+                    ? '#4CAF50'
+                    : syncState === 'syncing'
+                      ? tokens.accent
+                      : tokens.textMuted,
+              }}
+            />
+            <Text
+              style={{
+                fontSize: 11,
+                color: tokens.textHint,
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+              }}
+            >
+              {syncState === 'idle'
+                ? 'SYNCED'
+                : syncState === 'syncing'
+                  ? 'SYNCING'
+                  : syncState === 'error'
+                    ? 'SYNC ERROR'
+                    : 'OFFLINE'}
+            </Text>
+          </View>
+        )}
       </View>
     </View>
   );
