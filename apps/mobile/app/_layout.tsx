@@ -3,8 +3,6 @@ import { View, Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
-console.log('[Graphite] RootLayout module loaded');
-
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -31,10 +29,9 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 }
 
 export default function RootLayout() {
-  console.log('[Graphite] RootLayout rendering');
   return (
     <ErrorBoundary>
-      <StatusBar style="light" />
+      <StatusBar style="light" backgroundColor="transparent" translucent />
       <Stack screenOptions={{ headerShown: false }} />
     </ErrorBoundary>
   );
