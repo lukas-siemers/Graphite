@@ -21,7 +21,6 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
-import { usePencilDetection } from '../../hooks/use-pencil-detection';
 
 type SaveStatus = 'Saved' | 'Saving...';
 
@@ -29,12 +28,7 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-interface EditorProps {
-  onToggleDrawing?: () => void;
-  drawingOpen?: boolean;
-}
-
-export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen: _drawingOpen }: EditorProps) {
+export default function Editor() {
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
@@ -49,7 +43,8 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const { width: windowWidth } = useWindowDimensions();
-  const { inputMode, handleTouchStart } = usePencilDetection();
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const setInputMode = useEditorStore((s) => s.setInputMode);
 
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
@@ -229,7 +224,19 @@ export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen:
   return (
     <View
       style={{ flex: 1, backgroundColor: tokens.bgBase }}
-      onStartShouldSetResponder={handleTouchStart}
+      onStartShouldSetResponder={(evt) => {
+        const native = evt.nativeEvent as any;
+        const isStylus = native.touchType === 2 || native.touchType === 'stylus';
+        if (isStylus) {
+          setInputMode('ink');
+        } else {
+          const majorRadius: number = native.majorRadius ?? 0;
+          if (!(inputMode === 'ink' && majorRadius > 20)) {
+            setInputMode('scroll');
+          }
+        }
+        return false;
+      }}
     >
       {/* Title area */}
       <View

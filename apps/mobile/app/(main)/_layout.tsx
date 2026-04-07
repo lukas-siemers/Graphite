@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as FileSystem from 'expo-file-system/legacy';
 import {
   initDatabase,
   getDatabase,
@@ -20,58 +19,21 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useEditorStore } from '../../stores/use-editor-store';
 import Sidebar from '../../components/sidebar/Sidebar';
 import NoteList from '../../components/note-list/NoteList';
 import Editor from '../../components/editor/Editor';
 import { FormattingToolbar } from '../../components/editor/FormattingToolbar';
-import { DrawingCanvas } from '../../components/drawing';
-import type { Stroke } from '../../components/drawing';
 import WelcomeScreen from '../../components/onboarding/WelcomeScreen';
-
-// ---------------------------------------------------------------------------
-// Drawing persistence helpers (Phase 1 — local filesystem via expo-file-system)
-// ---------------------------------------------------------------------------
-
-const DRAWINGS_DIR = `${FileSystem.documentDirectory}drawings/`;
-
-async function ensureDrawingsDir(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(DRAWINGS_DIR);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(DRAWINGS_DIR, { intermediates: true });
-  }
-}
-
-function drawingPath(noteId: string): string {
-  return `${DRAWINGS_DIR}${noteId}.json`;
-}
-
-async function loadStrokes(noteId: string): Promise<Stroke[]> {
-  try {
-    const path = drawingPath(noteId);
-    const info = await FileSystem.getInfoAsync(path);
-    if (!info.exists) return [];
-    const json = await FileSystem.readAsStringAsync(path);
-    return JSON.parse(json) as Stroke[];
-  } catch {
-    return [];
-  }
-}
-
-async function saveStrokes(noteId: string, strokes: Stroke[]): Promise<string> {
-  await ensureDrawingsDir();
-  const path = drawingPath(noteId);
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(strokes));
-  return path;
-}
 
 type PhoneScreen = 'sidebar' | 'list' | 'editor';
 
 function PhoneLayout() {
   const [screen, setScreen] = useState<PhoneScreen>('sidebar');
-  const [drawingOpen, setDrawingOpen] = useState(false);
-  const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
 
   // Navigate to editor when a note is selected.
   // Handles both the normal path (note picked from list → 'list' screen) and
@@ -142,19 +104,10 @@ function PhoneLayout() {
         )}
         {screen === 'editor' && (
           <View style={{ flex: 1, position: 'relative' }}>
-            <Editor
-              onToggleDrawing={() => setDrawingOpen((v) => !v)}
-              drawingOpen={drawingOpen}
-            />
-            {/* FAB — iPad/native only; hidden on web */}
+            <Editor />
+            {/* FAB — toggles ink/scroll input mode; iPad/native only */}
             {Platform.OS !== 'web' && <Pressable
-              onPress={async () => {
-                if (!drawingOpen && activeNoteId) {
-                  const strokes = await loadStrokes(activeNoteId);
-                  setInitialStrokes(strokes);
-                }
-                setDrawingOpen((v) => !v);
-              }}
+              onPress={toggleInputMode}
               style={({ pressed }) => ({
                 position: 'absolute',
                 bottom: 24,
@@ -162,26 +115,13 @@ function PhoneLayout() {
                 width: 48,
                 height: 48,
                 borderRadius: 0,
-                backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+                backgroundColor: pressed ? tokens.accentPressed : (inputMode === 'ink' ? tokens.accentPressed : tokens.accent),
                 alignItems: 'center',
                 justifyContent: 'center',
               })}
             >
               <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
             </Pressable>}
-            {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
-              <DrawingCanvas
-                noteId={activeNoteId}
-                initialStrokes={initialStrokes}
-                onClose={() => setDrawingOpen(false)}
-                onSave={async (strokes) => {
-                  const path = await saveStrokes(activeNoteId, strokes);
-                  const db = getDatabase();
-                  await updateNote(db, activeNoteId, { drawingAssetId: path });
-                  setDrawingOpen(false);
-                }}
-              />
-            )}
           </View>
         )}
       </View>
@@ -189,15 +129,10 @@ function PhoneLayout() {
   );
 }
 
-interface IPadLayoutProps {
-  drawingOpen: boolean;
-  setDrawingOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  activeNoteId: string | null;
-}
-
-function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutProps) {
+function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [initialStrokes, setInitialStrokes] = useState<Stroke[]>([]);
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
@@ -245,26 +180,17 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
 
             {/* Formatting toolbar */}
             <FormattingToolbar
-              onToggleDrawing={() => setDrawingOpen((v) => !v)}
-              drawingOpen={drawingOpen}
+              onToggleDrawing={toggleInputMode}
+              drawingOpen={inputMode === 'ink'}
             />
           </View>
 
           {/* Editor area */}
           <View style={{ flex: 1, position: 'relative' }}>
-            <Editor
-              onToggleDrawing={() => setDrawingOpen((v) => !v)}
-              drawingOpen={drawingOpen}
-            />
-            {/* FAB — iPad/native only; hidden on web */}
+            <Editor />
+            {/* FAB — toggles ink/scroll input mode; iPad/native only */}
             {Platform.OS !== 'web' && <Pressable
-              onPress={async () => {
-                if (!drawingOpen && activeNoteId) {
-                  const strokes = await loadStrokes(activeNoteId);
-                  setInitialStrokes(strokes);
-                }
-                setDrawingOpen((v) => !v);
-              }}
+              onPress={toggleInputMode}
               style={({ pressed }) => ({
                 position: 'absolute',
                 bottom: 24,
@@ -272,26 +198,13 @@ function IPadLayout({ drawingOpen, setDrawingOpen, activeNoteId }: IPadLayoutPro
                 width: 48,
                 height: 48,
                 borderRadius: 0,
-                backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+                backgroundColor: pressed ? tokens.accentPressed : (inputMode === 'ink' ? tokens.accentPressed : tokens.accent),
                 alignItems: 'center',
                 justifyContent: 'center',
               })}
             >
               <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
             </Pressable>}
-            {Platform.OS !== 'web' && drawingOpen && activeNoteId && (
-              <DrawingCanvas
-                noteId={activeNoteId}
-                initialStrokes={initialStrokes}
-                onClose={() => setDrawingOpen(false)}
-                onSave={async (strokes) => {
-                  const path = await saveStrokes(activeNoteId, strokes);
-                  const db = getDatabase();
-                  await updateNote(db, activeNoteId, { drawingAssetId: path });
-                  setDrawingOpen(false);
-                }}
-              />
-            )}
           </View>
         </View>
       </View>
@@ -316,7 +229,6 @@ export default function MainLayout() {
   const { width } = useWindowDimensions();
   const isIPad = width >= 768;
   const [dbReady, setDbReady] = useState(false);
-  const [drawingOpen, setDrawingOpen] = useState(false);
   // null = loading, false = show onboarding, true = skip
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
@@ -326,7 +238,6 @@ export default function MainLayout() {
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const setNotes = useNoteStore((s) => s.setNotes);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
-  const activeNoteId = useNoteStore((s) => s.activeNoteId);
 
   useEffect(() => {
     initDatabase()
@@ -410,11 +321,7 @@ export default function MainLayout() {
   }
 
   if (isIPad) {
-    return <IPadLayout
-      drawingOpen={drawingOpen}
-      setDrawingOpen={setDrawingOpen}
-      activeNoteId={activeNoteId}
-    />;
+    return <IPadLayout />;
   }
 
   return <PhoneLayout />;
