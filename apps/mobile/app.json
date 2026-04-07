@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "requiresFullScreen": true,
       "jsEngine": "jsc",
       "infoPlist": {
@@ -35,7 +35,7 @@
       "expo-router",
       "expo-sqlite"
     ],
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "web": {
       "output": "static",
       "bundler": "metro"
