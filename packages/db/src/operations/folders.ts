@@ -7,8 +7,10 @@ interface RawFolder {
   notebook_id: string;
   parent_id: string | null;
   name: string;
+  is_dirty: number;
   created_at: number;
   updated_at: number;
+  synced_at: number | null;
   sort_order: number;
 }
 
@@ -18,8 +20,10 @@ function mapFolder(row: RawFolder): Folder {
     notebookId: row.notebook_id,
     parentId: row.parent_id,
     name: row.name,
+    isDirty: row.is_dirty ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    syncedAt: row.synced_at ?? null,
     sortOrder: row.sort_order ?? 0,
   };
 }
@@ -40,10 +44,10 @@ export async function createFolder(
   );
   const sortOrder = (maxRow?.max_order ?? -1) + 1;
   await db.runAsync(
-    'INSERT INTO folders (id, notebook_id, parent_id, name, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO folders (id, notebook_id, parent_id, name, is_dirty, created_at, updated_at, synced_at, sort_order) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, ?)',
     [id, notebookId, parent, name, now, now, sortOrder],
   );
-  return { id, notebookId, parentId: parent, name, createdAt: now, updatedAt: now, sortOrder };
+  return { id, notebookId, parentId: parent, name, isDirty: 1, createdAt: now, updatedAt: now, syncedAt: null, sortOrder };
 }
 
 export async function getFolders(
@@ -74,7 +78,7 @@ export async function updateFolder(
 ): Promise<void> {
   const now = Date.now();
   await db.runAsync(
-    'UPDATE folders SET name = ?, updated_at = ? WHERE id = ?',
+    'UPDATE folders SET name = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [name, now, id],
   );
 }
@@ -91,7 +95,7 @@ export async function renameFolder(
 ): Promise<void> {
   const now = Date.now();
   await db.runAsync(
-    'UPDATE folders SET name = ?, updated_at = ? WHERE id = ?',
+    'UPDATE folders SET name = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [name, now, id],
   );
 }
@@ -180,4 +184,45 @@ export async function deleteFolder(
   });
 
   return { deletedFolderIds, deletedNoteIds };
+}
+
+// ---------------------------------------------------------------------------
+// Sync helpers
+// ---------------------------------------------------------------------------
+
+/** Return all folders with is_dirty = 1. */
+export async function getDirtyFolders(db: SQLiteDatabase): Promise<Folder[]> {
+  const rows = await db.getAllAsync<RawFolder>('SELECT * FROM folders WHERE is_dirty = 1');
+  return rows.map(mapFolder);
+}
+
+/** Mark a folder as synced (clean). */
+export async function markFolderClean(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(
+    'UPDATE folders SET is_dirty = 0, synced_at = ? WHERE id = ?',
+    [Date.now(), id],
+  );
+}
+
+/**
+ * Apply a remote folder record to the local DB. Uses last-write-wins
+ * conflict resolution based on updated_at.
+ */
+export async function applyRemoteFolder(
+  db: SQLiteDatabase,
+  remote: { id: string; notebook_id: string; parent_id: string | null; name: string; sort_order?: number; created_at: number; updated_at: number },
+): Promise<void> {
+  const local = await db.getFirstAsync<RawFolder>('SELECT * FROM folders WHERE id = ?', [remote.id]);
+  if (!local) {
+    await db.runAsync(
+      'INSERT INTO folders (id, notebook_id, parent_id, name, is_dirty, sort_order, created_at, updated_at, synced_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)',
+      [remote.id, remote.notebook_id, remote.parent_id, remote.name, remote.sort_order ?? 0, remote.created_at, remote.updated_at, Date.now()],
+    );
+  } else if (remote.updated_at >= local.updated_at) {
+    await db.runAsync(
+      'UPDATE folders SET notebook_id = ?, parent_id = ?, name = ?, sort_order = ?, updated_at = ?, synced_at = ?, is_dirty = 0 WHERE id = ?',
+      [remote.notebook_id, remote.parent_id, remote.name, remote.sort_order ?? local.sort_order, remote.updated_at, Date.now(), remote.id],
+    );
+  }
+  // If local is newer, keep local — it is already dirty and will push on next sync.
 }

@@ -5,6 +5,7 @@ import type { Notebook, Note } from '../types';
 interface RawNotebook {
   id: string;
   name: string;
+  is_dirty: number;
   created_at: number;
   updated_at: number;
   synced_at: number | null;
@@ -15,6 +16,7 @@ function mapNotebook(row: RawNotebook): Notebook {
   return {
     id: row.id,
     name: row.name,
+    isDirty: row.is_dirty ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncedAt: row.synced_at,
@@ -34,10 +36,10 @@ export async function createNotebook(
   );
   const sortOrder = (maxRow?.max_order ?? -1) + 1;
   await db.runAsync(
-    'INSERT INTO notebooks (id, name, created_at, updated_at, synced_at, sort_order) VALUES (?, ?, ?, ?, NULL, ?)',
+    'INSERT INTO notebooks (id, name, is_dirty, created_at, updated_at, synced_at, sort_order) VALUES (?, ?, 1, ?, ?, NULL, ?)',
     [id, name, now, now, sortOrder],
   );
-  return { id, name, createdAt: now, updatedAt: now, syncedAt: null, sortOrder };
+  return { id, name, isDirty: 1, createdAt: now, updatedAt: now, syncedAt: null, sortOrder };
 }
 
 export async function getNotebooks(db: SQLiteDatabase): Promise<Notebook[]> {
@@ -64,7 +66,7 @@ export async function updateNotebook(
 ): Promise<void> {
   const now = Date.now();
   await db.runAsync(
-    'UPDATE notebooks SET name = ?, updated_at = ? WHERE id = ?',
+    'UPDATE notebooks SET name = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [name, now, id],
   );
 }
@@ -81,7 +83,7 @@ export async function renameNotebook(
 ): Promise<void> {
   const now = Date.now();
   await db.runAsync(
-    'UPDATE notebooks SET name = ?, updated_at = ? WHERE id = ?',
+    'UPDATE notebooks SET name = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [name, now, id],
   );
 }
@@ -238,4 +240,45 @@ export async function seedSampleNotebook(
   }
 
   return nb;
+}
+
+// ---------------------------------------------------------------------------
+// Sync helpers
+// ---------------------------------------------------------------------------
+
+/** Return all notebooks with is_dirty = 1. */
+export async function getDirtyNotebooks(db: SQLiteDatabase): Promise<Notebook[]> {
+  const rows = await db.getAllAsync<RawNotebook>('SELECT * FROM notebooks WHERE is_dirty = 1');
+  return rows.map(mapNotebook);
+}
+
+/** Mark a notebook as synced (clean). */
+export async function markNotebookClean(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(
+    'UPDATE notebooks SET is_dirty = 0, synced_at = ? WHERE id = ?',
+    [Date.now(), id],
+  );
+}
+
+/**
+ * Apply a remote notebook record to the local DB. Uses last-write-wins
+ * conflict resolution based on updated_at.
+ */
+export async function applyRemoteNotebook(
+  db: SQLiteDatabase,
+  remote: { id: string; name: string; sort_order?: number; created_at: number; updated_at: number },
+): Promise<void> {
+  const local = await db.getFirstAsync<RawNotebook>('SELECT * FROM notebooks WHERE id = ?', [remote.id]);
+  if (!local) {
+    await db.runAsync(
+      'INSERT INTO notebooks (id, name, is_dirty, sort_order, created_at, updated_at, synced_at) VALUES (?, ?, 0, ?, ?, ?, ?)',
+      [remote.id, remote.name, remote.sort_order ?? 0, remote.created_at, remote.updated_at, Date.now()],
+    );
+  } else if (remote.updated_at >= local.updated_at) {
+    await db.runAsync(
+      'UPDATE notebooks SET name = ?, sort_order = ?, updated_at = ?, synced_at = ?, is_dirty = 0 WHERE id = ?',
+      [remote.name, remote.sort_order ?? local.sort_order, remote.updated_at, Date.now(), remote.id],
+    );
+  }
+  // If local is newer, keep local — it is already dirty and will push on next sync.
 }

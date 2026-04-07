@@ -61,7 +61,7 @@ export async function createNote(
   await db.runAsync(
     `INSERT INTO notes
        (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, sort_order, created_at, updated_at, synced_at)
-     VALUES (?, ?, ?, 'Untitled', '', NULL, 0, ?, ?, ?, NULL)`,
+     VALUES (?, ?, ?, 'Untitled', '', NULL, 1, ?, ?, ?, NULL)`,
     [id, folder, notebookId, sortOrder, now, now],
   );
   const inserted = await db.getFirstAsync<{ rowid: number }>(
@@ -82,7 +82,7 @@ export async function createNote(
     body: '',
     drawingAssetId: null,
     canvasJson: null,
-    isDirty: 0,
+    isDirty: 1,
     sortOrder,
     createdAt: now,
     updatedAt: now,
@@ -145,36 +145,36 @@ export async function updateNote(
   if (patch.title !== undefined && patch.body !== undefined) {
     if (skipTs) {
       await db.runAsync(
-        'UPDATE notes SET title = ?, body = ? WHERE id = ?',
+        'UPDATE notes SET title = ?, body = ?, is_dirty = 1 WHERE id = ?',
         [patch.title, patch.body, id],
       );
     } else {
       await db.runAsync(
-        'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE id = ?',
+        'UPDATE notes SET title = ?, body = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
         [patch.title, patch.body, now, id],
       );
     }
   } else if (patch.title !== undefined) {
     if (skipTs) {
       await db.runAsync(
-        'UPDATE notes SET title = ? WHERE id = ?',
+        'UPDATE notes SET title = ?, is_dirty = 1 WHERE id = ?',
         [patch.title, id],
       );
     } else {
       await db.runAsync(
-        'UPDATE notes SET title = ?, updated_at = ? WHERE id = ?',
+        'UPDATE notes SET title = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
         [patch.title, now, id],
       );
     }
   } else if (patch.body !== undefined) {
     if (skipTs) {
       await db.runAsync(
-        'UPDATE notes SET body = ? WHERE id = ?',
+        'UPDATE notes SET body = ?, is_dirty = 1 WHERE id = ?',
         [patch.body, id],
       );
     } else {
       await db.runAsync(
-        'UPDATE notes SET body = ?, updated_at = ? WHERE id = ?',
+        'UPDATE notes SET body = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
         [patch.body, now, id],
       );
     }
@@ -183,12 +183,12 @@ export async function updateNote(
   if (patch.drawingAssetId !== undefined) {
     if (skipTs) {
       await db.runAsync(
-        'UPDATE notes SET drawing_asset_id = ? WHERE id = ?',
+        'UPDATE notes SET drawing_asset_id = ?, is_dirty = 1 WHERE id = ?',
         [patch.drawingAssetId, id],
       );
     } else {
       await db.runAsync(
-        'UPDATE notes SET drawing_asset_id = ?, updated_at = ? WHERE id = ?',
+        'UPDATE notes SET drawing_asset_id = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
         [patch.drawingAssetId, now, id],
       );
     }
@@ -197,12 +197,12 @@ export async function updateNote(
   if (patch.canvasJson !== undefined) {
     if (skipTs) {
       await db.runAsync(
-        'UPDATE notes SET canvas_json = ? WHERE id = ?',
+        'UPDATE notes SET canvas_json = ?, is_dirty = 1 WHERE id = ?',
         [patch.canvasJson, id],
       );
     } else {
       await db.runAsync(
-        'UPDATE notes SET canvas_json = ?, updated_at = ? WHERE id = ?',
+        'UPDATE notes SET canvas_json = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
         [patch.canvasJson, now, id],
       );
     }
@@ -269,7 +269,7 @@ export async function moveNote(
 ): Promise<{ noteId: string; folderId: string | null; updated_at: number }> {
   const updated_at = Date.now();
   await db.runAsync(
-    'UPDATE notes SET folder_id = ?, updated_at = ? WHERE id = ?',
+    'UPDATE notes SET folder_id = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [folderId, updated_at, noteId],
   );
   // Note: FTS5 manual maintenance is intentionally skipped here. The FTS index
@@ -323,7 +323,7 @@ export async function moveNoteToNotebook(
       );
   const sortOrder = (maxRow as any)?.next ?? 0;
   await db.runAsync(
-    'UPDATE notes SET notebook_id = ?, folder_id = ?, sort_order = ?, updated_at = ? WHERE id = ?',
+    'UPDATE notes SET notebook_id = ?, folder_id = ?, sort_order = ?, updated_at = ?, is_dirty = 1 WHERE id = ?',
     [targetNotebookId, targetFolderId, sortOrder, updatedAt, noteId],
   );
 }
@@ -375,4 +375,106 @@ export async function searchNotesEnhanced(
   scored.sort((a, b) => b.score - a.score);
 
   return scored.map((s) => s.note);
+}
+
+// ---------------------------------------------------------------------------
+// Sync helpers
+// ---------------------------------------------------------------------------
+
+/** Return all notes with is_dirty = 1. */
+export async function getDirtyNotes(db: SQLiteDatabase): Promise<Note[]> {
+  const rows = await db.getAllAsync<RawNote>('SELECT * FROM notes WHERE is_dirty = 1');
+  return rows.map(mapNote);
+}
+
+/** Mark a note as synced (clean). */
+export async function markNoteClean(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync(
+    'UPDATE notes SET is_dirty = 0, synced_at = ? WHERE id = ?',
+    [Date.now(), id],
+  );
+}
+
+/**
+ * Apply a remote note record to the local DB. Uses last-write-wins
+ * conflict resolution based on updated_at. Also maintains the FTS5 index.
+ */
+export async function applyRemoteNote(
+  db: SQLiteDatabase,
+  remote: {
+    id: string;
+    folder_id: string | null;
+    notebook_id: string;
+    title: string;
+    body: string;
+    canvas_json?: string | null;
+    sort_order?: number;
+    created_at: number;
+    updated_at: number;
+  },
+): Promise<void> {
+  const local = await db.getFirstAsync<RawNote>('SELECT * FROM notes WHERE id = ?', [remote.id]);
+  if (!local) {
+    // New note from another device — insert locally as clean.
+    await db.runAsync(
+      `INSERT INTO notes (id, folder_id, notebook_id, title, body, canvas_json, is_dirty, sort_order, created_at, updated_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      [
+        remote.id,
+        remote.folder_id,
+        remote.notebook_id,
+        remote.title,
+        remote.body,
+        remote.canvas_json ?? null,
+        remote.sort_order ?? 0,
+        remote.created_at,
+        remote.updated_at,
+        Date.now(),
+      ],
+    );
+    // Populate FTS index for the new row.
+    const inserted = await db.getFirstAsync<{ rowid: number }>(
+      'SELECT rowid FROM notes WHERE id = ?',
+      [remote.id],
+    );
+    if (inserted) {
+      await db.runAsync(
+        'INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)',
+        [inserted.rowid, remote.title, remote.body],
+      );
+    }
+  } else if (remote.updated_at >= local.updated_at) {
+    // Remote wins — update local row and rebuild FTS entry.
+    const before = await db.getFirstAsync<{ rowid: number; title: string; body: string }>(
+      'SELECT rowid, title, body FROM notes WHERE id = ?',
+      [remote.id],
+    );
+    await db.runAsync(
+      `UPDATE notes SET folder_id = ?, notebook_id = ?, title = ?, body = ?, canvas_json = ?,
+       sort_order = ?, updated_at = ?, synced_at = ?, is_dirty = 0 WHERE id = ?`,
+      [
+        remote.folder_id,
+        remote.notebook_id,
+        remote.title,
+        remote.body,
+        remote.canvas_json ?? null,
+        remote.sort_order ?? local.sort_order,
+        remote.updated_at,
+        Date.now(),
+        remote.id,
+      ],
+    );
+    // Maintain FTS5 index.
+    if (before) {
+      await db.runAsync(
+        `INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)`,
+        [before.rowid, before.title, before.body],
+      );
+      await db.runAsync(
+        'INSERT INTO notes_fts(rowid, title, body) VALUES(?, ?, ?)',
+        [before.rowid, remote.title, remote.body],
+      );
+    }
+  }
+  // If local is newer, keep local — it is already dirty and will push on next sync.
 }
