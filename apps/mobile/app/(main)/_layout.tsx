@@ -20,6 +20,8 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
+import { useSyncEngine } from '../../hooks/use-sync-engine';
+import { getCurrentSession } from '../../components/auth/AuthGate';
 import Sidebar from '../../components/sidebar/Sidebar';
 import NoteList from '../../components/note-list/NoteList';
 import Editor from '../../components/editor/Editor';
@@ -231,6 +233,7 @@ export default function MainLayout() {
   const [dbReady, setDbReady] = useState(false);
   // null = loading, false = show onboarding, true = skip
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const setNotebooks = useNotebookStore((s) => s.setNotebooks);
   const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
@@ -238,6 +241,20 @@ export default function MainLayout() {
   const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
   const setNotes = useNoteStore((s) => s.setNotes);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
+
+  // Start the sync engine with the authenticated user's ID
+  const { syncState } = useSyncEngine(
+    userId,
+    process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+  );
+
+  useEffect(() => {
+    // Get the current user ID from the auth session
+    getCurrentSession().then((session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+  }, []);
 
   useEffect(() => {
     initDatabase()
