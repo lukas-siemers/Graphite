@@ -1,0 +1,30 @@
+diff --git a/node_modules/react-native/React/Base/RCTBridge.mm b/node_modules/react-native/React/Base/RCTBridge.mm
+index b8452a3..9b1d4ad 100644
+--- a/node_modules/react-native/React/Base/RCTBridge.mm
++++ b/node_modules/react-native/React/Base/RCTBridge.mm
+@@ -243,7 +243,7 @@ void RCTSetTurboModuleInteropBridgeProxyLogLevel(RCTBridgeProxyLoggingLevel logL
+ }
+ 
+ // Turn on TurboModule sync execution of void methods
+-static BOOL gTurboModuleEnableSyncVoidMethods = NO;
++static BOOL gTurboModuleEnableSyncVoidMethods = YES;
+ BOOL RCTTurboModuleSyncVoidMethodsEnabled(void)
+ {
+   return gTurboModuleEnableSyncVoidMethods;
+diff --git a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+index 6646570..3ae766b 100644
+--- a/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
++++ b/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm
+@@ -470,7 +470,11 @@ void ObjCTurboModule::performVoidMethodInvocation(
+     @try {
+       [inv invokeWithTarget:strongModule];
+     } @catch (NSException *exception) {
+-      throw convertNSExceptionToJSError(runtime, exception, std::string{moduleName}, methodNameStr);
++      // iOS 26 fix: convertNSExceptionToJSError touches the JSI runtime,
++      // which is not thread-safe. When this block runs on a dispatch queue
++      // (async void methods), calling into Hermes corrupts GC state.
++      // Log and swallow instead of crashing the process.
++      NSLog(@"[RCTTurboModule] Exception in %s.%s: %@", moduleName, methodName, exception);
+     } @finally {
+       [retainedObjectsForInvocation removeAllObjects];
+     }
