@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "requiresFullScreen": true,
             "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
