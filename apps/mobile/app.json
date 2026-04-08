@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "15",
+      "buildNumber": "16",
       "requiresFullScreen": true,
             "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -38,6 +38,7 @@
         {
           "ios": {
             "newArchEnabled": false,
+            "jsEngine": "jsc",
             "flipper": false
           }
         }
