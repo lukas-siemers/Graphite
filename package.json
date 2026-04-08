@@ -25,7 +25,7 @@
   },
   "scripts": {
     "mobile": "yarn workspace @graphite/mobile start",
-    "postinstall": "patch-package",
+    "postinstall": "cd apps/mobile && npx patch-package",
     "test": "vitest run",
     "test:watch": "vitest"
   },
