@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "17",
+      "buildNumber": "18",
       "requiresFullScreen": true,
             "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -37,13 +37,13 @@
         "expo-build-properties",
         {
           "ios": {
-            "newArchEnabled": false,
+            "newArchEnabled": true,
             "flipper": false
           }
         }
       ]
     ],
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "web": {
       "output": "static",
       "bundler": "metro"
