@@ -90,7 +90,10 @@ jobs:
       # Verify the TurboModule fix was injected into AppDelegate by the Expo plugin.
       - name: Verify TurboModule fix in AppDelegate
         run: |
-          grep -q 'RCTEnableTurboModuleSyncVoidMethods' apps/mobile/ios/Graphite/AppDelegate.mm || { echo "FATAL: TurboModule fix not in AppDelegate"; cat apps/mobile/ios/Graphite/AppDelegate.mm; exit 1; }
+          DELEGATE=$(find apps/mobile/ios -name 'AppDelegate.*' -type f | head -1)
+          echo "Found AppDelegate at: $DELEGATE"
+          if [ -z "$DELEGATE" ]; then echo "FATAL: No AppDelegate found"; find apps/mobile/ios -type f | head -30; exit 1; fi
+          grep -q 'RCTEnableTurboModuleSyncVoidMethods' "$DELEGATE" || { echo "FATAL: TurboModule fix not in AppDelegate:"; cat "$DELEGATE"; exit 1; }
           echo "TurboModule fix verified in AppDelegate ✔"
 
       # Install CocoaPods dependencies.
