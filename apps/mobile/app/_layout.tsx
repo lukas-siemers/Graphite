@@ -2,8 +2,7 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-
-console.log('[Graphite] RootLayout module loaded');
+import AuthGate from '../components/auth/AuthGate';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   constructor(props: { children: React.ReactNode }) {
@@ -11,7 +10,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     this.state = { error: null };
   }
   static getDerivedStateFromError(error: Error) {
-    return { error: error.message + '\n' + error.stack };
+    return { error: (error?.message || 'Unknown error') + (error?.stack ? '\n' + error.stack : '') };
   }
   render() {
     if (this.state.error) {
@@ -20,7 +19,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
           <Text style={{ color: '#F28500', fontSize: 16, fontWeight: '700', marginBottom: 12 }}>
             Render Error
           </Text>
-          <Text style={{ color: '#DCDDDE', fontSize: 12, fontFamily: 'monospace' }}>
+          <Text style={{ color: '#DCDDDE', fontSize: 12 }}>
             {this.state.error}
           </Text>
         </View>
@@ -31,11 +30,12 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 }
 
 export default function RootLayout() {
-  console.log('[Graphite] RootLayout rendering');
   return (
     <ErrorBoundary>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false }} />
+      <StatusBar style="light" backgroundColor="transparent" translucent />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthGate>
     </ErrorBoundary>
   );
 }

@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );`;
 
+// Migration 10 — sync dirty tracking for notebooks and folders
+// Adds is_dirty INTEGER DEFAULT 0 and synced_at INTEGER to folders, and
+// is_dirty INTEGER DEFAULT 0 to notebooks (synced_at already exists on notebooks).
+// Notes already have both columns from the initial schema.
+export const ADD_NOTEBOOK_IS_DIRTY = `ALTER TABLE notebooks ADD COLUMN is_dirty INTEGER DEFAULT 0;`;
+export const ADD_FOLDER_IS_DIRTY = `ALTER TABLE folders ADD COLUMN is_dirty INTEGER DEFAULT 0;`;
+export const ADD_FOLDER_SYNCED_AT = `ALTER TABLE folders ADD COLUMN synced_at INTEGER;`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -95,4 +103,7 @@ export const ALL_MIGRATIONS = [
   CREATE_TAGS,
   CREATE_NOTE_TAGS,
   CREATE_SETTINGS,
+  ADD_NOTEBOOK_IS_DIRTY,
+  ADD_FOLDER_IS_DIRTY,
+  ADD_FOLDER_SYNCED_AT,
 ] as const;
