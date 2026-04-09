@@ -30,6 +30,14 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     async function loadSession() {
       try {
+        // Skip Supabase entirely if credentials aren't configured (offline/free mode)
+        const url = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+        const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+        if (!url || !key) {
+          if (mounted) setLoading(false);
+          return;
+        }
+
         const supabase = getSupabaseClient();
         const { data } = await supabase.auth.getSession();
         if (mounted) {
