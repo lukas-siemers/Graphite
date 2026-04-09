@@ -7,9 +7,6 @@ import {
   renameNotebook,
   deleteNotebook,
   seedSampleNotebook,
-  getDirtyNotebooks,
-  markNotebookClean,
-  applyRemoteNotebook,
 } from '../operations/notebooks';
 import { createNote, getNotes } from '../operations/notes';
 
@@ -147,94 +144,5 @@ describe('notebooks operations', () => {
       expect(note.body.length).toBeGreaterThan(0);
       expect(note.body).toContain('#');
     }
-  });
-
-  describe('sync helpers', () => {
-    it('createNotebook sets isDirty to 1', async () => {
-      const nb = await createNotebook(db, 'Work');
-      expect(nb.isDirty).toBe(1);
-    });
-
-    it('updateNotebook sets isDirty to 1', async () => {
-      const nb = await createNotebook(db, 'Work');
-      await markNotebookClean(db, nb.id);
-      const [clean] = await getNotebooks(db);
-      expect(clean.isDirty).toBe(0);
-
-      await updateNotebook(db, nb.id, 'Renamed');
-      const [updated] = await getNotebooks(db);
-      expect(updated.isDirty).toBe(1);
-    });
-
-    it('getDirtyNotebooks returns only dirty rows', async () => {
-      const nb1 = await createNotebook(db, 'A');
-      const nb2 = await createNotebook(db, 'B');
-      await markNotebookClean(db, nb1.id);
-
-      const dirty = await getDirtyNotebooks(db);
-      expect(dirty).toHaveLength(1);
-      expect(dirty[0].id).toBe(nb2.id);
-    });
-
-    it('markNotebookClean clears dirty and sets synced_at', async () => {
-      const nb = await createNotebook(db, 'Work');
-      vi.setSystemTime(new Date('2024-06-01'));
-      await markNotebookClean(db, nb.id);
-
-      const [cleaned] = await getNotebooks(db);
-      expect(cleaned.isDirty).toBe(0);
-      expect(cleaned.syncedAt).toBe(new Date('2024-06-01').getTime());
-    });
-
-    it('applyRemoteNotebook inserts a new remote notebook', async () => {
-      const now = Date.now();
-      await applyRemoteNotebook(db, {
-        id: 'remote-nb-1',
-        name: 'From Remote',
-        created_at: now,
-        updated_at: now,
-      });
-
-      const all = await getNotebooks(db);
-      const remote = all.find((n) => n.id === 'remote-nb-1');
-      expect(remote).not.toBeUndefined();
-      expect(remote!.name).toBe('From Remote');
-      expect(remote!.isDirty).toBe(0);
-    });
-
-    it('applyRemoteNotebook remote newer wins', async () => {
-      const nb = await createNotebook(db, 'Local');
-      vi.setSystemTime(new Date('2025-01-01'));
-
-      await applyRemoteNotebook(db, {
-        id: nb.id,
-        name: 'Remote Name',
-        created_at: nb.createdAt,
-        updated_at: new Date('2025-01-01').getTime(),
-      });
-
-      const all = await getNotebooks(db);
-      const updated = all.find((n) => n.id === nb.id);
-      expect(updated!.name).toBe('Remote Name');
-      expect(updated!.isDirty).toBe(0);
-    });
-
-    it('applyRemoteNotebook local newer preserved', async () => {
-      const nb = await createNotebook(db, 'Local');
-      vi.setSystemTime(new Date('2025-01-01'));
-      await updateNotebook(db, nb.id, 'Updated Local');
-
-      await applyRemoteNotebook(db, {
-        id: nb.id,
-        name: 'Old Remote',
-        created_at: nb.createdAt,
-        updated_at: new Date('2024-06-01').getTime(),
-      });
-
-      const all = await getNotebooks(db);
-      const kept = all.find((n) => n.id === nb.id);
-      expect(kept!.name).toBe('Updated Local');
-      expect(kept!.isDirty).toBe(1);
-    });
   });
 });

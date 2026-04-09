@@ -495,16 +495,8 @@ export default function Sidebar() {
           </View>
           <Text style={{ fontSize: 12, color: tokens.textMuted, fontWeight: '500' }}>Lukas S.</Text>
         </View>
-        <Pressable
-          hitSlop={10}
-          onPress={async () => {
-            try {
-              const { getSupabaseClient } = await import('@graphite/sync');
-              await getSupabaseClient().auth.signOut();
-            } catch (_) {}
-          }}
-        >
-          <Text style={{ fontSize: 11, color: tokens.textHint, fontWeight: '600' }}>LOGOUT</Text>
+        <Pressable hitSlop={10}>
+          <Text style={{ fontSize: 18, color: tokens.textHint }}>{'\u2699'}</Text>
         </Pressable>
       </View>
     </View>

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SyncEngine } from '../engine';
+import { NotImplementedError } from '../errors';
 
 const baseConfig = {
   supabaseUrl: 'https://stub.example',
@@ -7,7 +8,7 @@ const baseConfig = {
   userId: 'user-1',
 };
 
-describe('SyncEngine', () => {
+describe('SyncEngine (Phase 2 scaffold)', () => {
   it('throws when constructed without a userId', () => {
     expect(() => new SyncEngine({ ...baseConfig, userId: '' })).toThrow();
   });
@@ -17,49 +18,18 @@ describe('SyncEngine', () => {
     expect(engine.state).toBe('disabled');
   });
 
-  it('push() returns empty result when given no records', async () => {
+  it('start() throws NotImplementedError (Phase 2)', async () => {
     const engine = new SyncEngine(baseConfig);
-    const result = await engine.push([]);
-    expect(result.pushed).toBe(0);
-    expect(result.pulled).toBe(0);
-    expect(result.errors).toHaveLength(0);
+    await expect(engine.start()).rejects.toBeInstanceOf(NotImplementedError);
   });
 
-  it('push() handles errors gracefully', async () => {
+  it('push() throws NotImplementedError (Phase 2)', async () => {
     const engine = new SyncEngine(baseConfig);
-    // Pushing to a non-existent Supabase URL will fail at the network level
-    const result = await engine.push([
-      {
-        id: 'note-1',
-        table: 'notes',
-        updatedAt: Date.now(),
-        data: { id: 'note-1', title: 'Test', body: '', created_at: Date.now(), updated_at: Date.now() },
-      },
-    ]);
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.pushed).toBe(0);
+    await expect(engine.push([])).rejects.toBeInstanceOf(NotImplementedError);
   });
 
-  it('stop() sets state to disabled', async () => {
+  it('pull() throws NotImplementedError (Phase 2)', async () => {
     const engine = new SyncEngine(baseConfig);
-    await engine.stop();
-    expect(engine.state).toBe('disabled');
-  });
-
-  it('onRemoteChange callback can be set and cleared', () => {
-    const engine = new SyncEngine(baseConfig);
-    const cb = () => {};
-    engine.onRemoteChange = cb;
-    engine.onRemoteChange = null;
-    // No throw — callback management works
-  });
-
-  it('syncNow() aggregates push and pull results', async () => {
-    const engine = new SyncEngine(baseConfig);
-    const result = await engine.syncNow([], 0);
-    // With stub URL, pull will error but syncNow should not throw
-    expect(result.startedAt).toBeLessThanOrEqual(result.finishedAt);
-    expect(typeof result.pushed).toBe('number');
-    expect(typeof result.pulled).toBe('number');
+    await expect(engine.pull(0)).rejects.toBeInstanceOf(NotImplementedError);
   });
 });

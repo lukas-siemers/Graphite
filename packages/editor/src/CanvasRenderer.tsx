@@ -215,73 +215,47 @@ export function CanvasRenderer({
   // ── Native path ──────────────────────────────────────────────────────────
   // Same unified editor, plus the Skia ink layer rendered on top so Apple
   // Pencil strokes visually sit above the CodeMirror-rendered text.
-  //
-  // GestureDetector installs a native UIPanGestureRecognizer even when
-  // disabled, which competes with the WebView's internal UIScrollView and
-  // prevents it from becoming first responder on tap. We only wrap with
-  // GestureDetector in ink mode; in scroll mode the gesture handler is
-  // absent so the WebView receives all touches cleanly.
-  //
-  // GestureHandlerRootView is already provided by Expo Router at the app
-  // root — nesting a second one can break touch delivery on iOS, so we
-  // use a plain View wrapper here instead.
-  const scrollContent = (
-    <ScrollView
-      ref={scrollRef}
-      bounces={false}
-      style={{ backgroundColor: tokens.bgBase }}
-      contentContainerStyle={{ width }}
-      scrollEnabled={inputMode !== 'ink'}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={{ width }} onLayout={handleLayout}>
-        <View style={styles.contentLayer}>
-          <LivePreviewInput
-            value={canvasDoc.textContent.body}
-            onChange={(text) => onTextChange?.(text)}
-            inputMode={readOnly ? 'ink' : inputMode}
-            placeholder="Start writing..."
-            pendingCommand={pendingCommand}
-            onCommandApplied={onCommandApplied}
-            onActiveFormatsChange={onActiveFormatsChange}
-            autoFocus={autoFocusFirst}
-          />
-        </View>
-
-        {/* Ink layer — absolutely positioned ON TOP of the content.
-            Pointer events are disabled unless we're in ink mode so
-            keyboard text entry still reaches the WebView underneath. */}
-        <View
-          style={StyleSheet.absoluteFill}
-          pointerEvents={inputMode === 'ink' ? 'auto' : 'none'}
-        >
-          <InkLayerView
-            inkLayer={canvasDoc.inkLayer}
-            width={width}
-            height={contentHeightRef.current}
-          />
-        </View>
-      </View>
-    </ScrollView>
-  );
-
-  if (inputMode === 'ink') {
-    // GestureHandlerRootView is already provided by Expo Router at the app
-    // root. Nesting a second one crashes on iOS (duplicate gesture handler
-    // registry). Use a plain View wrapper instead.
-    return (
-      <View style={{ flex: 1 }}>
-        <GestureDetector gesture={inkGesture}>
-          {scrollContent}
-        </GestureDetector>
-      </View>
-    );
-  }
-
   return (
-    <View style={{ flex: 1 }}>
-      {scrollContent}
-    </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureDetector gesture={inkGesture}>
+        <ScrollView
+          ref={scrollRef}
+          bounces={false}
+          style={{ backgroundColor: tokens.bgBase }}
+          contentContainerStyle={{ width }}
+          scrollEnabled={inputMode !== 'ink'}
+        >
+          <View style={{ width }} onLayout={handleLayout}>
+            <View style={styles.contentLayer}>
+              <LivePreviewInput
+                value={canvasDoc.textContent.body}
+                onChange={(text) => onTextChange?.(text)}
+                inputMode={readOnly ? 'ink' : inputMode}
+                placeholder="Start writing..."
+                pendingCommand={pendingCommand}
+                onCommandApplied={onCommandApplied}
+                onActiveFormatsChange={onActiveFormatsChange}
+                autoFocus={autoFocusFirst}
+              />
+            </View>
+
+            {/* Ink layer — absolutely positioned ON TOP of the content.
+                Pointer events are disabled unless we're in ink mode so
+                keyboard text entry still reaches the WebView underneath. */}
+            <View
+              style={StyleSheet.absoluteFill}
+              pointerEvents={inputMode === 'ink' ? 'auto' : 'none'}
+            >
+              <InkLayerView
+                inkLayer={canvasDoc.inkLayer}
+                width={width}
+                height={contentHeightRef.current}
+              />
+            </View>
+          </View>
+        </ScrollView>
+      </GestureDetector>
+    </GestureHandlerRootView>
   );
 }
 

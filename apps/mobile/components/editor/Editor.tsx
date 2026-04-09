@@ -21,6 +21,7 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
+import { usePencilDetection } from '../../hooks/use-pencil-detection';
 
 type SaveStatus = 'Saved' | 'Saving...';
 
@@ -28,7 +29,12 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-export default function Editor() {
+interface EditorProps {
+  onToggleDrawing?: () => void;
+  drawingOpen?: boolean;
+}
+
+export default function Editor({ onToggleDrawing: _onToggleDrawing, drawingOpen: _drawingOpen }: EditorProps) {
   const notes = useNoteStore((s) => s.notes);
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
@@ -43,13 +49,11 @@ export default function Editor() {
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const { width: windowWidth } = useWindowDimensions();
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const setInputMode = useEditorStore((s) => s.setInputMode);
+  const { inputMode, handleTouchStart } = usePencilDetection();
 
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
-  const syncState = useEditorStore((s) => s.syncState);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -225,19 +229,7 @@ export default function Editor() {
   return (
     <View
       style={{ flex: 1, backgroundColor: tokens.bgBase }}
-      onStartShouldSetResponder={(evt) => {
-        const native = evt.nativeEvent as any;
-        const isStylus = native.touchType === 2 || native.touchType === 'stylus';
-        if (isStylus) {
-          setInputMode('ink');
-        } else {
-          const majorRadius: number = native.majorRadius ?? 0;
-          if (!(inputMode === 'ink' && majorRadius > 20)) {
-            setInputMode('scroll');
-          }
-        }
-        return false;
-      }}
+      onStartShouldSetResponder={handleTouchStart}
     >
       {/* Title area */}
       <View
@@ -394,40 +386,6 @@ export default function Editor() {
         >
           {wordCount} WORDS {'\u00B7'} {computeReadingTime(wordCount).toUpperCase()} {'\u00B7'} {saveStatus.toUpperCase()}
         </Text>
-        {syncState !== 'disabled' && (
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                marginRight: 4,
-                backgroundColor:
-                  syncState === 'idle'
-                    ? '#4CAF50'
-                    : syncState === 'syncing'
-                      ? tokens.accent
-                      : tokens.textMuted,
-              }}
-            />
-            <Text
-              style={{
-                fontSize: 11,
-                color: tokens.textHint,
-                letterSpacing: 0.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              {syncState === 'idle'
-                ? 'SYNCED'
-                : syncState === 'syncing'
-                  ? 'SYNCING'
-                  : syncState === 'error'
-                    ? 'SYNC ERROR'
-                    : 'OFFLINE'}
-            </Text>
-          </View>
-        )}
       </View>
     </View>
   );

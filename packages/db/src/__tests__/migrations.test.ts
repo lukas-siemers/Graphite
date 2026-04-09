@@ -16,32 +16,29 @@ describe('schema migrations', () => {
     expect(result.count).toBeGreaterThan(0);
   });
 
-  it('notebooks table exists with correct columns: id, name, is_dirty, created_at, updated_at, synced_at, sort_order', () => {
+  it('notebooks table exists with correct columns: id, name, created_at, updated_at, synced_at, sort_order', () => {
     const columns = db.prepare("PRAGMA table_info('notebooks')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
     expect(names).toContain('name');
-    expect(names).toContain('is_dirty');
     expect(names).toContain('created_at');
     expect(names).toContain('updated_at');
     expect(names).toContain('synced_at');
     expect(names).toContain('sort_order');
-    expect(names).toHaveLength(7);
+    expect(names).toHaveLength(6);
   });
 
-  it('folders table exists with correct columns: id, notebook_id, parent_id, name, is_dirty, created_at, updated_at, synced_at, sort_order', () => {
+  it('folders table exists with correct columns: id, notebook_id, parent_id, name, created_at, updated_at, sort_order', () => {
     const columns = db.prepare("PRAGMA table_info('folders')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
     expect(names).toContain('notebook_id');
     expect(names).toContain('parent_id');
     expect(names).toContain('name');
-    expect(names).toContain('is_dirty');
     expect(names).toContain('created_at');
     expect(names).toContain('updated_at');
-    expect(names).toContain('synced_at');
     expect(names).toContain('sort_order');
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(7);
   });
 
   it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json, sort_order', () => {
