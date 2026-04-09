@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "22",
+      "buildNumber": "23",
       "requiresFullScreen": true,
       "jsEngine": "jsc",
       "infoPlist": {
@@ -33,7 +33,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/force-sync-turbomodule"
     ],
     "newArchEnabled": true,
     "web": {
