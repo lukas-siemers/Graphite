@@ -1,7 +1,9 @@
 name: iOS Build
 
-# Manual trigger only — click "Run workflow" in the Actions tab.
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       profile:
@@ -15,9 +17,12 @@ on:
 
 jobs:
   build:
-    name: Build iOS (${{ inputs.profile }})
+    name: Build iOS (${{ inputs.profile || 'appstore' }})
     runs-on: macos-latest
     timeout-minutes: 45
+
+    env:
+      BUILD_PROFILE: ${{ inputs.profile || 'appstore' }}
 
     steps:
       - name: Checkout
@@ -97,7 +102,7 @@ jobs:
         run: |
           SCHEME="Graphite"
           WORKSPACE="Graphite.xcworkspace"
-          if [ "${{ inputs.profile }}" = "appstore" ]; then
+          if [ "${{ env.BUILD_PROFILE }}" = "appstore" ]; then
             set -o pipefail
             xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos archive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE="$PROFILE_UUID" 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning:|ARCHIVE|FAILED|BUILD" || true
             echo "--- Last 100 lines of build log ---"
@@ -110,7 +115,7 @@ jobs:
 
       # Upload TestFlight build (appstore profile only).
       - name: Upload to TestFlight
-        if: inputs.profile == 'appstore'
+        if: env.BUILD_PROFILE == 'appstore'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -125,7 +130,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: graphite-ios-${{ inputs.profile }}
+          name: graphite-ios-${{ env.BUILD_PROFILE }}
           path: |
             ${{ runner.temp }}/export/*.ipa
             ${{ runner.temp }}/Graphite.xcarchive
