@@ -45,6 +45,17 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      # Verify the TurboModule threading patch was applied.
+      # The postinstall script patches RCTBridge.mm and RCTTurboModule.mm
+      # to prevent Hermes GC corruption from concurrent thread access.
+      - name: Verify RN TurboModule patch
+        run: |
+          grep -q 'gTurboModuleEnableSyncVoidMethods = YES' apps/mobile/node_modules/react-native/React/Base/RCTBridge.mm || { echo "FATAL: RCTBridge.mm patch not applied"; exit 1; }
+          echo "RCTBridge.mm patch verified ✔"
+          THROW_COUNT=$(grep -c 'throw convertNSExceptionToJSError' apps/mobile/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios/ReactCommon/RCTTurboModule.mm || true)
+          if [ "$THROW_COUNT" != "0" ]; then echo "FATAL: RCTTurboModule.mm has $THROW_COUNT unpatched throw(s)"; exit 1; fi
+          echo "RCTTurboModule.mm patch verified ✔"
+
       # Install Apple certificate and provisioning profile from GitHub Secrets.
       # See README section "iOS Build Setup" for how to create these secrets.
       - name: Install Apple signing certificate
