@@ -108,18 +108,36 @@ jobs:
         working-directory: apps/mobile/ios
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Ensure EXPO_PUBLIC vars are available during the Metro bundling phase
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
+          set -euo pipefail
           SCHEME="Graphite"
           WORKSPACE="Graphite.xcworkspace"
           if [ "${{ env.BUILD_PROFILE }}" = "appstore" ]; then
-            set -o pipefail
-            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos archive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE="$PROFILE_UUID" 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning:|ARCHIVE|FAILED|BUILD" || true
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -sdk iphoneos archive CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE="$PROFILE_UUID" 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
             echo "--- Last 100 lines of build log ---"
             tail -100 "$RUNNER_TEMP/xcodebuild.log"
             printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>method</key>\n<string>app-store</string>\n<key>teamID</key>\n<string>%s</string>\n<key>signingStyle</key>\n<string>manual</string>\n<key>provisioningProfiles</key>\n<dict>\n<key>com.graphite.app</key>\n<string>%s</string>\n</dict>\n</dict>\n</plist>' "$APPLE_TEAM_ID" "$PROFILE_UUID" > "$RUNNER_TEMP/ExportOptions.plist"
             xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Graphite.xcarchive" -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
           else
             xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Debug -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M4)' build CODE_SIGNING_ALLOWED=NO | tail -50
+          fi
+
+      # Verify the JS bundle is present in the archive.
+      - name: Verify JS bundle in archive
+        if: env.BUILD_PROFILE == 'appstore'
+        run: |
+          APP_PATH=$(find "$RUNNER_TEMP/Graphite.xcarchive/Products/Applications" -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then echo "FATAL: No .app found in archive"; exit 1; fi
+          # Hermes produces .hbc (bytecode), JSC produces main.jsbundle
+          if ls "$APP_PATH"/main.jsbundle "$APP_PATH"/main.jsbundle.hbc 2>/dev/null | head -1; then
+            echo "JS bundle verified in archive"
+          else
+            echo "FATAL: No JS bundle (main.jsbundle or .hbc) found in archive"
+            ls -la "$APP_PATH/"
+            exit 1
           fi
 
       # Upload TestFlight build (appstore profile only).
