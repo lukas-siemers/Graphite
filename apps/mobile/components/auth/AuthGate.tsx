@@ -27,6 +27,14 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   useEffect(() => {
     let mounted = true;
+    let cleanupListener: (() => void) | undefined;
+
+    // Safety timeout: if loadSession hangs (e.g. getSession() never resolves
+    // in a production RN build without localStorage), force-exit loading state
+    // so the user sees the LoginScreen instead of an infinite black screen.
+    const safetyTimer = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 5000);
 
     async function loadSession() {
       try {
@@ -34,14 +42,20 @@ export default function AuthGate({ children }: AuthGateProps) {
         const url = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
         const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
         if (!url || !key) {
-          if (mounted) setLoading(false);
           return;
         }
 
         const supabase = getSupabaseClient();
-        const { data } = await supabase.auth.getSession();
-        if (mounted) {
-          setSession(data.session);
+
+        // Race against a timeout — getSession() can hang in production RN
+        // builds where localStorage is unavailable.
+        const result = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+
+        if (mounted && result && typeof result === 'object' && 'data' in result) {
+          setSession((result as { data: { session: Session | null } }).data.session);
         }
 
         // Listen for auth state changes (login, logout, token refresh)
@@ -53,12 +67,11 @@ export default function AuthGate({ children }: AuthGateProps) {
           },
         );
 
-        return () => {
-          listener.subscription.unsubscribe();
-        };
+        cleanupListener = () => listener.subscription.unsubscribe();
       } catch {
-        // Supabase credentials not configured — allow offline mode
+        // Supabase credentials not configured or failed — allow offline mode
       } finally {
+        clearTimeout(safetyTimer);
         if (mounted) {
           setLoading(false);
         }
@@ -68,6 +81,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     loadSession();
     return () => {
       mounted = false;
+      clearTimeout(safetyTimer);
+      cleanupListener?.();
     };
   }, []);
 
