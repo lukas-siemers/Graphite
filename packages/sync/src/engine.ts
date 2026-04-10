@@ -1,5 +1,6 @@
-import { createClient, type SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
+import { type SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
 import { resolveByLastWrite } from './conflict';
+import { getSupabaseClient } from './client';
 import type {
   SyncEngineConfig,
   SyncResult,
@@ -33,7 +34,8 @@ export class SyncEngine {
       throw new Error('SyncEngine requires a userId from an authenticated session');
     }
     this.userId = config.userId;
-    this.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+    // Reuse the singleton client so auth storage config is shared
+    this.supabase = getSupabaseClient();
   }
 
   get state(): SyncState {

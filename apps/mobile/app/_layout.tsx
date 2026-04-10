@@ -1,8 +1,21 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { Platform, View, Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { setAuthStorage } from '@graphite/sync';
 import AuthGate from '../components/auth/AuthGate';
+
+// React Native doesn't have localStorage. Configure Supabase to use
+// expo-secure-store so auth tokens persist securely on device.
+// This runs at import time — before any component mounts.
+if (Platform.OS !== 'web') {
+  const SecureStore = require('expo-secure-store');
+  setAuthStorage({
+    getItem: (key: string) => SecureStore.getItemAsync(key),
+    setItem: (key: string, value: string) => SecureStore.setItemAsync(key, value),
+    removeItem: (key: string) => SecureStore.deleteItemAsync(key),
+  });
+}
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
   constructor(props: { children: React.ReactNode }) {

@@ -1,6 +1,29 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * Supabase expects a storage interface with these three methods.
+ * Both sync and async return types are accepted.
+ */
+export interface AuthStorage {
+  getItem: (key: string) => string | null | Promise<string | null>;
+  setItem: (key: string, value: string) => void | Promise<void>;
+  removeItem: (key: string) => void | Promise<void>;
+}
+
 let client: SupabaseClient | null = null;
+let authStorage: AuthStorage | undefined;
+
+/**
+ * Set the auth storage adapter before the first getSupabaseClient() call.
+ * React Native doesn't have localStorage, so the mobile app must call this
+ * at startup with expo-secure-store (or AsyncStorage) as the backend.
+ * Desktop/web can skip this — localStorage works natively.
+ */
+export function setAuthStorage(storage: AuthStorage): void {
+  authStorage = storage;
+  // Reset singleton so next call picks up the new storage
+  client = null;
+}
 
 /**
  * Returns a singleton Supabase client.
@@ -18,7 +41,11 @@ export function getSupabaseClient(): SupabaseClient {
     return client;
   }
 
-  client = createClient(url, key);
+  client = createClient(url, key, {
+    auth: {
+      ...(authStorage ? { storage: authStorage } : {}),
+    },
+  });
   return client;
 }
 
