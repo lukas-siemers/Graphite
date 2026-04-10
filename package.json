@@ -25,7 +25,6 @@
   },
   "scripts": {
     "mobile": "yarn workspace @graphite/mobile start",
-    "postinstall": "node scripts/patch-rn-turbomodule.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
