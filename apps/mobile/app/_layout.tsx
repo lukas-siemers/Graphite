@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Platform, View, Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -42,7 +42,44 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
 }
 
+/**
+ * Diagnostic build — renders a bright visible screen immediately to confirm
+ * the JS bundle loads and React can render. Bypasses AuthGate, Supabase,
+ * and Expo Router to isolate the black screen issue.
+ *
+ * TODO: Remove this diagnostic after confirming the production build works.
+ */
 export default function RootLayout() {
+  const [phase, setPhase] = useState('mount');
+
+  useEffect(() => {
+    setPhase('effect');
+    // After 2s, try rendering the real app
+    const timer = setTimeout(() => setPhase('app'), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Phase 1: Immediate render — proves JS loaded and React works
+  if (phase === 'mount' || phase === 'effect') {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FF0000', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 32, fontWeight: '900', color: '#FFFFFF' }}>
+          BUILD 32 - {phase.toUpperCase()}
+        </Text>
+        <Text style={{ fontSize: 16, color: '#FFFFFF', marginTop: 12 }}>
+          If you see this, JS bundle loaded OK
+        </Text>
+        <Text style={{ fontSize: 14, color: '#FFFFFF', marginTop: 8 }}>
+          Platform: {Platform.OS} | Arch: {typeof global?.HermesInternal !== 'undefined' ? 'Hermes' : 'JSC'}
+        </Text>
+        <Text style={{ fontSize: 14, color: '#FFFFFF', marginTop: 4 }}>
+          NewArch: {typeof global?._IS_FABRIC !== 'undefined' ? 'YES' : 'UNKNOWN'}
+        </Text>
+      </View>
+    );
+  }
+
+  // Phase 2: Real app
   return (
     <ErrorBoundary>
       <StatusBar style="light" backgroundColor="transparent" translucent />
