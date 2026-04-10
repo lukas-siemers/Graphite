@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTestDb } from '../test-utils';
+import { ALL_MIGRATIONS } from '../schema';
+import { runMigrations } from '../migrations';
 
 describe('schema migrations', () => {
   let db: Database.Database;
@@ -14,6 +16,26 @@ describe('schema migrations', () => {
     // Query sqlite_master as a sanity check.
     const result = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'").get() as { count: number };
     expect(result.count).toBeGreaterThan(0);
+  });
+
+  it('does not rerun existing ALTER migrations when legacy user_version is 0', async () => {
+    const legacyDb = createTestDb();
+    const expoDb = {
+      execAsync: async (sql: string) => {
+        legacyDb.exec(sql);
+      },
+      getAllAsync: async <T = unknown>(sql: string): Promise<T[]> => {
+        return legacyDb.prepare(sql).all() as T[];
+      },
+      getFirstAsync: async <T = unknown>(sql: string): Promise<T | null> => {
+        return (legacyDb.prepare(sql).get() as T) ?? null;
+      },
+    };
+
+    legacyDb.pragma('user_version = 0');
+
+    await expect(runMigrations(expoDb as any)).resolves.toBeUndefined();
+    expect(legacyDb.pragma('user_version', { simple: true })).toBe(ALL_MIGRATIONS.length);
   });
 
   it('notebooks table exists with correct columns: id, name, is_dirty, created_at, updated_at, synced_at, sort_order', () => {

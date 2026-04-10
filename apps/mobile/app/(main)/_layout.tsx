@@ -231,6 +231,7 @@ export default function MainLayout() {
   const { width } = useWindowDimensions();
   const isIPad = width >= 768;
   const [dbReady, setDbReady] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
   // null = loading, false = show onboarding, true = skip
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -257,8 +258,11 @@ export default function MainLayout() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
     initDatabase()
       .then(async (db) => {
+        if (!mounted) return;
         // Check onboarding flag
         const onboardingFlag = await getSetting(db, 'onboarding_completed');
         if (onboardingFlag !== '1') {
@@ -271,7 +275,15 @@ export default function MainLayout() {
         await loadAppData(db);
         setDbReady(true);
       })
-      .catch(console.error);
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        setDbError(error instanceof Error ? error.message : String(error));
+        setDbReady(true);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
@@ -321,14 +333,19 @@ export default function MainLayout() {
     await loadAppData(db);
   }
 
-  if (!dbReady) {
+  if (!dbReady || dbError) {
     return (
       <View
         style={{ flex: 1, backgroundColor: tokens.bgBase, alignItems: 'center', justifyContent: 'center' }}
       >
         <Text style={{ fontSize: 18, fontWeight: '700', color: tokens.textPrimary, letterSpacing: -0.5 }}>
-          Graphite
+          {dbError ? 'Graphite could not open your local notebook' : 'Graphite'}
         </Text>
+        {dbError && (
+          <Text style={{ marginTop: 12, paddingHorizontal: 24, textAlign: 'center', fontSize: 12, color: tokens.textMuted }}>
+            {dbError}
+          </Text>
+        )}
       </View>
     );
   }

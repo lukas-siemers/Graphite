@@ -1,21 +1,85 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { ALL_MIGRATIONS } from './schema';
 
+async function tableHasColumn(
+  db: SQLiteDatabase,
+  tableName: string,
+  columnName: string,
+): Promise<boolean> {
+  const escapedTableName = tableName.replace(/'/g, "''");
+  const columns = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info('${escapedTableName}')`,
+  );
+  return columns.some((column) => column.name === columnName);
+}
+
+async function applyMigration(db: SQLiteDatabase, sql: string): Promise<void> {
+  if (
+    sql === 'ALTER TABLE notes ADD COLUMN canvas_json TEXT;' &&
+    (await tableHasColumn(db, 'notes', 'canvas_json'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE notebooks ADD COLUMN sort_order INTEGER DEFAULT 0;' &&
+    (await tableHasColumn(db, 'notebooks', 'sort_order'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0;' &&
+    (await tableHasColumn(db, 'folders', 'sort_order'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0;' &&
+    (await tableHasColumn(db, 'notes', 'sort_order'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE notebooks ADD COLUMN is_dirty INTEGER DEFAULT 0;' &&
+    (await tableHasColumn(db, 'notebooks', 'is_dirty'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE folders ADD COLUMN is_dirty INTEGER DEFAULT 0;' &&
+    (await tableHasColumn(db, 'folders', 'is_dirty'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE folders ADD COLUMN synced_at INTEGER;' &&
+    (await tableHasColumn(db, 'folders', 'synced_at'))
+  ) {
+    return;
+  }
+
+  await db.execAsync(sql);
+}
+
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL;');
   await db.execAsync('PRAGMA foreign_keys = ON;');
 
-  // Track which migrations have already been applied via PRAGMA user_version.
-  // Each migration increments the version by 1. On subsequent launches, only
-  // NEW migrations (index >= current version) are executed, avoiding the
-  // "duplicate column name" crash from re-running ALTER TABLE statements.
+  // Older TestFlight builds applied migrations before user_version tracking
+  // existed. Those installs can have the latest columns while still reporting
+  // version 0, so ALTER migrations must be idempotent.
   const versionRow = await db.getFirstAsync<{ user_version: number }>(
     'PRAGMA user_version',
   );
   const currentVersion = versionRow?.user_version ?? 0;
 
   for (let i = currentVersion; i < ALL_MIGRATIONS.length; i++) {
-    await db.execAsync(ALL_MIGRATIONS[i]);
+    await applyMigration(db, ALL_MIGRATIONS[i]);
   }
 
   // Stamp the new version so the next launch skips these migrations.
