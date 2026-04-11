@@ -45,7 +45,7 @@ function loadCanvasRenderer(): CanvasRendererComponent | null {
   }
 
   try {
-    const editorModule = require('@graphite/editor') as {
+    const editorModule = require('../../../../packages/editor/src/CanvasRenderer') as {
       CanvasRenderer?: CanvasRendererComponent;
     };
     cachedCanvasRenderer = editorModule.CanvasRenderer ?? null;
@@ -471,6 +471,9 @@ export default function Editor() {
               </Text>
               <Text style={{ marginTop: 4, fontSize: 12, color: tokens.textMuted }}>
                 Graphite switched to plain text so the app can keep running.
+              </Text>
+              <Text style={{ marginTop: 6, fontSize: 11, color: tokens.textHint }}>
+                {advancedEditorError}
               </Text>
             </View>
           )}
