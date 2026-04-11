@@ -282,46 +282,57 @@ export function CanvasRenderer({
           />
         </View>
 
-        {/* Ink layer — absolutely positioned ON TOP of the content.
-            Pointer events are disabled unless we're in ink mode so
-            keyboard text entry still reaches the WebView underneath.
-            This is a sibling of the text layer, NOT a wrapper — a
-            wrapper with responder handlers breaks WKWebView native
-            touches (see commit b2a05a4).
-
-            SkiaCanvas mount is guarded: we only render the Skia
-            subview when we actually need it (canDraw OR there is
-            something to draw). On iOS Fabric / new arch, react-native
-            -skia's native view does not reliably inherit the parent
-            View's pointerEvents='none' setting, which means a mounted
-            SkiaCanvas overlay on top of the WebView can silently
-            intercept taps in production builds even though it works
-            in Expo Go where Skia is stubbed out entirely (see
-            isExpoGo check in InkLayerView). The conditional mount
-            keeps typing alive on empty notes by simply never mounting
-            the Skia native view in the common case. */}
-        <View
-          style={StyleSheet.absoluteFill}
-          pointerEvents={canDraw ? 'auto' : 'none'}
-          onStartShouldSetResponder={() => canDraw}
-          onMoveShouldSetResponder={() => canDraw}
-          onResponderGrant={handleInkStart}
-          onResponderMove={handleInkMove}
-          onResponderRelease={finishInkStroke}
-          onResponderTerminate={finishInkStroke}
-          onResponderTerminationRequest={() => false}
-        >
-          {(canDraw ||
-            canvasDoc.inkLayer.strokes.length > 0 ||
-            activeStroke) && (
+        {/* Ink overlay — three mutually exclusive mount states.
+            Production regression investigation (builds 46-49) found
+            that a perpetually-mounted absoluteFill View carrying
+            responder handlers on top of the WebView steals touches
+            from WKWebView on iOS Fabric / New Architecture, even
+            when pointerEvents='none' and the responder callbacks
+            return false. RCTSurfaceTouchHandler still installs a
+            gesture recognizer at the View level whenever responder
+            methods are attached, and that recognizer preempts
+            WKWebView's internal first-responder tap routing.
+            Three agents (SWE-1, SWE-2, QA) independently identified
+            this as the cause of "body area black, tapping does
+            nothing" on production TestFlight.
+            Fix:
+              1. canDraw  -> wrapper with responders AND Skia child
+              2. !canDraw && strokes.length > 0  ->  pointerEvents=
+                 'none' wrapper with Skia child and NO responder
+                 handlers. Strokes still render visually; WebView
+                 underneath keeps uncontested touch delivery.
+              3. !canDraw && strokes.length === 0  ->  nothing
+                 mounted at all. WebView sibling is the only thing
+                 above the content layer. Matches Expo Go's tree. */}
+        {canDraw ? (
+          <View
+            style={StyleSheet.absoluteFill}
+            pointerEvents="auto"
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={handleInkStart}
+            onResponderMove={handleInkMove}
+            onResponderRelease={finishInkStroke}
+            onResponderTerminate={finishInkStroke}
+            onResponderTerminationRequest={() => false}
+          >
             <InkLayerView
               inkLayer={canvasDoc.inkLayer}
               width={width}
               height={contentHeight}
               activeStroke={activeStroke}
             />
-          )}
-        </View>
+          </View>
+        ) : canvasDoc.inkLayer.strokes.length > 0 ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <InkLayerView
+              inkLayer={canvasDoc.inkLayer}
+              width={width}
+              height={contentHeight}
+              activeStroke={null}
+            />
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
