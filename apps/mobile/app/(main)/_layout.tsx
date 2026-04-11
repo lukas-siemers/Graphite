@@ -1,362 +1,123 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  initDatabase,
-  getDatabase,
-  getNotebooks,
-  getFolders,
-  getNotes,
-  createNotebook,
-  createFolder,
-  createNote,
-  updateNote,
-  getSetting,
-  setSetting,
-  seedSampleNotebook,
-} from '@graphite/db';
-import { tokens } from '@graphite/ui';
-import { useNotebookStore } from '../../stores/use-notebook-store';
-import { useNoteStore } from '../../stores/use-note-store';
-import { useFolderStore } from '../../stores/use-folder-store';
-import { useEditorStore } from '../../stores/use-editor-store';
-import { useSyncEngine } from '../../hooks/use-sync-engine';
-import { getCurrentSession } from '../../components/auth/AuthGate';
-import Sidebar from '../../components/sidebar/Sidebar';
-import NoteList from '../../components/note-list/NoteList';
-import Editor from '../../components/editor/Editor';
-import { FormattingToolbar } from '../../components/editor/FormattingToolbar';
-import WelcomeScreen from '../../components/onboarding/WelcomeScreen';
+import { Text, View } from 'react-native';
 
-type PhoneScreen = 'sidebar' | 'list' | 'editor';
+type MainShellComponent = () => React.JSX.Element;
 
-function PhoneLayout() {
-  const [screen, setScreen] = useState<PhoneScreen>('sidebar');
-  const activeNoteId = useNoteStore((s) => s.activeNoteId);
-  const setActiveNote = useNoteStore((s) => s.setActiveNote);
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
-
-  // Navigate to editor when a note is selected.
-  // Handles both the normal path (note picked from list → 'list' screen) and
-  // the new-note path (note created from sidebar → 'sidebar' screen).
-  useEffect(() => {
-    if (activeNoteId && (screen === 'list' || screen === 'sidebar')) {
-      setScreen('editor');
-    }
-  }, [activeNoteId]);
-
-  function goBack() {
-    if (screen === 'editor') {
-      setActiveNote(null);
-      setScreen('list');
-    } else if (screen === 'list') {
-      setScreen('sidebar');
-    }
+class MainRouteErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
   }
 
-  const showBack = screen !== 'sidebar';
-  const headerTitle =
-    screen === 'sidebar' ? 'Graphite' : screen === 'list' ? 'Notes' : 'Editor';
+  static getDerivedStateFromError(error: Error) {
+    return {
+      error: (error?.message || 'Unknown error') + (error?.stack ? '\n' + error.stack : ''),
+    };
+  }
 
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
-      {/* Phone header */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          height: 44,
-          paddingHorizontal: 16,
-          backgroundColor: tokens.bgBase,
-          borderBottomWidth: 1,
-          borderBottomColor: tokens.border,
-        }}
-      >
-        {showBack && (
-          <Pressable onPress={goBack} style={{ marginRight: 12 }}>
-            <Text style={{ fontSize: 14, color: tokens.accent, fontWeight: '600' }}>
-              {'< Back'}
-            </Text>
-          </Pressable>
-        )}
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: '700',
-            color: tokens.textPrimary,
-            letterSpacing: -0.3,
-          }}
-        >
-          {headerTitle}
-        </Text>
-      </View>
-
-      {/* Screen content */}
-      <View style={{ flex: 1 }}>
-        {screen === 'sidebar' && (
-          <View style={{ flex: 1 }}>
-            <PhoneSidebarWrapper onNavigate={() => setScreen('list')} />
-          </View>
-        )}
-        {screen === 'list' && (
-          <View style={{ flex: 1 }}>
-            <NoteList />
-          </View>
-        )}
-        {screen === 'editor' && (
-          <View style={{ flex: 1, position: 'relative' }}>
-            <Editor />
-            {/* FAB — toggles ink/scroll input mode; iPad/native only */}
-            {Platform.OS !== 'web' && <Pressable
-              onPress={toggleInputMode}
-              style={({ pressed }) => ({
-                position: 'absolute',
-                bottom: 24,
-                right: 24,
-                width: 48,
-                height: 48,
-                borderRadius: 0,
-                backgroundColor: pressed ? tokens.accentPressed : (inputMode === 'ink' ? tokens.accentPressed : tokens.accent),
-                alignItems: 'center',
-                justifyContent: 'center',
-              })}
-            >
-              <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-            </Pressable>}
-          </View>
-        )}
-      </View>
-    </SafeAreaView>
-  );
-}
-
-function IPadLayout() {
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
-      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
-        {/* Sidebar — collapses via width */}
-        <View
-          style={{
-            width: sidebarVisible ? 260 : 0,
-            overflow: 'hidden',
-            backgroundColor: tokens.bgSidebar,
-            borderRightWidth: sidebarVisible ? 1 : 0,
-            borderRightColor: tokens.border,
-          }}
-        >
-          <Sidebar />
-        </View>
-
-        {/* Editor column */}
-        <View style={{ flex: 1, flexDirection: 'column', backgroundColor: tokens.bgBase }}>
-          {/* Top nav bar */}
-          <View
-            style={{
-              height: 52,
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: tokens.bgBase,
-              borderBottomWidth: 1,
-              borderBottomColor: tokens.border,
-              paddingLeft: 8,
-            }}
-          >
-            {/* Sidebar toggle */}
-            <Pressable
-              onPress={() => setSidebarVisible((v) => !v)}
-              style={{
-                width: 36,
-                height: 36,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginRight: 4,
-              }}
-            >
-              <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
-            </Pressable>
-
-            {/* Formatting toolbar */}
-            <FormattingToolbar
-              onToggleDrawing={toggleInputMode}
-              drawingOpen={inputMode === 'ink'}
-            />
-          </View>
-
-          {/* Editor area */}
-          <View style={{ flex: 1, position: 'relative' }}>
-            <Editor />
-            {/* FAB — toggles ink/scroll input mode; iPad/native only */}
-            {Platform.OS !== 'web' && <Pressable
-              onPress={toggleInputMode}
-              style={({ pressed }) => ({
-                position: 'absolute',
-                bottom: 24,
-                right: 24,
-                width: 48,
-                height: 48,
-                borderRadius: 0,
-                backgroundColor: pressed ? tokens.accentPressed : (inputMode === 'ink' ? tokens.accentPressed : tokens.accent),
-                alignItems: 'center',
-                justifyContent: 'center',
-              })}
-            >
-              <Text style={{ fontSize: 22, color: '#4D2600' }}>✏</Text>
-            </Pressable>}
-          </View>
-        </View>
-      </View>
-    </SafeAreaView>
-  );
-}
-
-// Wraps Sidebar to trigger navigation on notebook/folder select
-function PhoneSidebarWrapper({ onNavigate }: { onNavigate: () => void }) {
-  const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
-
-  useEffect(() => {
-    if (activeNotebookId) {
-      onNavigate();
+  render() {
+    if (this.state.error) {
+      return <StartupProbeScreen stage="main-route-render" error={this.state.error} />;
     }
-  }, [activeNotebookId]);
 
-  return <Sidebar />;
+    return this.props.children;
+  }
+}
+
+function StartupProbeScreen({
+  stage,
+  detail,
+  error,
+}: {
+  stage: string;
+  detail?: string;
+  error?: string | null;
+}) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: '#131313',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+      }}
+    >
+      <Text style={{ color: '#F28500', fontSize: 20, fontWeight: '700' }}>
+        Graphite startup probe
+      </Text>
+      <Text style={{ color: '#DCDDDE', fontSize: 13, marginTop: 16, textAlign: 'center' }}>
+        Stage: {stage}
+      </Text>
+      {detail && (
+        <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+          {detail}
+        </Text>
+      )}
+      {error && (
+        <Text style={{ color: '#FCA5A5', fontSize: 12, marginTop: 16, textAlign: 'center' }}>
+          {error}
+        </Text>
+      )}
+    </View>
+  );
 }
 
 export default function MainLayout() {
-  const { width } = useWindowDimensions();
-  const isIPad = width >= 768;
-  const [dbReady, setDbReady] = useState(false);
-  const [dbError, setDbError] = useState<string | null>(null);
-  // null = loading, false = show onboarding, true = skip
-  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-
-  const setNotebooks = useNotebookStore((s) => s.setNotebooks);
-  const setActiveNotebook = useNotebookStore((s) => s.setActiveNotebook);
-  const setFolders = useFolderStore((s) => s.setFolders);
-  const setActiveFolder = useFolderStore((s) => s.setActiveFolder);
-  const setNotes = useNoteStore((s) => s.setNotes);
-  const setActiveNote = useNoteStore((s) => s.setActiveNote);
-
-  // Start the sync engine with the authenticated user's ID
-  const { syncState } = useSyncEngine(
-    userId,
-    process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
-  );
+  const [stage, setStage] = useState('main-route-mounted');
+  const [error, setError] = useState<string | null>(null);
+  const [MainShell, setMainShell] = useState<MainShellComponent | null>(null);
 
   useEffect(() => {
-    // Get the current user ID from the auth session
-    getCurrentSession().then((session) => {
-      setUserId(session?.user?.id ?? null);
-    });
-  }, []);
+    let active = true;
 
-  useEffect(() => {
-    let mounted = true;
+    async function boot() {
+      try {
+        setStage('main-shell-import');
+        const mainShellModule = require('../../components/app/MainAppShell') as {
+          default?: MainShellComponent;
+        };
 
-    initDatabase()
-      .then(async (db) => {
-        if (!mounted) return;
-        // Check onboarding flag
-        const onboardingFlag = await getSetting(db, 'onboarding_completed');
-        if (onboardingFlag !== '1') {
-          setOnboardingDone(false);
-          setDbReady(true);
-          return;
+        if (!mainShellModule.default) {
+          throw new Error('MainAppShell default export was not available.');
         }
 
-        setOnboardingDone(true);
-        await loadAppData(db);
-        setDbReady(true);
-      })
-      .catch((error: unknown) => {
-        if (!mounted) return;
-        setDbError(error instanceof Error ? error.message : String(error));
-        setDbReady(true);
-      });
+        if (!active) return;
+        setMainShell(() => mainShellModule.default as MainShellComponent);
+        setStage('main-shell-ready');
+      } catch (caught) {
+        if (!active) return;
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setStage('main-shell-failed');
+      }
+    }
+
+    void boot();
 
     return () => {
-      mounted = false;
+      active = false;
     };
   }, []);
 
-  async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
-    let notebooks = await getNotebooks(db);
-
-    if (notebooks.length === 0) {
-      // Seed default data
-      const nb = await createNotebook(db, 'My Notebook');
-      const folder = await createFolder(db, nb.id, 'General');
-      const note = await createNote(db, nb.id, folder.id);
-      await updateNote(db, note.id, {
-        title: 'Welcome to Graphite',
-        body: '# Welcome\n\nStart writing your notes here.',
-      });
-
-      notebooks = await getNotebooks(db);
-      const folders = await getFolders(db, nb.id);
-      const notes = await getNotes(db, nb.id, folder.id);
-
-      setNotebooks(notebooks);
-      setFolders(folders);
-      setNotes(notes);
-      setActiveNotebook(nb.id);
-      setActiveFolder(folder.id);
-      if (notes.length > 0) setActiveNote(notes[0].id);
-    } else {
-      // Load existing data
-      const nb = notebooks[0];
-      const folders = await getFolders(db, nb.id);
-      const activeFolderId = folders.length > 0 ? folders[0].id : undefined;
-      const notes = await getNotes(db, nb.id, activeFolderId ?? null);
-
-      setNotebooks(notebooks);
-      setFolders(folders);
-      setNotes(notes);
-      setActiveNotebook(nb.id);
-      if (activeFolderId) setActiveFolder(activeFolderId);
-      if (notes.length > 0) setActiveNote(notes[0].id);
-    }
+  if (error) {
+    return <StartupProbeScreen stage={stage} error={error} />;
   }
 
-  async function handleOnboardingComplete() {
-    const db = getDatabase();
-    await seedSampleNotebook(db);
-    await setSetting(db, 'onboarding_completed', '1');
-    setOnboardingDone(true);
-    await loadAppData(db);
-  }
-
-  if (!dbReady || dbError) {
+  if (!MainShell) {
     return (
-      <View
-        style={{ flex: 1, backgroundColor: tokens.bgBase, alignItems: 'center', justifyContent: 'center' }}
-      >
-        <Text style={{ fontSize: 18, fontWeight: '700', color: tokens.textPrimary, letterSpacing: -0.5 }}>
-          {dbError ? 'Graphite could not open your local notebook' : 'Graphite'}
-        </Text>
-        {dbError && (
-          <Text style={{ marginTop: 12, paddingHorizontal: 24, textAlign: 'center', fontSize: 12, color: tokens.textMuted }}>
-            {dbError}
-          </Text>
-        )}
-      </View>
+      <StartupProbeScreen
+        stage={stage}
+        detail="The route module is alive. Loading the main app shell next."
+      />
     );
   }
 
-  if (onboardingDone === false) {
-    return <WelcomeScreen onComplete={handleOnboardingComplete} />;
-  }
-
-  if (isIPad) {
-    return <IPadLayout />;
-  }
-
-  return <PhoneLayout />;
+  return (
+    <MainRouteErrorBoundary>
+      <MainShell />
+    </MainRouteErrorBoundary>
+  );
 }

@@ -12,7 +12,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
-import { CanvasRenderer } from '@graphite/editor';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -23,6 +22,49 @@ import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
 
 type SaveStatus = 'Saved' | 'Saving...';
+
+interface CanvasRendererProps {
+  canvasDoc: CanvasDocument;
+  width?: number;
+  onInkChange?: (inkLayer: CanvasDocument['inkLayer']) => void;
+  onTextChange?: (text: string) => void;
+  inputMode?: 'ink' | 'scroll';
+  pendingCommand?: string | null;
+  onCommandApplied?: () => void;
+  onActiveFormatsChange?: (formats: any[]) => void;
+}
+
+type CanvasRendererComponent = (props: CanvasRendererProps) => JSX.Element;
+
+let cachedCanvasRenderer: CanvasRendererComponent | null | undefined;
+let cachedCanvasRendererError: string | null = null;
+
+function loadCanvasRenderer(): CanvasRendererComponent | null {
+  if (typeof cachedCanvasRenderer !== 'undefined') {
+    return cachedCanvasRenderer;
+  }
+
+  try {
+    const editorModule = require('@graphite/editor') as {
+      CanvasRenderer?: CanvasRendererComponent;
+    };
+    cachedCanvasRenderer = editorModule.CanvasRenderer ?? null;
+
+    if (!cachedCanvasRenderer) {
+      cachedCanvasRendererError = 'Canvas renderer export was not available.';
+    }
+  } catch (error) {
+    cachedCanvasRenderer = null;
+    cachedCanvasRendererError =
+      error instanceof Error ? error.message : String(error);
+  }
+
+  return cachedCanvasRenderer;
+}
+
+function getCanvasRendererError(): string | null {
+  return cachedCanvasRendererError;
+}
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -183,6 +225,19 @@ export default function Editor() {
     }, 500);
   }
 
+  function handleFallbackBodyChange(text: string) {
+    setLocalBody(text);
+    setSaveStatus('Saving...');
+    if (bodyDebounce.current) clearTimeout(bodyDebounce.current);
+    bodyDebounce.current = setTimeout(() => {
+      if (activeCanvasDoc) {
+        void handleCanvasTextChange(text);
+        return;
+      }
+      persistSave({ body: text });
+    }, 500);
+  }
+
   const activeNotebook = notebooks.find((n) => n.id === activeNotebookId);
   const activeFolder = folders.find((f) => f.id === activeFolderId);
 
@@ -204,6 +259,15 @@ export default function Editor() {
 
   // Canvas column width: full width minus sidebar/padding on iPad, full width on phone
   const canvasWidth = Math.min(windowWidth, 680);
+  const shouldAttemptAdvancedEditor =
+    activeCanvasDoc !== null &&
+    (Platform.OS === 'web' || Boolean((globalThis as { __DEV__?: boolean }).__DEV__));
+  const AdvancedCanvasRenderer = shouldAttemptAdvancedEditor ? loadCanvasRenderer() : null;
+  const advancedEditorError = activeCanvasDoc
+    ? shouldAttemptAdvancedEditor
+      ? getCanvasRendererError()
+      : 'Advanced editor disabled for native production startup stability.'
+    : null;
 
   if (!activeNote) {
     return (
@@ -327,10 +391,10 @@ export default function Editor() {
       )}
 
       {/* Content area — live-preview canvas is always on */}
-      {activeCanvasDoc !== null ? (
+      {activeCanvasDoc !== null && AdvancedCanvasRenderer ? (
         /* ── Primary surface — always open for writing ── */
         <View style={{ flex: 1 }}>
-          <CanvasRenderer
+          <AdvancedCanvasRenderer
             canvasDoc={activeCanvasDoc}
             width={canvasWidth}
             onTextChange={handleCanvasTextChange}
@@ -349,26 +413,47 @@ export default function Editor() {
         </View>
       ) : (
         /* ── Fallback while canvas migration runs ── */
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          <TextInput
-            value={localBody}
-            onChangeText={handleBodyChange}
-            multiline
-            placeholder="Start writing..."
-            placeholderTextColor={tokens.textHint}
-            style={{
-              fontSize: 16,
-              lineHeight: 24,
-              color: tokens.textBody,
-              backgroundColor: 'transparent',
-              borderWidth: 0,
-              padding: 24,
-              minHeight: 300,
-              textAlignVertical: 'top',
-              ...(Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none', resize: 'none', boxShadow: 'none' } as any : {}),
-            }}
-          />
-        </ScrollView>
+        <View style={{ flex: 1 }}>
+          {advancedEditorError && (
+            <View
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 10,
+                borderBottomWidth: 1,
+                borderBottomColor: tokens.border,
+                backgroundColor: tokens.bgHover,
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: tokens.accentLight }}>
+                Advanced editor unavailable in this build
+              </Text>
+              <Text style={{ marginTop: 4, fontSize: 12, color: tokens.textMuted }}>
+                Graphite switched to plain text so the app can keep running.
+              </Text>
+            </View>
+          )}
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+            <TextInput
+              value={localBody}
+              onChangeText={advancedEditorError ? handleFallbackBodyChange : handleBodyChange}
+              multiline
+              placeholder="Start writing..."
+              placeholderTextColor={tokens.textHint}
+              editable={inputMode !== 'ink'}
+              style={{
+                fontSize: 16,
+                lineHeight: 24,
+                color: tokens.textBody,
+                backgroundColor: 'transparent',
+                borderWidth: 0,
+                padding: 24,
+                minHeight: 300,
+                textAlignVertical: 'top',
+                ...(Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none', resize: 'none', boxShadow: 'none' } as any : {}),
+              }}
+            />
+          </ScrollView>
+        </View>
       )}
 
       {/* Status bar */}
