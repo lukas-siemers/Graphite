@@ -96,6 +96,9 @@ export default function Editor() {
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
+  const [AdvancedCanvasRenderer, setAdvancedCanvasRenderer] =
+    useState<CanvasRendererComponent | null>(null);
+  const [advancedEditorError, setAdvancedEditorError] = useState<string | null>(null);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -259,15 +262,41 @@ export default function Editor() {
 
   // Canvas column width: full width minus sidebar/padding on iPad, full width on phone
   const canvasWidth = Math.min(windowWidth, 680);
-  const shouldAttemptAdvancedEditor =
+
+  useEffect(() => {
+    if (!activeCanvasDoc) {
+      setAdvancedCanvasRenderer(null);
+      setAdvancedEditorError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const renderer = loadCanvasRenderer();
+      if (cancelled) return;
+
+      if (renderer) {
+        setAdvancedCanvasRenderer(() => renderer);
+        setAdvancedEditorError(null);
+        return;
+      }
+
+      setAdvancedCanvasRenderer(null);
+      setAdvancedEditorError(
+        getCanvasRendererError() ?? 'The advanced editor could not be loaded.',
+      );
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeCanvasDoc]);
+
+  const loadingAdvancedEditor =
     activeCanvasDoc !== null &&
-    (Platform.OS === 'web' || Boolean((globalThis as { __DEV__?: boolean }).__DEV__));
-  const AdvancedCanvasRenderer = shouldAttemptAdvancedEditor ? loadCanvasRenderer() : null;
-  const advancedEditorError = activeCanvasDoc
-    ? shouldAttemptAdvancedEditor
-      ? getCanvasRendererError()
-      : 'Advanced editor disabled for native production startup stability.'
-    : null;
+    AdvancedCanvasRenderer === null &&
+    advancedEditorError === null;
 
   if (!activeNote) {
     return (
@@ -411,6 +440,19 @@ export default function Editor() {
             onActiveFormatsChange={setActiveFormats}
           />
         </View>
+      ) : loadingAdvancedEditor ? (
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: tokens.bgBase,
+          }}
+        >
+          <Text style={{ fontSize: 12, color: tokens.textMuted }}>
+            Loading editor...
+          </Text>
+        </View>
       ) : (
         /* ── Fallback while canvas migration runs ── */
         <View style={{ flex: 1 }}>
@@ -435,7 +477,7 @@ export default function Editor() {
           <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
             <TextInput
               value={localBody}
-              onChangeText={advancedEditorError ? handleFallbackBodyChange : handleBodyChange}
+              onChangeText={activeCanvasDoc ? handleFallbackBodyChange : handleBodyChange}
               multiline
               placeholder="Start writing..."
               placeholderTextColor={tokens.textHint}
