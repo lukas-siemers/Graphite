@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
-import { nanoid } from 'nanoid';
+// nanoid/non-secure: see CanvasRenderer.tsx — Hermes has no crypto global.
+import { nanoid } from 'nanoid/non-secure';
 import { createEmptyCanvas, getDatabase } from '@graphite/db';
 import type { Note, InkStroke } from '@graphite/db';
 import { useNoteStore } from '../stores/use-note-store';
