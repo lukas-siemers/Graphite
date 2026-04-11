@@ -145,6 +145,10 @@ export default function Editor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    setInputMode('scroll');
+  }, [activeNoteId, setInputMode]);
+
   // Sync local state when active note changes
   useEffect(() => {
     if (activeNote) {
@@ -316,22 +320,7 @@ export default function Editor() {
   }
 
   return (
-    <View
-      style={{ flex: 1, backgroundColor: tokens.bgBase }}
-      onStartShouldSetResponder={(evt) => {
-        const native = evt.nativeEvent as any;
-        const isStylus = native.touchType === 2 || native.touchType === 'stylus';
-        if (isStylus) {
-          setInputMode('ink');
-        } else {
-          const majorRadius: number = native.majorRadius ?? 0;
-          if (!(inputMode === 'ink' && majorRadius > 20)) {
-            setInputMode('scroll');
-          }
-        }
-        return false;
-      }}
-    >
+    <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       {/* Title area */}
       <View
         style={{

@@ -1,15 +1,5 @@
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Platform } from 'react-native';
-
-// Gesture handler is native-only — on web the ink layer is a no-op anyway
-// (Skia is stubbed) so we skip it entirely to avoid DOM style errors.
-let Gesture: any = { Pan: () => ({ runOnJS: () => ({ enabled: () => ({ onStart: () => ({ onUpdate: () => ({ onEnd: () => ({}) }) }) }) }) }) };
-let GestureDetector: any = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-if (Platform.OS !== 'web') {
-  const gh = require('react-native-gesture-handler');
-  Gesture = gh.Gesture;
-  GestureDetector = gh.GestureDetector;
-}
 import Constants from 'expo-constants';
 import { nanoid } from 'nanoid';
 import { tokens } from '@graphite/ui';
@@ -62,17 +52,22 @@ interface InkLayerViewProps {
   inkLayer: InkLayer;
   width: number;
   height: number;
+  activeStroke?: InkStroke | null;
 }
 
-function InkLayerView({ inkLayer, width, height }: InkLayerViewProps) {
+function InkLayerView({ inkLayer, width, height, activeStroke = null }: InkLayerViewProps) {
   if (Platform.OS === 'web' || isExpoGo || !SkiaCanvas || !Path || !Skia) {
     // Skia is native-only — no ink layer on web or Expo Go
     return null;
   }
 
+  const strokes = activeStroke
+    ? inkLayer.strokes.concat(activeStroke)
+    : inkLayer.strokes;
+
   return (
     <SkiaCanvas style={[StyleSheet.absoluteFill, { width, height }]}>
-      {inkLayer.strokes.map((stroke) => {
+      {strokes.map((stroke) => {
         if (stroke.points.length < 2) return null;
 
         const svgParts: string[] = [];
@@ -130,60 +125,71 @@ export function CanvasRenderer({
   onActiveFormatsChange,
   autoFocusFirst = false,
 }: CanvasRendererProps) {
-  const scrollRef = useRef<ScrollView>(null);
-  const contentHeightRef = useRef<number>(600);
+  const [contentHeight, setContentHeight] = useState(600);
+  const [activeStroke, setActiveStroke] = useState<InkStroke | null>(null);
+  const canDraw = inputMode === 'ink' && !readOnly && !!onInkChange;
 
-  // Active stroke being drawn — accumulated between pan start/change/end
-  const activeStrokeRef = useRef<InkStroke | null>(null);
+  function createStrokePoint(event: any): StrokePoint {
+    const native = event.nativeEvent;
+    const pressure =
+      typeof native.force === 'number' && native.force > 0
+        ? native.force
+        : typeof native.pressure === 'number' && native.pressure > 0
+          ? native.pressure
+          : 0.5;
 
-  /**
-   * PanGesture captures Apple Pencil / finger strokes when inputMode === 'ink'.
-   */
-  const inkGesture = Gesture.Pan()
-    .runOnJS(true)
-    .enabled(inputMode === 'ink' && !readOnly && !!onInkChange)
-    .onStart((e: any) => {
-      if (!onInkChange) return;
-      const pressure: number = typeof e.force === 'number' ? e.force : 0.5;
-      const point: StrokePoint = {
-        x: e.x,
-        y: e.y,
-        pressure,
-        tilt: 0,
-        timestamp: Date.now(),
-      };
-      activeStrokeRef.current = {
-        id: nanoid(),
-        points: [point],
-        color: tokens.textPrimary,
-        width: 2,
-        opacity: 1.0,
-      };
-    })
-    .onUpdate((e: any) => {
-      if (!activeStrokeRef.current || !onInkChange) return;
-      const pressure: number = typeof e.force === 'number' ? e.force : 0.5;
-      const point: StrokePoint = {
-        x: e.x,
-        y: e.y,
-        pressure,
-        tilt: 0,
-        timestamp: Date.now(),
-      };
-      activeStrokeRef.current.points.push(point);
-    })
-    .onEnd(() => {
-      if (!activeStrokeRef.current || !onInkChange) return;
-      const completed = activeStrokeRef.current;
-      activeStrokeRef.current = null;
-      const updatedLayer: InkLayer = {
-        strokes: canvasDoc.inkLayer.strokes.concat(completed),
-      };
-      onInkChange(updatedLayer);
+    return {
+      x: native.locationX,
+      y: native.locationY,
+      pressure,
+      tilt: 0,
+      timestamp: Date.now(),
+    };
+  }
+
+  function handleInkStart(event: any) {
+    if (!canDraw) return;
+    setActiveStroke({
+      id: nanoid(),
+      points: [createStrokePoint(event)],
+      color: tokens.textPrimary,
+      width: 2,
+      opacity: 1,
     });
+  }
+
+  function handleInkMove(event: any) {
+    if (!canDraw) return;
+    setActiveStroke((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        points: current.points.concat(createStrokePoint(event)),
+      };
+    });
+  }
+
+  function finishInkStroke() {
+    if (!canDraw) {
+      setActiveStroke(null);
+      return;
+    }
+
+    setActiveStroke((current) => {
+      if (!current || current.points.length < 2) {
+        return null;
+      }
+
+      const updatedLayer: InkLayer = {
+        strokes: canvasDoc.inkLayer.strokes.concat(current),
+      };
+      onInkChange?.(updatedLayer);
+      return null;
+    });
+  }
 
   function handleLayout(event: { nativeEvent: { layout: { height: number } } }) {
-    contentHeightRef.current = event.nativeEvent.layout.height;
+    setContentHeight(event.nativeEvent.layout.height);
   }
 
   // ── Web path ─────────────────────────────────────────────────────────────
@@ -211,18 +217,8 @@ export function CanvasRenderer({
   // Same unified editor, plus the Skia ink layer rendered on top so Apple
   // Pencil strokes visually sit above the CodeMirror-rendered text.
   //
-  // GestureDetector installs a native UIPanGestureRecognizer even when
-  // disabled, which competes with the WebView's internal UIScrollView and
-  // prevents it from becoming first responder on tap. We only wrap with
-  // GestureDetector in ink mode; in scroll mode the gesture handler is
-  // absent so the WebView receives all touches cleanly.
-  //
-  // GestureHandlerRootView is already provided by Expo Router at the app
-  // root — nesting a second one can break touch delivery on iOS, so we
-  // use a plain View wrapper here instead.
   const scrollContent = (
     <ScrollView
-      ref={scrollRef}
       bounces={false}
       style={{ backgroundColor: tokens.bgBase }}
       contentContainerStyle={{ width }}
@@ -248,30 +244,25 @@ export function CanvasRenderer({
             keyboard text entry still reaches the WebView underneath. */}
         <View
           style={StyleSheet.absoluteFill}
-          pointerEvents={inputMode === 'ink' ? 'auto' : 'none'}
+          pointerEvents={canDraw ? 'auto' : 'none'}
+          onStartShouldSetResponder={() => canDraw}
+          onMoveShouldSetResponder={() => canDraw}
+          onResponderGrant={handleInkStart}
+          onResponderMove={handleInkMove}
+          onResponderRelease={finishInkStroke}
+          onResponderTerminate={finishInkStroke}
+          onResponderTerminationRequest={() => false}
         >
           <InkLayerView
             inkLayer={canvasDoc.inkLayer}
             width={width}
-            height={contentHeightRef.current}
+            height={contentHeight}
+            activeStroke={activeStroke}
           />
         </View>
       </View>
     </ScrollView>
   );
-
-  if (inputMode === 'ink') {
-    // GestureHandlerRootView is already provided by Expo Router at the app
-    // root. Nesting a second one crashes on iOS (duplicate gesture handler
-    // registry). Use a plain View wrapper instead.
-    return (
-      <View style={{ flex: 1 }}>
-        <GestureDetector gesture={inkGesture}>
-          {scrollContent}
-        </GestureDetector>
-      </View>
-    );
-  }
 
   return (
     <View style={{ flex: 1 }}>
