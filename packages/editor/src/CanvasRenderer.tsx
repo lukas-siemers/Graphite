@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { nanoid } from 'nanoid';
@@ -7,37 +7,6 @@ import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite
 import { LivePreviewInput } from './LivePreviewInput';
 import { strokeToOutlinePath } from './inkPath';
 import type { FormatCommand } from './types';
-
-// ---------------------------------------------------------------------------
-// Pointer-type detection
-//
-// iOS touch events include a `touchType` field that distinguishes finger
-// ('direct') from Apple Pencil ('stylus'). React Native surfaces this on
-// `event.nativeEvent` for both the TouchableResponder chain and the legacy
-// gesture responders, but the exact shape has varied across SDKs — historical
-// values have been the string 'stylus' or the numeric 2. We accept both.
-// ---------------------------------------------------------------------------
-const STYLUS_PALM_REJECT_MS = 500;
-
-function isStylusEvent(event: any): boolean {
-  const native = event?.nativeEvent;
-  if (!native) return false;
-
-  // Newer RN surfaces touchType directly on the nativeEvent for the primary
-  // touch; older RN attaches it to individual entries in `touches`. Check
-  // both so this is resilient across Expo SDK 54 and earlier runtimes.
-  const direct = native.touchType;
-  if (direct === 'stylus' || direct === 2) return true;
-
-  const touches = native.touches;
-  if (Array.isArray(touches) && touches.length > 0) {
-    const t = touches[0];
-    const touchType = t?.touchType;
-    if (touchType === 'stylus' || touchType === 2) return true;
-  }
-
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // Skia — dynamic import so the component works in Expo Go (no native module)
@@ -64,11 +33,7 @@ export interface CanvasRendererProps {
   onInkChange?: (inkLayer: InkLayer) => void;
   onTextChange?: (text: string) => void;
   readOnly?: boolean;
-  /**
-   * Legacy prop — no longer drives ink capture. The unified canvas decides
-   * per-touch based on pointer type (stylus vs finger). Accepted here only
-   * so existing call sites do not crash; will be removed in a later slice.
-   */
+  /** Controls whether the text layer accepts keyboard input */
   inputMode?: 'ink' | 'scroll';
   /** Format command dispatched from the toolbar — routed to the CodeMirror host */
   pendingCommand?: FormatCommand | null;
@@ -144,6 +109,18 @@ function InkLayerView({ inkLayer, width, height, activeStroke = null }: InkLayer
  *     inline formatting are all rendered by CodeMirror — no React Native
  *     segment parsing, no separate <CodeBlock> component.
  *   - Ink layer: Skia strokes overlaid on native, no-op on web.
+ *
+ * Gesture model (Slice 2.5):
+ *   Ink capture is gated by the manual `inputMode` toggle exposed on the
+ *   toolbar. This is a deliberate step back from the automatic pencil
+ *   detection that shipped in Slice 2 (build 46) — putting responder
+ *   handlers on a wrapper of the WebView starved WKWebView of native
+ *   touches and broke both finger text input AND Apple Pencil ink.
+ *
+ *   TODO(Slice 3): move automatic pencil-vs-finger detection INSIDE the
+ *   iframe via DOM Pointer Events (`pointerType === 'pen'`) and stream
+ *   pen coordinates out through the existing postMessage bridge. Manual
+ *   toggle goes away at that point.
  */
 export function CanvasRenderer({
   canvasDoc,
@@ -151,8 +128,7 @@ export function CanvasRenderer({
   onInkChange,
   onTextChange,
   readOnly = false,
-  // inputMode is accepted for backward-compat only — see prop comment above.
-  inputMode: _inputMode,
+  inputMode = 'scroll',
   pendingCommand,
   onCommandApplied,
   onActiveFormatsChange,
@@ -161,12 +137,7 @@ export function CanvasRenderer({
 }: CanvasRendererProps) {
   const [contentHeight, setContentHeight] = useState(600);
   const [activeStroke, setActiveStroke] = useState<InkStroke | null>(null);
-  // Ink is always potentially on — the per-event pointer-type check inside
-  // the responder callbacks decides whether to capture a given touch.
-  const canDraw = !readOnly && !!onInkChange;
-  // Timestamp of the last stylus move. Used to hold a short palm-rejection
-  // window after pencil lift so stray finger touches don't drop a caret.
-  const lastStylusAtRef = useRef<number>(0);
+  const canDraw = inputMode === 'ink' && !readOnly && !!onInkChange;
 
   function createStrokePoint(event: any): StrokePoint {
     const native = event.nativeEvent;
@@ -197,7 +168,6 @@ export function CanvasRenderer({
 
   function handleInkStart(event: any) {
     if (!canDraw) return;
-    lastStylusAtRef.current = Date.now();
     setActiveStroke({
       id: nanoid(),
       points: [createStrokePoint(event)],
@@ -212,7 +182,6 @@ export function CanvasRenderer({
 
   function handleInkMove(event: any) {
     if (!canDraw) return;
-    lastStylusAtRef.current = Date.now();
     setActiveStroke((current) => {
       if (!current) return current;
       // Object.assign instead of spread — avoids a Hermes GC crash on iOS 26
@@ -240,8 +209,6 @@ export function CanvasRenderer({
       onInkChange?.(updatedLayer);
       return null;
     });
-    // Keep the palm-rejection window alive briefly after pencil lift.
-    lastStylusAtRef.current = Date.now();
   }
 
   function handleLayout(event: { nativeEvent: { layout: { height: number } } }) {
@@ -251,15 +218,14 @@ export function CanvasRenderer({
   // ── Web path ─────────────────────────────────────────────────────────────
   // Skia ink layer is a no-op on web, so we skip the ScrollView + gesture
   // wrapper entirely and let the live preview component manage its own
-  // height and scrolling. The text layer is always editable unless the
-  // whole canvas is readOnly — there is no ink gate on web.
+  // height and scrolling.
   if (Platform.OS === 'web') {
     return (
       <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
         <LivePreviewInput
           value={canvasDoc.textContent.body}
           onChange={(text) => onTextChange?.(text)}
-          inputMode={readOnly ? 'ink' : 'scroll'}
+          inputMode={readOnly ? 'ink' : inputMode}
           placeholder="Start writing..."
           pendingCommand={pendingCommand}
           onCommandApplied={onCommandApplied}
@@ -273,75 +239,29 @@ export function CanvasRenderer({
 
   // ── Native path ──────────────────────────────────────────────────────────
   // Same unified editor, plus the Skia ink layer rendered on top so Apple
-  // Pencil strokes visually sit above the CodeMirror-rendered text. The
-  // ScrollView is always scroll-enabled; finger touches fall through the
-  // ink responder to scroll/edit text, stylus touches are captured by the
-  // ink layer and commit a stroke on pencil lift.
+  // Pencil strokes visually sit above the CodeMirror-rendered text.
   //
-  // Responder gating (per canvas-ink-ux spec section 2):
-  //   - stylus touch  -> capture, start/continue an ink stroke
-  //   - finger touch  -> return false, event falls through to WebView/ScrollView
-  //   - finger touch within 500ms of the last stylus move -> also rejected
-  //     as palm contact (see spec case 12)
+  // Critical invariant: the ink overlay is a SIBLING of the text content,
+  // not a wrapper around it. When inputMode !== 'ink' the overlay has
+  // pointerEvents='none' so touches reach the WebView natively — that is
+  // what lets WKWebView own finger taps for selection and keyboard focus.
+  // Do NOT add responder handlers to the outer wrapper View (see b2a05a4
+  // and the Slice 2 regression in 1fa3559 / build 46).
   //
-  function shouldSetInkResponder(event: any): boolean {
-    if (!canDraw) return false;
-    if (isStylusEvent(event)) return true;
-    // Inside the stylus palm-rejection window — swallow finger touches so
-    // they do not reach the text layer either. The responder callback
-    // returning true then releasing without a stroke accomplishes the swallow.
-    if (Date.now() - lastStylusAtRef.current < STYLUS_PALM_REJECT_MS) {
-      return true;
-    }
-    return false;
-  }
-
-  function handleInkGrant(event: any) {
-    // During the palm-rejection window a non-stylus touch may have been
-    // captured purely to swallow it — in that case do not start a stroke.
-    if (!isStylusEvent(event)) return;
-    handleInkStart(event);
-  }
-
-  function handleInkResponderMove(event: any) {
-    if (!activeStroke) return;
-    handleInkMove(event);
-  }
-
-  function handleInkResponderEnd() {
-    if (!activeStroke) {
-      // Was a swallowed finger touch during palm-rejection; nothing to commit.
-      return;
-    }
-    finishInkStroke();
-  }
-
   const scrollContent = (
     <ScrollView
       bounces={false}
       style={{ backgroundColor: tokens.bgBase }}
       contentContainerStyle={{ width }}
+      scrollEnabled={inputMode !== 'ink'}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Outer wrapper owns the responder chain so it can intercept
-          stylus touches in the CAPTURE phase before the WebView hit-test
-          runs. Finger touches fall through to descendants normally. */}
-      <View
-        style={{ width }}
-        onLayout={handleLayout}
-        onStartShouldSetResponderCapture={shouldSetInkResponder}
-        onMoveShouldSetResponderCapture={shouldSetInkResponder}
-        onResponderGrant={handleInkGrant}
-        onResponderMove={handleInkResponderMove}
-        onResponderRelease={handleInkResponderEnd}
-        onResponderTerminate={handleInkResponderEnd}
-        onResponderTerminationRequest={() => false}
-      >
+      <View style={{ width }} onLayout={handleLayout}>
         <View style={styles.contentLayer}>
           <LivePreviewInput
             value={canvasDoc.textContent.body}
             onChange={(text) => onTextChange?.(text)}
-            inputMode={readOnly ? 'ink' : 'scroll'}
+            inputMode={readOnly ? 'ink' : inputMode}
             placeholder="Start writing..."
             pendingCommand={pendingCommand}
             onCommandApplied={onCommandApplied}
@@ -351,12 +271,23 @@ export function CanvasRenderer({
           />
         </View>
 
-        {/* Ink layer — absolutely positioned ON TOP of the content but
-            pointer-transparent (pointerEvents='none'). Touches flow to
-            the outer wrapper's CAPTURE handlers above, which decide
-            stylus-vs-finger. The ink View itself is purely for Skia
-            rendering. */}
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        {/* Ink layer — absolutely positioned ON TOP of the content.
+            Pointer events are disabled unless we're in ink mode so
+            keyboard text entry still reaches the WebView underneath.
+            This is a sibling of the text layer, NOT a wrapper — a
+            wrapper with responder handlers breaks WKWebView native
+            touches (see commit b2a05a4). */}
+        <View
+          style={StyleSheet.absoluteFill}
+          pointerEvents={canDraw ? 'auto' : 'none'}
+          onStartShouldSetResponder={() => canDraw}
+          onMoveShouldSetResponder={() => canDraw}
+          onResponderGrant={handleInkStart}
+          onResponderMove={handleInkMove}
+          onResponderRelease={finishInkStroke}
+          onResponderTerminate={finishInkStroke}
+          onResponderTerminationRequest={() => false}
+        >
           <InkLayerView
             inkLayer={canvasDoc.inkLayer}
             width={width}

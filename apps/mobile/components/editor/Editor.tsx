@@ -28,6 +28,7 @@ interface CanvasRendererProps {
   width?: number;
   onInkChange?: (inkLayer: CanvasDocument['inkLayer']) => void;
   onTextChange?: (text: string) => void;
+  inputMode?: 'ink' | 'scroll';
   pendingCommand?: string | null;
   onCommandApplied?: () => void;
   onActiveFormatsChange?: (formats: any[]) => void;
@@ -85,6 +86,8 @@ export default function Editor() {
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const { width: windowWidth } = useWindowDimensions();
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const setInputMode = useEditorStore((s) => s.setInputMode);
 
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
@@ -142,6 +145,12 @@ export default function Editor() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Reset input mode to text/scroll whenever the active note changes —
+  // ink mode is always a deliberate per-note opt-in from the toolbar.
+  useEffect(() => {
+    setInputMode('scroll');
+  }, [activeNoteId, setInputMode]);
 
   // Sync local state when active note changes
   useEffect(() => {
@@ -330,6 +339,7 @@ export default function Editor() {
           onChangeText={handleTitleChange}
           placeholder="Untitled"
           placeholderTextColor={tokens.textHint}
+          editable={inputMode !== 'ink'}
           style={{
             flex: 1,
             fontSize: 28,
@@ -416,6 +426,7 @@ export default function Editor() {
               const db = getDatabase();
               updateNoteCanvas(db, activeNote.id, updated);
             }}
+            inputMode={inputMode}
             pendingCommand={pendingCommand}
             onCommandApplied={clearCommand}
             onActiveFormatsChange={setActiveFormats}
@@ -466,6 +477,7 @@ export default function Editor() {
               multiline
               placeholder="Start writing..."
               placeholderTextColor={tokens.textHint}
+              editable={inputMode !== 'ink'}
               style={{
                 fontSize: 16,
                 lineHeight: 24,

@@ -19,6 +19,7 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useEditorStore } from '../../stores/use-editor-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
 import { getCurrentSession } from '../../components/auth/AuthGate';
 import Sidebar from '../../components/sidebar/Sidebar';
@@ -143,6 +144,8 @@ function PhoneLayout() {
 function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const handleCreateNote = useCreateNoteAction();
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
@@ -184,7 +187,10 @@ function IPadLayout() {
               <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
             </Pressable>
 
-            <FormattingToolbar />
+            <FormattingToolbar
+              onToggleDrawing={toggleInputMode}
+              drawingOpen={inputMode === 'ink'}
+            />
             <Pressable
               onPress={handleCreateNote}
               hitSlop={10}
