@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import { tokens } from '@graphite/ui';
 import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite/db';
 import { LivePreviewInput } from './LivePreviewInput';
+import { strokeToOutlinePath } from './inkPath';
 import type { FormatCommand } from './types';
 
 // ---------------------------------------------------------------------------
@@ -70,32 +71,26 @@ function InkLayerView({ inkLayer, width, height, activeStroke = null }: InkLayer
   return (
     <SkiaCanvas style={[StyleSheet.absoluteFill, { width, height }]}>
       {strokes.map((stroke) => {
-        if (stroke.points.length < 2) return null;
+        if (stroke.points.length === 0) return null;
 
-        const svgParts: string[] = [];
-        const { x: x0, y: y0 } = stroke.points[0];
-        svgParts.push(`M ${x0} ${y0}`);
-        for (let i = 1; i < stroke.points.length; i++) {
-          const { x, y } = stroke.points[i];
-          svgParts.push(`L ${x} ${y}`);
-        }
-        const pathStr = svgParts.join(' ');
+        const pathStr = strokeToOutlinePath(stroke);
+        if (!pathStr) return null;
 
-        const avgPressure =
-          stroke.points.reduce((sum, p) => sum + p.pressure, 0) /
-          stroke.points.length;
-        const paintWidth = stroke.width * Math.max(0.3, avgPressure);
+        const skiaPath = Skia.Path.MakeFromSVGString(pathStr);
+        if (!skiaPath) return null;
 
+        // perfect-freehand returns an outline polygon — render as a fill,
+        // NOT a stroke. The polygon already encodes the stroke geometry
+        // (pressure-varied width, taper, caps), so a fill paint reproduces
+        // the pen shape faithfully. A stroke paint would draw an outline
+        // around the outline, which is wrong.
         const paint = Skia.Paint();
         paint.setColor(Skia.Color(stroke.color));
-        paint.setStrokeWidth(paintWidth);
-        paint.setStyle(1 /* stroke */);
+        paint.setStyle(0 /* fill */);
         paint.setAntiAlias(true);
-        paint.setStrokeCap(1 /* round */);
-        paint.setStrokeJoin(1 /* round */);
         paint.setAlphaf(stroke.opacity);
 
-        return <Path key={stroke.id} path={pathStr} paint={paint} />;
+        return <Path key={stroke.id} path={skiaPath} paint={paint} />;
       })}
     </SkiaCanvas>
   );
