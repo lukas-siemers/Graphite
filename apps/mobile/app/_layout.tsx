@@ -141,7 +141,12 @@ export default function RootLayout() {
 
   return (
     <RootErrorBoundary>
-      <StatusBar style="light" backgroundColor="transparent" translucent />
+      <StatusBar
+        hidden={Platform.OS === 'ios'}
+        style="light"
+        backgroundColor="transparent"
+        translucent
+      />
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }} />
       </AuthGate>
