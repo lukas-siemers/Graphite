@@ -1,13 +1,10 @@
-import { View, Pressable, Text, ScrollView, Platform } from 'react-native';
+import { View, Pressable, Text, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
 import { useEditorStore } from '../../stores/use-editor-store';
 
-interface FormattingToolbarProps {
-  onToggleDrawing?: () => void;
-  drawingOpen?: boolean;
-}
+type FormattingToolbarProps = Record<string, never>;
 
 function Separator() {
   return (
@@ -77,7 +74,7 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
   );
 }
 
-export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: FormattingToolbarProps) {
+export function FormattingToolbar(_props: FormattingToolbarProps = {}) {
   const activeFormats = useEditorStore((s) => s.activeFormats);
   const hasSelection = useEditorStore((s) => s.hasSelection);
   const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
@@ -157,42 +154,6 @@ export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: Form
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
       </ScrollView>
-
-      {/* Right side — fixed */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingRight: 8,
-          gap: 2,
-        }}
-      >
-        {/* Draw toggle — iPad / native only */}
-        {Platform.OS !== 'web' && (
-          <Pressable
-            onPress={onToggleDrawing}
-            style={({ pressed }) => ({
-              width: 30,
-              height: 30,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: drawingOpen
-                ? tokens.bgHover
-                : pressed
-                ? tokens.bgBright
-                : 'transparent',
-              borderBottomWidth: drawingOpen ? 2 : 0,
-              borderBottomColor: tokens.accent,
-            })}
-          >
-            <MaterialCommunityIcons
-              name="draw"
-              size={16}
-              color={drawingOpen ? tokens.accentLight : tokens.textMuted}
-            />
-          </Pressable>
-        )}
-      </View>
     </View>
   );
 }
