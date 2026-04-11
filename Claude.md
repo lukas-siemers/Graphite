@@ -27,6 +27,23 @@ Graphite is a cross-platform markdown note-taking app inspired by Obsidian. It t
 
 ---
 
+## Known pitfalls
+
+### iOS production startup trap (April 2026)
+
+- Symptom: the app worked in Expo Go, but on iPad TestFlight it showed the splash/logo briefly and then went to a black screen.
+- Root cause pattern: too much work was happening eagerly in the production startup path before a stable screen had rendered. The dangerous spots were module-level imports / `require()` calls in `apps/mobile/app/_layout.tsx`, `apps/mobile/app/(main)/_layout.tsx`, and the editor path. Those imports pulled in native-heavy code (`@graphite/sync`, `expo-secure-store`, `AuthGate`, `@graphite/editor`, Skia/WebView/worklets) during route initialization.
+- Why Expo Go was misleading: Expo Go did not exercise the same native startup behavior as the standalone/TestFlight build, so "works in Expo Go" did **not** prove the production startup path was safe.
+- The stabilization that fixed the black screen was:
+  1. keep root/layout files lightweight
+  2. lazy-load startup-critical modules instead of importing them eagerly at module scope
+  3. split the heavy `(main)` app shell out of the route layout
+  4. keep a visible startup probe / fallback screen so startup failures do not collapse into an undifferentiated black screen
+  5. lazy-load the advanced editor/native editor stack instead of binding it into initial route load
+- Rule going forward: do not add new module-level native-heavy imports to the mobile startup path unless they are proven safe in a standalone iOS production build. Validate startup changes in TestFlight/dev-client, not just Expo Go.
+
+---
+
 ## Monorepo structure
 
 ```

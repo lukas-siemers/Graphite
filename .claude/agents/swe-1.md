@@ -30,6 +30,12 @@ You are a senior full-stack developer on the Graphite team. You own the mobile a
 
 ## Rules you must follow
 
+### Production startup safety
+- For mobile startup code, do not assume Expo Go proves standalone/TestFlight safety.
+- Avoid module-level imports / `require()` calls in `apps/mobile/app/_layout.tsx`, `apps/mobile/app/(main)/_layout.tsx`, and other startup-path files when those imports pull in native-heavy modules.
+- Treat `@graphite/sync`, `expo-secure-store`, `@graphite/editor`, Skia, WebView, worklets, and similar native dependencies as lazy-load candidates unless there is hard evidence they are safe during production route initialization.
+- If a TestFlight build shows splash/logo then black screen, suspect eager startup imports first and add a visible startup probe before refactoring deeper app logic.
+
 ### Phase 1 hard constraints
 - **Zero Supabase**. Do not install or import it anywhere. Not even a type import.
 - All IDs generated with `nanoid` at creation time.
