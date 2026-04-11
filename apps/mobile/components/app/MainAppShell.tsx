@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -30,12 +30,33 @@ import WelcomeScreen from '../../components/onboarding/WelcomeScreen';
 
 type PhoneScreen = 'sidebar' | 'list' | 'editor';
 
+function useCreateNoteAction(onCreated?: () => void) {
+  const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
+  const activeFolderId = useFolderStore((s) => s.activeFolderId);
+  const createNewNote = useNoteStore((s) => s.createNewNote);
+
+  return useCallback(async () => {
+    if (!activeNotebookId) return;
+    try {
+      const db = getDatabase();
+      await createNewNote(db, activeNotebookId, activeFolderId ?? undefined);
+      onCreated?.();
+    } catch (error) {
+      Alert.alert(
+        'Could not create note',
+        error instanceof Error ? error.message : 'Graphite could not create a new markdown note.',
+      );
+    }
+  }, [activeFolderId, activeNotebookId, createNewNote, onCreated]);
+}
+
 function PhoneLayout() {
   const [screen, setScreen] = useState<PhoneScreen>('sidebar');
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
   const inputMode = useEditorStore((s) => s.inputMode);
   const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
+  const handleCreateNote = useCreateNoteAction(() => setScreen('editor'));
 
   useEffect(() => {
     if (activeNoteId && (screen === 'list' || screen === 'sidebar')) {
@@ -78,6 +99,7 @@ function PhoneLayout() {
         )}
         <Text
           style={{
+            flex: 1,
             fontSize: 16,
             fontWeight: '700',
             color: tokens.textPrimary,
@@ -86,6 +108,18 @@ function PhoneLayout() {
         >
           {headerTitle}
         </Text>
+        <Pressable
+          onPress={handleCreateNote}
+          hitSlop={10}
+          style={{
+            width: 28,
+            height: 28,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ fontSize: 20, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
+        </Pressable>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -135,6 +169,7 @@ function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const inputMode = useEditorStore((s) => s.inputMode);
   const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
+  const handleCreateNote = useCreateNoteAction();
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
@@ -180,6 +215,20 @@ function IPadLayout() {
               onToggleDrawing={toggleInputMode}
               drawingOpen={inputMode === 'ink'}
             />
+            <Pressable
+              onPress={handleCreateNote}
+              hitSlop={10}
+              style={{
+                width: 36,
+                height: 36,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginLeft: 4,
+                marginRight: 10,
+              }}
+            >
+              <Text style={{ fontSize: 20, color: tokens.textMuted, lineHeight: 20 }}>+</Text>
+            </Pressable>
           </View>
 
           <View style={{ flex: 1, position: 'relative' }}>

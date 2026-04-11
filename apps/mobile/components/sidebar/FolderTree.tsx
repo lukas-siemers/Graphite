@@ -130,7 +130,12 @@ export default function FolderTree({ notebookId, searchQuery = '' }: FolderTreeP
     try {
       const db = getDatabase();
       await createNewNote(db, notebookId, folderId);
-    } catch (_) {}
+    } catch (error) {
+      Alert.alert(
+        'Could not create note',
+        error instanceof Error ? error.message : 'Graphite could not create a new markdown note.',
+      );
+    }
   }
 
   async function handleDeleteFolder(folderId: string, folderName: string) {

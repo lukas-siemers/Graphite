@@ -21,7 +21,7 @@ export interface InkLayer {
 }
 
 export interface TextContent {
-  body: string;       // plain text for v1.5. Formatting ranges added in Phase 4.
+  body: string;       // markdown source rendered by the live-preview editor
 }
 
 export interface CanvasDocument {

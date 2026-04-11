@@ -36,6 +36,7 @@ interface LivePreviewInputProps {
   onCommandApplied?: () => void;
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
   autoFocus?: boolean;
+  focusKey?: string | null;
 }
 
 /**
@@ -97,6 +98,7 @@ export function LivePreviewInput({
   onCommandApplied,
   onActiveFormatsChange,
   autoFocus = false,
+  focusKey = null,
 }: LivePreviewInputProps) {
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
@@ -209,6 +211,11 @@ export function LivePreviewInput({
     if (!readyRef.current) return;
     postToFrame({ type: 'set-readonly', readonly: inputMode === 'ink' });
   }, [inputMode]);
+
+  useEffect(() => {
+    if (!readyRef.current || !focusKey || inputMode === 'ink') return;
+    postToFrame({ type: 'focus' });
+  }, [focusKey, inputMode]);
 
   // Apply format commands from the toolbar
   useEffect(() => {

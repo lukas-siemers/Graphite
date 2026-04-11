@@ -31,6 +31,7 @@ interface LivePreviewInputProps {
   onCommandApplied?: () => void;
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
   autoFocus?: boolean;
+  focusKey?: string | null;
 }
 
 const EDITOR_HTML = buildEditorHtml();
@@ -44,6 +45,7 @@ export function LivePreviewInput({
   onCommandApplied,
   onActiveFormatsChange,
   autoFocus = false,
+  focusKey = null,
 }: LivePreviewInputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -167,6 +169,11 @@ export function LivePreviewInput({
     if (!readyRef.current) return;
     postToFrame({ type: 'set-readonly', readonly: inputMode === 'ink' });
   }, [inputMode]);
+
+  useEffect(() => {
+    if (!readyRef.current || !focusKey || inputMode === 'ink') return;
+    postToFrame({ type: 'focus' });
+  }, [focusKey, inputMode]);
 
   // Apply format commands from the toolbar
   useEffect(() => {

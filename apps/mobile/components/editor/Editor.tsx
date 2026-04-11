@@ -427,6 +427,7 @@ export default function Editor() {
             pendingCommand={pendingCommand}
             onCommandApplied={clearCommand}
             onActiveFormatsChange={setActiveFormats}
+            focusKey={activeNoteId}
           />
         </View>
       ) : loadingAdvancedEditor ? (

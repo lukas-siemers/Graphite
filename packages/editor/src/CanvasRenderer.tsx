@@ -42,6 +42,8 @@ export interface CanvasRendererProps {
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
   /** Auto-focus the editor — set true when entering edit mode from preview */
   autoFocusFirst?: boolean;
+  /** Refocus the editor when the active note changes */
+  focusKey?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +126,7 @@ export function CanvasRenderer({
   onCommandApplied,
   onActiveFormatsChange,
   autoFocusFirst = false,
+  focusKey = null,
 }: CanvasRendererProps) {
   const [contentHeight, setContentHeight] = useState(600);
   const [activeStroke, setActiveStroke] = useState<InkStroke | null>(null);
@@ -137,12 +140,21 @@ export function CanvasRenderer({
         : typeof native.pressure === 'number' && native.pressure > 0
           ? native.pressure
           : 0.5;
+    const altitudeAngle =
+      typeof native.altitudeAngle === 'number' ? native.altitudeAngle : null;
+    const tilt =
+      altitudeAngle !== null
+        ? Math.max(0, Math.min(90, 90 - (altitudeAngle * 180) / Math.PI))
+        : Math.hypot(
+            typeof native.tiltX === 'number' ? native.tiltX : 0,
+            typeof native.tiltY === 'number' ? native.tiltY : 0,
+          );
 
     return {
       x: native.locationX,
       y: native.locationY,
       pressure,
-      tilt: 0,
+      tilt,
       timestamp: Date.now(),
     };
   }
@@ -208,6 +220,7 @@ export function CanvasRenderer({
           onCommandApplied={onCommandApplied}
           onActiveFormatsChange={onActiveFormatsChange}
           autoFocus={autoFocusFirst}
+          focusKey={focusKey}
         />
       </View>
     );
@@ -236,6 +249,7 @@ export function CanvasRenderer({
             onCommandApplied={onCommandApplied}
             onActiveFormatsChange={onActiveFormatsChange}
             autoFocus={autoFocusFirst}
+            focusKey={focusKey}
           />
         </View>
 
