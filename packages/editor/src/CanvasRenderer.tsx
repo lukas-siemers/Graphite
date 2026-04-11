@@ -186,12 +186,19 @@ export function CanvasRenderer({
 
   function handleInkMove(event: any) {
     if (!canDraw) return;
+    // Read synthetic event fields SYNCHRONOUSLY. The setActiveStroke
+    // reducer callback runs on the next render, and by that time React
+    // has already returned the PressEvent to its pool — nativeEvent is
+    // nulled out, and `event.nativeEvent.force` would throw
+    // "Cannot read property 'force' of null". Capture the StrokePoint
+    // here and close over the plain value inside the reducer.
+    const point = createStrokePoint(event);
     setActiveStroke((current) => {
       if (!current) return current;
       // Object.assign instead of spread — avoids a Hermes GC crash on iOS 26
       // when shallow-copying InkStroke objects from inside a state setter.
       return Object.assign({}, current, {
-        points: current.points.concat(createStrokePoint(event)),
+        points: current.points.concat(point),
       });
     });
   }
