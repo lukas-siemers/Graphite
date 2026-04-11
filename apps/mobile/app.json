@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "48",
+      "buildNumber": "49",
       "requiresFullScreen": true,
       "jsEngine": "hermes",
       "infoPlist": {
