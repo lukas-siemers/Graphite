@@ -5,15 +5,10 @@ import { View, ScrollView, StyleSheet, Platform } from 'react-native';
 // (Skia is stubbed) so we skip it entirely to avoid DOM style errors.
 let Gesture: any = { Pan: () => ({ runOnJS: () => ({ enabled: () => ({ onStart: () => ({ onUpdate: () => ({ onEnd: () => ({}) }) }) }) }) }) };
 let GestureDetector: any = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-let GestureHandlerRootView: any = ({ children, style }: { children: React.ReactNode; style?: any }) => (
-  <View style={style}>{children}</View>
-);
-
 if (Platform.OS !== 'web') {
   const gh = require('react-native-gesture-handler');
   Gesture = gh.Gesture;
   GestureDetector = gh.GestureDetector;
-  GestureHandlerRootView = gh.GestureHandlerRootView;
 }
 import Constants from 'expo-constants';
 import { nanoid } from 'nanoid';
