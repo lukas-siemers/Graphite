@@ -287,7 +287,19 @@ export function CanvasRenderer({
             keyboard text entry still reaches the WebView underneath.
             This is a sibling of the text layer, NOT a wrapper — a
             wrapper with responder handlers breaks WKWebView native
-            touches (see commit b2a05a4). */}
+            touches (see commit b2a05a4).
+
+            SkiaCanvas mount is guarded: we only render the Skia
+            subview when we actually need it (canDraw OR there is
+            something to draw). On iOS Fabric / new arch, react-native
+            -skia's native view does not reliably inherit the parent
+            View's pointerEvents='none' setting, which means a mounted
+            SkiaCanvas overlay on top of the WebView can silently
+            intercept taps in production builds even though it works
+            in Expo Go where Skia is stubbed out entirely (see
+            isExpoGo check in InkLayerView). The conditional mount
+            keeps typing alive on empty notes by simply never mounting
+            the Skia native view in the common case. */}
         <View
           style={StyleSheet.absoluteFill}
           pointerEvents={canDraw ? 'auto' : 'none'}
@@ -299,12 +311,16 @@ export function CanvasRenderer({
           onResponderTerminate={finishInkStroke}
           onResponderTerminationRequest={() => false}
         >
-          <InkLayerView
-            inkLayer={canvasDoc.inkLayer}
-            width={width}
-            height={contentHeight}
-            activeStroke={activeStroke}
-          />
+          {(canDraw ||
+            canvasDoc.inkLayer.strokes.length > 0 ||
+            activeStroke) && (
+            <InkLayerView
+              inkLayer={canvasDoc.inkLayer}
+              width={width}
+              height={contentHeight}
+              activeStroke={activeStroke}
+            />
+          )}
         </View>
       </View>
     </ScrollView>
