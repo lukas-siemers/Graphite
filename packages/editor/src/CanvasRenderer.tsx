@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { nanoid } from 'nanoid';
+// nanoid/non-secure: Hermes has no `crypto` global, so the default
+// nanoid entry point (which calls crypto.getRandomValues) throws on
+// native. Stroke IDs don't need cryptographic randomness — Math.random
+// collision resistance is fine for a per-session ID.
+import { nanoid } from 'nanoid/non-secure';
 import { tokens } from '@graphite/ui';
 import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite/db';
 import { LivePreviewInput } from './LivePreviewInput';
