@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 type AuthGateComponent = (props: { children: React.ReactNode }) => React.JSX.Element;
 
@@ -141,18 +140,16 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <RootErrorBoundary>
-        <StatusBar
-          hidden={Platform.OS === 'ios'}
-          style="light"
-          backgroundColor="transparent"
-          translucent
-        />
-        <AuthGate>
-          <Stack screenOptions={{ headerShown: false }} />
-        </AuthGate>
-      </RootErrorBoundary>
-    </GestureHandlerRootView>
+    <RootErrorBoundary>
+      <StatusBar
+        hidden={Platform.OS === 'ios'}
+        style="light"
+        backgroundColor="transparent"
+        translucent
+      />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthGate>
+    </RootErrorBoundary>
   );
 }
