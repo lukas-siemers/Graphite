@@ -8,10 +8,11 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, createEmptyCanvas } from '@graphite/db';
+import { getDatabase, createEmptyCanvas, CanvasSchemaV1 } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
 import DrawingCanvas from './DrawingCanvas';
+import { extractStrokes } from 'graphite-pencil-kit';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -117,8 +118,20 @@ export default function Editor() {
     }, 500);
   }
 
-  // Drawing mode: save PKDrawing base64 blob. Called by DrawingCanvas on
-  // Done press and on auto-save (debounced inside DrawingCanvas itself).
+  // Drawing mode: save PKDrawing base64 blob + extracted cross-platform
+  // strokes[]. Called by DrawingCanvas on Done press and on auto-save
+  // (debounced inside DrawingCanvas itself).
+  //
+  // Stage 2 dual-write (see docs/specs — ink extractor PR):
+  //   1. Keep `inkLayer.pkDrawingBase64` for iPad re-edit fidelity (PencilKit
+  //      is the only renderer that can consume the opaque blob).
+  //   2. Also extract `inkLayer.strokes[]` via the `graphite-pencil-kit`
+  //      native module so the desktop SVG renderer has something to draw.
+  //
+  // If extraction fails (module not registered, bad blob) we still write the
+  // blob so the user never loses data — `strokes` just stays empty and the
+  // desktop will render nothing until the next successful extract. This is
+  // the same "fail loud only in schema validation" policy used elsewhere.
   const handleDrawingChange = useCallback(
     async (base64: string) => {
       const noteId = activeNoteIdRef.current;
@@ -126,6 +139,10 @@ export default function Editor() {
       setSaveStatus('Saving...');
       try {
         const db = getDatabase();
+
+        // Read current doc so we preserve textContent + any existing
+        // contentLayer objects. Legacy docs may be missing fields — fall
+        // back to an empty canvas and let Zod fill defaults on serialize.
         let currentDoc: CanvasDocument;
         const currentJson = canvasJsonRef.current;
         if (currentJson) {
@@ -137,12 +154,48 @@ export default function Editor() {
         } else {
           currentDoc = createEmptyCanvas();
         }
-        const nextDoc: CanvasDocument = Object.assign({}, currentDoc, {
-          inkLayer: Object.assign({}, currentDoc.inkLayer, {
+
+        // Extract structured strokes. Any failure (native module missing,
+        // invalid PKDrawing, schema drift) is swallowed so the save path
+        // never crashes — but we do keep the base64 blob either way.
+        let extractedStrokes: CanvasSchemaV1.InkStroke[] = [];
+        try {
+          extractedStrokes = await extractStrokes(base64);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[editor] extractStrokes failed; writing blob only', err);
+          extractedStrokes = [];
+        }
+
+        // Build a v1-shape document. We normalize the legacy fields in case
+        // currentDoc came from a pre-v1 row. `CanvasSchemaV1.canvasDocumentSchema`
+        // will validate strictly on serialize.
+        const v1Doc: CanvasSchemaV1.CanvasDocument = {
+          version: 1,
+          inkLayer: {
+            strokes: extractedStrokes,
             pkDrawingBase64: base64,
-          }),
-        });
-        await updateNoteCanvas(db, noteId, nextDoc);
+          },
+          contentLayer: {
+            objects: [],
+          },
+          textContent: {
+            body: currentDoc.textContent?.body ?? '',
+          },
+        };
+
+        // Re-validate via Zod before persisting. Throws ZodError on drift.
+        const canvasJson = CanvasSchemaV1.serializeCanvasDocument(v1Doc);
+
+        // Hand off to the existing store writer. The legacy `CanvasDocument`
+        // type here is shape-compatible with the v1 doc except for the
+        // `strokes[]` inner shape — cast through unknown until the cutover
+        // lands and both types converge.
+        await updateNoteCanvas(
+          db,
+          noteId,
+          JSON.parse(canvasJson) as unknown as CanvasDocument,
+        );
         setSaveStatus('Saved');
       } catch (_) {
         setSaveStatus('Saved');

@@ -63,6 +63,11 @@ export const inkStrokeSchema = z.object({
 
 export const inkLayerSchema = z.object({
   strokes: z.array(inkStrokeSchema),
+  // Opaque PKDrawing.dataRepresentation() base64 blob emitted by
+  // react-native-pencil-kit. Stored alongside `strokes[]` during the Stage 2
+  // dual-write: iPad uses the blob for lossless PencilKit re-edit fidelity,
+  // desktop uses `strokes[]` for cross-platform rendering.
+  pkDrawingBase64: z.string().optional(),
 });
 
 // -------- Content layer --------

@@ -1,7 +1,7 @@
 {
   "name": "graphite-pencil-kit",
-  "version": "0.1.0",
-  "description": "Local Expo module exposing Apple PencilKit (PKCanvasView) as a Fabric view for Graphite.",
+  "version": "0.2.0",
+  "description": "Local Expo module that extracts structured stroke data from an opaque PKDrawing base64 blob (no view registration — the drawing surface is owned by react-native-pencil-kit).",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "private": true,
