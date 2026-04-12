@@ -67,6 +67,13 @@ export default function Editor() {
   useNoteCanvasMigration(activeNote);
 
   // Auto-delete empty notes when the user navigates away.
+  //
+  // Both deleteIfEmpty call sites below use .catch(() => {}) to swallow any
+  // async rejection. Without it, a fire-and-forget rejection propagates as
+  // an unhandled promise rejection, which Hermes on iOS reports to RCTFatal
+  // and crashes the app with SIGABRT. Crashed build 51 on first + tap until
+  // this fix landed — the try/catch alone does NOT catch async rejections
+  // from the returned promise, only synchronous throws from getDatabase().
   const prevActiveNoteIdRef = useRef<string | null>(activeNoteId ?? null);
   useEffect(() => {
     const prevId = prevActiveNoteIdRef.current;
@@ -74,9 +81,11 @@ export default function Editor() {
     if (prevId && prevId !== nextId) {
       try {
         const db = getDatabase();
-        void deleteIfEmpty(db, prevId);
+        deleteIfEmpty(db, prevId).catch(() => {
+          // Best-effort cleanup — must not break navigation or crash.
+        });
       } catch (_) {
-        // Best-effort cleanup — must not break navigation.
+        // Synchronous throw from getDatabase() only.
       }
     }
     prevActiveNoteIdRef.current = nextId;
@@ -89,9 +98,11 @@ export default function Editor() {
       if (!prevId) return;
       try {
         const db = getDatabase();
-        void deleteIfEmpty(db, prevId);
+        deleteIfEmpty(db, prevId).catch(() => {
+          // Best-effort cleanup.
+        });
       } catch (_) {
-        // Best-effort cleanup.
+        // Synchronous throw from getDatabase() only.
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -51,6 +51,8 @@ export function useNoteCanvasMigration(note: Note | null): void {
       }
     }
 
-    migrate();
+    // .catch swallows any unhandled rejection — see Editor.tsx for the
+    // RCTFatal / SIGABRT rationale. Migration failures are non-fatal.
+    migrate().catch(() => {});
   }, [note?.id, note?.canvasJson]);
 }
