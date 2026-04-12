@@ -186,6 +186,11 @@ export default function Editor() {
         let extractedStrokes: CanvasSchemaV1.InkStroke[] = [];
         try {
           extractedStrokes = await extractStrokes(base64);
+          // eslint-disable-next-line no-console
+          console.log(
+            '[editor] extractStrokes ok — strokes=',
+            extractedStrokes.length,
+          );
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[editor] extractStrokes failed; writing blob only', err);
