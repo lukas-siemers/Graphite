@@ -237,15 +237,17 @@ export function CanvasRenderer({
 
 const styles = StyleSheet.create({
   // Left-aligned to match Editor.tsx's title area at paddingHorizontal 24.
-  // Previously used alignSelf='center' + maxWidth which pushed the body
-  // text inward while the title stayed at the left edge — small but
-  // visible misalignment on iPad. For now the body stretches across the
-  // full editor width; a centered 680px reading column can come back as a
-  // layout refinement once both title and body share the same container.
+  // flexGrow: 1 is load-bearing: without it the ScrollView content only
+  // occupies the TextInput's intrinsic 400 minHeight, leaving dead space
+  // between the text and the status bar and making the app look "cut off
+  // at the bottom" (reported on build 52). flexGrow stretches the content
+  // container to fill the ScrollView vertically, so the TextInput
+  // background reaches all the way down to the status bar.
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 48,
+    flexGrow: 1,
   },
   input: {
     width: '100%',
