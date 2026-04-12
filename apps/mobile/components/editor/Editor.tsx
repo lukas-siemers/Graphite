@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import {
   View,
   Text,
   TextInput,
   Pressable,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -12,6 +13,7 @@ import { getDatabase, createEmptyCanvas } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
 import DrawingCanvas from './DrawingCanvas';
+import { shouldMountInkOverlay } from './ink-overlay-mount';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -20,6 +22,16 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
+
+// Lazy-load the Skia ink overlay so `@shopify/react-native-skia` is kept
+// out of the production startup path. See CLAUDE.md "iOS production
+// startup trap" — static imports of native-heavy modules in the editor
+// route were the root cause of the builds 46-50 black-screen regression.
+// The lazy chunk is only fetched once we have strokes to render on iPad,
+// gated by the `shouldMountInkOverlay` check inside the component below.
+const InkOverlay = React.lazy(() =>
+  import('@graphite/editor').then((m) => ({ default: m.InkOverlay })),
+);
 
 type SaveStatus = 'Saved' | 'Saving...';
 
@@ -52,6 +64,19 @@ export default function Editor() {
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
+  // Measured size of the editor body frame. Used to size the read-only
+  // Skia ink overlay so strokes can render at absolute coordinates across
+  // the full viewport width. Defaults are large enough to avoid the
+  // first-frame "0x0 canvas" case where Skia would render nothing until
+  // onLayout fires.
+  const [editorLayout, setEditorLayout] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+  const handleEditorLayout = useCallback((event: { nativeEvent: { layout: { width: number; height: number } } }) => {
+    const { width, height } = event.nativeEvent.layout;
+    setEditorLayout((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+  }, []);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
@@ -212,6 +237,19 @@ export default function Editor() {
   // Fixed column width: capped at 680, down to windowWidth on phone
   const canvasWidth = Math.min(windowWidth, 680);
 
+  // Mount the Skia ink overlay only when the note actually has strokes
+  // AND we've measured the editor frame at least once. Both guards keep
+  // Skia out of the happy-path initial render on a fresh note — the
+  // lazy chunk won't be fetched at all until there's something to draw.
+  const strokeCount = activeCanvasDoc.inkLayer?.strokes?.length ?? 0;
+  const mountInkOverlay = shouldMountInkOverlay({
+    drawMode,
+    strokeCount,
+    layoutWidth: editorLayout.width,
+    layoutHeight: editorLayout.height,
+    platform: Platform.OS,
+  });
+
   if (!activeNote) {
     return (
       <View
@@ -317,10 +355,10 @@ export default function Editor() {
         </View>
       )}
 
-      {/* Editor body — mutually exclusive with DrawingCanvas. We never mount
-          both at once (see CLAUDE.md "iOS production startup trap" and the
-          builds 46-50 regressions). */}
-      <View style={{ flex: 1 }}>
+      {/* Editor body — DrawingCanvas and the text+ink stack are mutually
+          exclusive. We never mount both at once (see CLAUDE.md "iOS
+          production startup trap" and the builds 46-50 regressions). */}
+      <View style={{ flex: 1 }} onLayout={handleEditorLayout}>
         {drawMode ? (
           <DrawingCanvas
             key={activeNoteId ?? 'no-note'}
@@ -329,15 +367,41 @@ export default function Editor() {
             onDone={() => setDrawMode(false)}
           />
         ) : (
-          <CanvasRenderer
-            canvasDoc={activeCanvasDoc}
-            width={canvasWidth}
-            onTextChange={handleCanvasTextChange}
-            pendingCommand={pendingCommand}
-            onCommandApplied={clearCommand}
-            onActiveFormatsChange={setActiveFormats}
-            focusKey={activeNoteId}
-          />
+          <>
+            <CanvasRenderer
+              canvasDoc={activeCanvasDoc}
+              width={canvasWidth}
+              onTextChange={handleCanvasTextChange}
+              pendingCommand={pendingCommand}
+              onCommandApplied={clearCommand}
+              onActiveFormatsChange={setActiveFormats}
+              focusKey={activeNoteId}
+            />
+            {/* Read-only ink overlay — v1.5 Stage 3. Mounted only when
+                the note actually has strokes so Skia is never pulled
+                into the editor route load path on empty notes. Uses an
+                absolute-positioned, `pointerEvents='none'` Skia canvas
+                so taps pass through to the TextInput below. Ink at
+                absolute x coordinates outside the 680px text column is
+                rendered (it uses the full viewport width). */}
+            {mountInkOverlay && (
+              <Suspense fallback={null}>
+                {/* The `as never` cast bridges the legacy `CanvasDocument`
+                    ink shape (from `canvas-types.ts`) to the v1 Zod shape
+                    (from `canvas-schema.ts`) during the canvas_json
+                    dual-write cutover. Once the editor read path moves
+                    to v1 this cast goes away. Strokes are only populated
+                    by Stage 2's native extractor, so until that ships
+                    the array is always empty and this branch is dead
+                    code anyway (gated by `mountInkOverlay`). */}
+                <InkOverlay
+                  strokes={activeCanvasDoc.inkLayer.strokes as never}
+                  width={editorLayout.width}
+                  height={editorLayout.height}
+                />
+              </Suspense>
+            )}
+          </>
         )}
       </View>
 

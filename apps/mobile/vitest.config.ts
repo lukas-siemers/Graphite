@@ -13,6 +13,12 @@ export default defineConfig({
   test: {
     name: '@graphite/mobile',
     environment: 'node',
-    include: ['stores/**/*.test.ts', 'app/**/*.test.ts', 'hooks/**/*.test.ts', 'lib/**/*.test.ts'],
+    include: [
+      'stores/**/*.test.ts',
+      'app/**/*.test.ts',
+      'hooks/**/*.test.ts',
+      'lib/**/*.test.ts',
+      'components/**/*.test.ts',
+    ],
   },
 });
