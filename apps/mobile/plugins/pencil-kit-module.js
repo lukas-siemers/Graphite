@@ -1,46 +1,39 @@
-const fs = require('fs');
-const path = require('path');
+const { withXcodeProject, IOSConfig } = require('expo/config-plugins');
 
 /**
- * Expo config plugin: guards the local graphite-pencil-kit module.
+ * Links Apple's PencilKit.framework into the main iOS app target.
  *
- * Expo SDK 54 autolinking already defaults to scanning `./modules`, so the
- * module under `apps/mobile/modules/graphite-pencil-kit/` is picked up
- * without extra config. This plugin exists for two reasons:
- *
- *   1. Fail fast during `expo prebuild` if the module directory is missing
- *      (e.g. after a bad merge). A silent autolinking miss shows up later
- *      as a "view manager not found" red box in the iOS build, which is
- *      painful to debug.
- *   2. Document in app.json that the app depends on a local PencilKit
- *      module — greppable, discoverable, and hard to accidentally drop.
+ * react-native-pencil-kit@1.2.3's RNPencilKit.podspec does not declare
+ * `s.frameworks = 'PencilKit'`, so its libRNPencilKit.a references PK*
+ * symbols (PKCanvasView, PKInkType*, PKToolPicker, ...) that go
+ * unresolved at archive time. Build 57 surfaced this after the previous
+ * local GraphitePencilKit.podspec (which did declare the framework)
+ * was disabled via `platforms: []`.
  */
-const withPencilKitModule = (config) => {
-  const moduleRoot = path.resolve(
-    __dirname,
-    '..',
-    'modules',
-    'graphite-pencil-kit',
-  );
+const withPencilKitFramework = (config) => {
+  return withXcodeProject(config, (mod) => {
+    const project = mod.modResults;
+    const target = IOSConfig.XcodeUtils.getApplicationNativeTarget({
+      project,
+      projectName: mod.modRequest.projectName,
+    });
 
-  const required = [
-    'expo-module.config.json',
-    'ios/GraphitePencilKitModule.swift',
-    'ios/GraphitePencilKitView.swift',
-    'ios/GraphitePencilKit.podspec',
-  ];
+    const frameworksPhase = project.pbxFrameworksBuildPhaseObj(target.uuid);
+    const alreadyLinked = frameworksPhase.files.some(
+      (f) => typeof f.comment === 'string' && f.comment.includes('PencilKit.framework'),
+    );
 
-  for (const rel of required) {
-    const abs = path.join(moduleRoot, rel);
-    if (!fs.existsSync(abs)) {
-      throw new Error(
-        `[pencil-kit-module] Required file missing: ${rel}. ` +
-          `Expected at ${abs}. Did the local module get deleted?`,
-      );
+    if (!alreadyLinked) {
+      project.addFramework('PencilKit.framework', {
+        target: target.uuid,
+        customFramework: false,
+        embed: false,
+        sign: false,
+      });
     }
-  }
 
-  return config;
+    return mod;
+  });
 };
 
-module.exports = withPencilKitModule;
+module.exports = withPencilKitFramework;
