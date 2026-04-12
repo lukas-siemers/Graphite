@@ -1,3 +1,6 @@
 {
-  "platforms": []
+  "platforms": ["ios"],
+  "ios": {
+    "modules": ["GraphitePencilKitModule"]
+  }
 }

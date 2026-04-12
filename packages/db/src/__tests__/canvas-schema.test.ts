@@ -209,4 +209,57 @@ describe('canvas-schema v1', () => {
     } as unknown as CanvasDocument;
     expect(() => serializeCanvasDocument(malformed)).toThrow();
   });
+
+  it('accepts a top-level inkLayer.pkDrawingBase64 for iPad dual-write (Stage 2)', () => {
+    // Stage 2 (PencilKit extractor) dual-writes the opaque PKDrawing blob at
+    // the ink layer root alongside the structured `strokes[]`. iPad re-opens
+    // a note by feeding the blob back to PencilKit; desktop renders from the
+    // strokes. Both must coexist in the same document without validation
+    // failure.
+    const doc = {
+      version: 1,
+      inkLayer: {
+        strokes: [
+          {
+            id: 'pk-roundtrip',
+            color: '#FFFFFF',
+            width: 2,
+            tool: 'pen',
+            anchor: { type: 'absolute', x: 0, y: 0 },
+            points: [{ x: 0, y: 0, pressure: 0.9, timeOffset: 0 }],
+          },
+        ],
+        pkDrawingBase64: 'OPAQUE-PKDRAWING-BLOB==',
+      },
+      contentLayer: { objects: [] },
+      textContent: { body: '' },
+    };
+
+    const parsed = canvasDocumentSchema.parse(doc);
+    expect(parsed.inkLayer.pkDrawingBase64).toBe('OPAQUE-PKDRAWING-BLOB==');
+    expect(parsed.inkLayer.strokes).toHaveLength(1);
+  });
+
+  it('treats inkLayer.pkDrawingBase64 as optional (desktop-authored documents omit it)', () => {
+    const doc = {
+      version: 1,
+      inkLayer: {
+        strokes: [
+          {
+            id: 'desktop-stroke',
+            color: '#DCDDDE',
+            width: 1,
+            tool: 'marker',
+            anchor: { type: 'absolute', x: 0, y: 0 },
+            points: [{ x: 0, y: 0, pressure: 1, timeOffset: 0 }],
+          },
+        ],
+        // no top-level pkDrawingBase64 — desktop doesn't produce one
+      },
+      contentLayer: { objects: [] },
+      textContent: { body: '' },
+    };
+    const parsed = canvasDocumentSchema.parse(doc);
+    expect(parsed.inkLayer.pkDrawingBase64).toBeUndefined();
+  });
 });
