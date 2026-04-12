@@ -1,11 +1,42 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SyncEngine } from '../engine';
+import { resetSupabaseClient } from '../client';
 
 const baseConfig = {
   supabaseUrl: 'https://stub.example',
   supabaseAnonKey: 'stub-key',
   userId: 'user-1',
 };
+
+// Mock @supabase/supabase-js so the engine's network calls fail fast and
+// deterministically instead of waiting on real DNS/TCP timeouts (which blew
+// past the 5s Vitest default on CI — see fix/sync-test-timeout).
+vi.mock('@supabase/supabase-js', () => {
+  const networkError = new Error('mocked network failure');
+  const queryBuilder = {
+    upsert: vi.fn().mockResolvedValue({ data: null, error: networkError }),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    gt: vi.fn().mockResolvedValue({ data: null, error: networkError }),
+  };
+  const channel = {
+    on: vi.fn().mockReturnThis(),
+    subscribe: vi.fn().mockReturnThis(),
+  };
+  const client = {
+    from: vi.fn().mockReturnValue(queryBuilder),
+    channel: vi.fn().mockReturnValue(channel),
+    removeChannel: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    createClient: vi.fn().mockReturnValue(client),
+  };
+});
+
+beforeEach(() => {
+  // Reset the singleton so each test picks up a fresh mocked client
+  resetSupabaseClient();
+});
 
 describe('SyncEngine', () => {
   it('throws when constructed without a userId', () => {
@@ -57,7 +88,7 @@ describe('SyncEngine', () => {
   it('syncNow() aggregates push and pull results', async () => {
     const engine = new SyncEngine(baseConfig);
     const result = await engine.syncNow([], 0);
-    // With stub URL, pull will error but syncNow should not throw
+    // With the mocked client, pull returns an error but syncNow must not throw
     expect(result.startedAt).toBeLessThanOrEqual(result.finishedAt);
     expect(typeof result.pushed).toBe('number');
     expect(typeof result.pulled).toBe('number');
