@@ -209,10 +209,7 @@ export function CanvasRenderer({
     <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       <ScrollView
         style={{ flex: 1, backgroundColor: tokens.bgBase }}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { maxWidth: width, width: '100%' },
-        ]}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         <TextInput
@@ -239,11 +236,16 @@ export function CanvasRenderer({
 }
 
 const styles = StyleSheet.create({
+  // Left-aligned to match Editor.tsx's title area at paddingHorizontal 24.
+  // Previously used alignSelf='center' + maxWidth which pushed the body
+  // text inward while the title stayed at the left edge — small but
+  // visible misalignment on iPad. For now the body stretches across the
+  // full editor width; a centered 680px reading column can come back as a
+  // layout refinement once both title and body share the same container.
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 48,
-    alignSelf: 'center',
   },
   input: {
     width: '100%',
