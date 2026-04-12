@@ -323,6 +323,7 @@ export default function Editor() {
       <View style={{ flex: 1 }}>
         {drawMode ? (
           <DrawingCanvas
+            key={activeNoteId ?? 'no-note'}
             initialDrawingBase64={activeCanvasDoc.inkLayer.pkDrawingBase64 ?? null}
             onDrawingChange={handleDrawingChange}
             onDone={() => setDrawMode(false)}
