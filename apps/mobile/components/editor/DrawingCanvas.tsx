@@ -68,20 +68,24 @@ function PencilKitSurface({
   const pencilKitRef = React.useRef<any>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load initial drawing data once on mount. After that, PencilKit is the
-  // source of truth. Re-loading when the prop changes (e.g. after our own
-  // debounced save round-trips through the store) would replace strokes
-  // drawn during the save window with a stale snapshot.
+  // On mount: ALWAYS clear the native PKCanvasView first, then load the
+  // initial base64 if present. PencilKitView retains its drawing across React
+  // remounts (the native view is not torn down eagerly), so without an
+  // explicit clear, an empty new note would inherit the previous note's
+  // strokes. After mount PencilKit is the source of truth — we don't re-load
+  // on prop changes because the debounced save round-trip would clobber
+  // in-progress strokes.
   const initialDrawingRef = React.useRef(initialDrawingBase64);
   React.useEffect(() => {
+    if (!pencilKitRef.current) return undefined;
     const initial = initialDrawingRef.current;
-    if (initial && pencilKitRef.current) {
-      const timer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      pencilKitRef.current?.clear();
+      if (initial) {
         pencilKitRef.current?.loadBase64Data(initial);
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   // Auto-save on drawing change (debounced 500ms)
