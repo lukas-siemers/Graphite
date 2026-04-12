@@ -68,17 +68,21 @@ function PencilKitSurface({
   const pencilKitRef = React.useRef<any>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load initial drawing data after PencilKitView mounts
+  // Load initial drawing data once on mount. After that, PencilKit is the
+  // source of truth. Re-loading when the prop changes (e.g. after our own
+  // debounced save round-trips through the store) would replace strokes
+  // drawn during the save window with a stale snapshot.
+  const initialDrawingRef = React.useRef(initialDrawingBase64);
   React.useEffect(() => {
-    if (initialDrawingBase64 && pencilKitRef.current) {
-      // Small delay to let the native view initialize
+    const initial = initialDrawingRef.current;
+    if (initial && pencilKitRef.current) {
       const timer = setTimeout(() => {
-        pencilKitRef.current?.loadBase64Data(initialDrawingBase64);
+        pencilKitRef.current?.loadBase64Data(initial);
       }, 100);
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [initialDrawingBase64]);
+  }, []);
 
   // Auto-save on drawing change (debounced 500ms)
   const handleDrawingDidChange = React.useCallback(() => {
