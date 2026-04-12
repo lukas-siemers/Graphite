@@ -15,6 +15,79 @@ import Database from 'better-sqlite3';
 import { autoUpdater } from 'electron-updater';
 
 // ---------------------------------------------------------------------------
+// Env var loader (dependency-free) — Stage 4 sync wiring.
+//
+// We intentionally avoid the `dotenv` npm dep so we don't add supply-chain
+// surface for a 20-line parser. The file format is the same subset dotenv
+// accepts: `KEY=VALUE` lines, `#` comments, blank lines. Values may be
+// single- or double-quoted; we strip the quotes. Everything else is kept
+// as a literal string.
+//
+// Search order (first hit wins per-key, subsequent files never clobber a
+// key that was already set — either by an earlier file or by the OS):
+//   1. <userData>/graphite.env            — user-editable post-install
+//   2. <__dirname>/../.env.local          — repo root during dev
+//   3. <__dirname>/../../.env.local       — monorepo root fallback
+//
+// Keys that are already set in process.env are NOT overwritten — CI or a
+// parent process can always trump the file.
+// ---------------------------------------------------------------------------
+
+function loadEnvFile(filePath: string): void {
+  if (!fs.existsSync(filePath)) return;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of raw.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!(key in process.env)) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // Missing / unreadable env file is not fatal — sync will just fall
+    // back to offline mode because getSupabaseClient() returns a
+    // placeholder client when the URL/key are empty.
+  }
+}
+
+function loadDesktopEnv(): void {
+  // __dirname layouts:
+  //   dev:  <repo>/apps/desktop/electron/        (ts-node / compiled from electron/)
+  //   prod: <app>/resources/app.asar/dist/electron/
+  //
+  // We probe in both the compiled `dist/electron/` layout and the dev
+  // `apps/desktop/electron/` layout for each candidate so the same
+  // loader works under `npm run electron:dev` (loads from apps/mobile
+  // via the monorepo) AND from the packaged app (loads from the
+  // desktop resources directory). The userData file always takes top
+  // precedence so a post-install override is easy.
+  const candidates = [
+    path.join(app.getPath('userData'), 'graphite.env'),
+    // apps/desktop/.env.local
+    path.join(__dirname, '..', '.env.local'),
+    path.join(__dirname, '..', '..', '.env.local'),
+    // apps/mobile/.env.local (monorepo dev mode — primary location today)
+    path.join(__dirname, '..', '..', '..', 'mobile', '.env.local'),
+    path.join(__dirname, '..', '..', '..', '..', 'mobile', '.env.local'),
+    // repo root .env.local (fallback if someone put it there)
+    path.join(__dirname, '..', '..', '..', '.env.local'),
+    path.join(__dirname, '..', '..', '..', '..', '.env.local'),
+  ];
+  for (const c of candidates) loadEnvFile(c);
+}
+
+// ---------------------------------------------------------------------------
 // Local static server for serving the Expo web export in production.
 //
 // Expo Router reads window.location.pathname to resolve routes. Loading
@@ -148,6 +221,20 @@ function wrap<T>(fn: () => T): { data: T } | { error: string } {
 }
 
 function registerIpcHandlers() {
+  // ---- Env / config --------------------------------------------------------
+  // Supabase URL + anon key are exposed to the renderer so the sync engine
+  // (which lives in `packages/sync` and is imported by renderer-side hooks)
+  // can configure itself. Both values are client-safe — the anon key is
+  // designed to ship in client bundles and is gated by RLS on the server.
+  // The service-role key is NEVER exposed; it's a server-only secret and
+  // must only appear in Edge Functions, per CLAUDE.md.
+  ipcMain.handle('env:getSupabaseConfig', () =>
+    wrap(() => ({
+      url: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+      anonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+    })),
+  );
+
   ipcMain.handle('db:getNotebooks', () =>
     wrap(() => db.prepare('SELECT * FROM notebooks ORDER BY updated_at DESC').all())
   );
@@ -362,6 +449,12 @@ if (!gotLock) {
 }
 
 app.whenReady().then(async () => {
+  // Load Supabase credentials (and any other EXPO_PUBLIC_* vars) from
+  // the bundled / user-editable env file BEFORE we register IPC handlers,
+  // so the first call to `env:getSupabaseConfig` from the renderer sees
+  // the hydrated values.
+  loadDesktopEnv();
+
   // Start the local static server for production builds. __dirname is
   // dist/electron/ — the web export lives one level up at dist/.
   if (process.env.NODE_ENV !== 'development') {

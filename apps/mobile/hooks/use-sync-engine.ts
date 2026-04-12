@@ -31,6 +31,11 @@ export interface UseSyncEngineResult {
   pushNow: () => void;
 }
 
+// The pure web/Electron remote-row adapter lives in its own module so
+// the unit tests can import it in Node without dragging `react-native`
+// into the resolver. See `apply-remote-to-store.ts` for the contract.
+import { applyRemoteToStore, isWebNoopDbContext } from './apply-remote-to-store';
+
 /**
  * Manages the sync lifecycle: pushes dirty records on app foreground and
  * applies remote changes from Supabase Realtime. The engine is only
@@ -171,8 +176,30 @@ export function useSyncEngine(
     // pull() results are applied to the local DB AND refresh the Zustand
     // stores. Without this, remote data lands in the engine but the UI
     // never sees it.
+    //
+    // Stage 4 desktop path: when the local DB is the noopDb stub, apply
+    // rows straight to the Zustand stores — SQLite write + reload would
+    // wipe the store on every remote event.
+    const webNoopDb = isWebNoopDbContext();
+
     engine.onRemoteChange = async (table, event, newRecord, _oldRecord) => {
       try {
+        const { useNotebookStore } = await import('../stores/use-notebook-store');
+        const { useFolderStore } = await import('../stores/use-folder-store');
+        const { useNoteStore } = await import('../stores/use-note-store');
+
+        if (webNoopDb) {
+          applyRemoteToStore(
+            table,
+            event,
+            newRecord,
+            useNotebookStore,
+            useFolderStore,
+            useNoteStore,
+          );
+          return;
+        }
+
         const db = getDatabase();
         if (event === 'DELETE') {
           if (table === 'notes' && newRecord?.id) await deleteNote(db, newRecord.id as string);
@@ -185,10 +212,6 @@ export function useSyncEngine(
         }
 
         // Reload Zustand stores so the UI reflects the remote changes.
-        const { useNotebookStore } = await import('../stores/use-notebook-store');
-        const { useFolderStore } = await import('../stores/use-folder-store');
-        const { useNoteStore } = await import('../stores/use-note-store');
-
         const notebooks = await getNotebooks(db);
         useNotebookStore.getState().setNotebooks(notebooks);
 

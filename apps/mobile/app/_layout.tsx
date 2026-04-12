@@ -100,6 +100,42 @@ export default function RootLayout() {
           });
         }
 
+        // Desktop Stage 4 wiring: on Electron we pull Supabase creds
+        // from the main process (via the preload bridge) before AuthGate
+        // mounts. The sync client's singleton will then see real URL +
+        // anon key instead of the placeholder and AuthGate can actually
+        // reach Supabase. Missing bridge = plain web = offline mode.
+        setStage('desktop-supabase-config');
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          const bridge = (window as unknown as {
+            graphite?: {
+              env?: {
+                getSupabaseConfig?: () => Promise<
+                  { data?: { url: string; anonKey: string } } | { error: string }
+                >;
+              };
+            };
+          }).graphite;
+
+          if (bridge?.env?.getSupabaseConfig) {
+            try {
+              const result = await bridge.env.getSupabaseConfig();
+              if ('data' in result && result.data?.url && result.data?.anonKey) {
+                const syncModule = require('@graphite/sync') as {
+                  setSupabaseCredentials?: (url: string, anonKey: string) => void;
+                };
+                syncModule.setSupabaseCredentials?.(
+                  result.data.url,
+                  result.data.anonKey,
+                );
+              }
+            } catch {
+              // Non-fatal — AuthGate will surface "offline mode" by
+              // returning the placeholder client from getSupabaseClient().
+            }
+          }
+        }
+
         setStage('auth-gate-import');
         const authGateModule = require('../components/auth/AuthGate') as {
           default?: AuthGateComponent;
