@@ -35,7 +35,7 @@ import UIKit
  *     no opacity field
  *   - `width` = stroke.path.first?.size.width (base width); per-point width
  *     variation is carried through `pressure`
- *   - `tool` maps `PKInkType` to the schema enum. Unknown types fall back to
+ *   - `tool` maps `PKInk.InkType` to the schema enum. Unknown types fall back to
  *     "pen" so we never emit invalid data.
  *
  * IDs: nanoid is done on the JS side (per task spec) — we emit strokes
@@ -134,7 +134,7 @@ public class GraphitePencilKitModule: Module {
   }
 
   /**
-   * Maps `PKInkType` to the schema's `StrokeTool` enum.
+   * Maps `PKInk.InkType` to the schema's `StrokeTool` enum.
    *   .pen        -> "pen"
    *   .pencil     -> "pencil"
    *   .marker     -> "marker"
@@ -145,7 +145,7 @@ public class GraphitePencilKitModule: Module {
    * Eraser strokes never surface here — PencilKit applies the eraser to the
    * drawing before `strokes` is populated, so we only see the surviving ink.
    */
-  private static func toolName(for inkType: PKInkType) -> String {
+  private static func toolName(for inkType: PKInk.InkType) -> String {
     switch inkType {
     case .pen:
       return "pen"
@@ -157,7 +157,7 @@ public class GraphitePencilKitModule: Module {
       break
     }
 
-    // PKInkType gained .crayon (iOS 17) and .watercolor (iOS 17+) after our
+    // PKInk.InkType gained .crayon (iOS 17) and .watercolor (iOS 17+) after our
     // minimum deployment target bumped. We handle them by string so the
     // build stays compatible with older SDKs.
     let asString = String(describing: inkType).lowercased()
