@@ -75,7 +75,7 @@ function PhoneLayout() {
     screen === 'sidebar' ? 'Graphite' : screen === 'list' ? 'Notes' : 'Editor';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
       <View
         style={{
           flexDirection: 'row',
@@ -145,7 +145,7 @@ function IPadLayout() {
   const handleCreateNote = useCreateNoteAction();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
         <View
           style={{
