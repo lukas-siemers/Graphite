@@ -110,7 +110,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 // without this exception.
 // ---------------------------------------------------------------------------
 config.transformer.transformIgnorePatterns = [
-  'node_modules/(?!(nanoid|@graphite)/)',
+  'node_modules/(?!(nanoid|@graphite|react-native-pencil-kit)/)',
 ];
 
 module.exports = config;
