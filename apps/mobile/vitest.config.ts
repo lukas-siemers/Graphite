@@ -19,6 +19,7 @@ export default defineConfig({
       'hooks/**/*.test.ts',
       'lib/**/*.test.ts',
       'modules/**/*.test.ts',
+      'components/**/*.test.ts',
     ],
   },
 });

@@ -38,14 +38,17 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     async function loadSession() {
       try {
-        // Skip Supabase entirely if credentials aren't configured (offline/free mode)
-        const url = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-        const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-        if (!url || !key) {
+        // Probe the sync client for configured credentials. On mobile
+        // the env is baked in and this check is a formality. On Electron
+        // desktop the main-process bridge has already seeded creds via
+        // `setSupabaseCredentials` before AuthGate mounted (see
+        // `apps/mobile/app/_layout.tsx`), so `getSupabaseClient()` will
+        // return a real client rather than the placeholder.
+        const supabase = getSupabaseClient();
+        const supabaseUrl = (supabase as unknown as { supabaseUrl?: string }).supabaseUrl || '';
+        if (!supabaseUrl || supabaseUrl.includes('placeholder.supabase.co')) {
           return;
         }
-
-        const supabase = getSupabaseClient();
 
         // Race against a timeout — getSession() can hang in production RN
         // builds where localStorage is unavailable.

@@ -20,7 +20,9 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
+import { useSupabaseConfig } from '../../hooks/use-supabase-config';
 import { getCurrentSession } from '../../components/auth/AuthGate';
+import { setSupabaseCredentials } from '@graphite/sync';
 import Sidebar from '../../components/sidebar/Sidebar';
 import NoteList from '../../components/note-list/NoteList';
 import Editor from '../../components/editor/Editor';
@@ -238,10 +240,26 @@ export default function MainAppShell() {
   const setNotes = useNoteStore((s) => s.setNotes);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
 
+  // Supabase creds come from Expo-baked env on mobile and from the
+  // Electron main process (via IPC) on desktop. `userId` stays null
+  // until the session resolves, so the engine won't start until creds
+  // AND auth are both ready.
+  const supabaseConfig = useSupabaseConfig();
+
+  // Push the desktop-sourced creds into `packages/sync`'s singleton
+  // client as soon as they're available, so every subsequent call to
+  // `getSupabaseClient()` (including the one inside AuthGate) sees the
+  // real URL/key instead of the placeholder.
+  useEffect(() => {
+    if (supabaseConfig.loaded && supabaseConfig.url && supabaseConfig.anonKey) {
+      setSupabaseCredentials(supabaseConfig.url, supabaseConfig.anonKey);
+    }
+  }, [supabaseConfig.loaded, supabaseConfig.url, supabaseConfig.anonKey]);
+
   useSyncEngine(
-    userId,
-    process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+    supabaseConfig.loaded ? userId : null,
+    supabaseConfig.url,
+    supabaseConfig.anonKey,
   );
 
   useEffect(() => {
