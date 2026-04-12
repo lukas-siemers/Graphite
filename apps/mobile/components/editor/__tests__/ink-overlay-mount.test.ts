@@ -67,7 +67,13 @@ describe('shouldMountInkOverlay', () => {
     expect(shouldMountInkOverlay({ ...BASE, platform: 'android' })).toBe(false);
   });
 
-  it('does NOT mount on web (desktop resolves the .web.tsx stub)', () => {
-    expect(shouldMountInkOverlay({ ...BASE, platform: 'web' })).toBe(false);
+  it('mounts on web / Electron — Stage 4 SVG renderer picks up .web.tsx', () => {
+    // Updated in Stage 4: the web bundle now ships a real SVG ink
+    // renderer (`InkOverlay.web.tsx`), not a stub. The mount predicate
+    // must allow it so iPad scribbles are visible on the desktop app.
+    // Skia is NOT pulled in on web — Metro/webpack resolve the `.web`
+    // variant ahead of `.tsx`, so `@shopify/react-native-skia` never
+    // enters the desktop bundle.
+    expect(shouldMountInkOverlay({ ...BASE, platform: 'web' })).toBe(true);
   });
 });
