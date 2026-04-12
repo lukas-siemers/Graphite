@@ -58,7 +58,15 @@ export default function DrawingCanvas(props: DrawingCanvasProps) {
     }) => void;
   }> | null = null;
   try {
-    const mod = require('graphite-pencil-kit');
+    // Relative path (not bare import) because graphite-pencil-kit is NOT a
+    // registered yarn workspace package — root package.json's workspaces
+    // array only includes apps/* and packages/*, so Metro can't resolve
+    // `require('graphite-pencil-kit')` to the local module folder. The
+    // Swift side is still autolinked via expo-modules-autolinking's
+    // default nativeModulesDir: ./modules, so requireNativeViewManager()
+    // on the view manager name inside the module works fine. This just
+    // fixes the JS-side bundling path.
+    const mod = require('../../modules/graphite-pencil-kit/src');
     GraphitePencilKitView = mod.GraphitePencilKitView ?? null;
   } catch (_err) {
     GraphitePencilKitView = null;
