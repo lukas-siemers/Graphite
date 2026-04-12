@@ -1,4 +1,4 @@
-import { View, Pressable, Text, ScrollView } from 'react-native';
+import { View, Pressable, Text, ScrollView, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
@@ -77,6 +77,8 @@ export function FormattingToolbar() {
   const hasSelection = useEditorStore((s) => s.hasSelection);
   const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
   const dispatchCommand = useEditorStore((s) => s.dispatchCommand);
+  const drawMode = useEditorStore((s) => s.drawMode);
+  const toggleDrawMode = useEditorStore((s) => s.toggleDrawMode);
 
   function isActive(cmd: FormatCommand) {
     return activeFormats.includes(cmd);
@@ -151,6 +153,39 @@ export function FormattingToolbar() {
 
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
+
+        {/* Group 6 — Draw (iOS only). Uses a plain Pressable instead of
+            ToolbarButton because drawMode is a non-format UI mode, not a
+            FormatCommand, and doesn't go through dispatchCommand. */}
+        {Platform.OS === 'ios' && (
+          <>
+            <Separator />
+            <Pressable
+              onPress={toggleDrawMode}
+              accessibilityLabel="Toggle drawing mode"
+              style={({ pressed }) => ({
+                width: 30,
+                height: 30,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: drawMode
+                  ? tokens.bgHover
+                  : pressed
+                  ? tokens.bgBright
+                  : 'transparent',
+                marginHorizontal: 1,
+                borderBottomWidth: drawMode ? 2 : 0,
+                borderBottomColor: tokens.accent,
+              })}
+            >
+              <MaterialCommunityIcons
+                name="draw"
+                size={16}
+                color={drawMode ? tokens.accentLight : tokens.textMuted}
+              />
+            </Pressable>
+          </>
+        )}
       </ScrollView>
     </View>
   );
