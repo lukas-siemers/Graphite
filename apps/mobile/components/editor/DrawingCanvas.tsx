@@ -2,22 +2,23 @@ import * as React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { tokens } from '@graphite/ui';
-import type { InkStroke } from '@graphite/db';
 
 export interface DrawingCanvasProps {
-  initialStrokes: InkStroke[];
-  onStrokesChange: (strokes: InkStroke[]) => void;
+  initialDrawingBase64: string | null;
+  onDrawingChange: (base64: string) => void;
   onDone: () => void;
 }
 
 /**
- * Full-screen drawing surface. This component is rendered *instead of* the
- * text editor when `drawMode` is on — never beside it. Mounting the native
- * PencilKit view inside the same tree as the TextInput was the root cause
- * of the builds 46-50 black-screen regressions, so we keep the two modes
- * mutually exclusive at the React tree level (see Editor.tsx).
+ * Full-screen drawing surface backed by react-native-pencil-kit (mym0404).
  *
- * Startup safety: we `require()` the native module lazily (not at module
+ * This component is rendered *instead of* the text editor when `drawMode`
+ * is on -- never beside it. Mounting the native PencilKit view inside the
+ * same tree as the TextInput was the root cause of the builds 46-50
+ * black-screen regressions, so we keep the two modes mutually exclusive
+ * at the React tree level (see Editor.tsx).
+ *
+ * Startup safety: we `require()` the npm package lazily (not at module
  * scope) so nothing imports PencilKit until the user actually taps the
  * Draw button. This mirrors the CanvasRenderer pattern from CLAUDE.md's
  * "iOS production startup trap" section.
@@ -26,12 +27,8 @@ export interface DrawingCanvasProps {
  * stub instead of attempting to load the native view.
  */
 export default function DrawingCanvas(props: DrawingCanvasProps) {
-  const { initialStrokes, onStrokesChange, onDone } = props;
+  const { initialDrawingBase64, onDrawingChange, onDone } = props;
 
-  // Expo Go runs the JS bundle without our custom native modules baked in.
-  // Checking appOwnership === 'expo' is how CanvasRenderer used to fence
-  // Skia off. If we didn't guard here, `requireNativeViewManager` would
-  // throw a "view manager not found" red box on dev client launches.
   const isExpoGo = Constants.appOwnership === 'expo';
 
   if (Platform.OS !== 'ios' || isExpoGo) {
@@ -47,32 +44,72 @@ export default function DrawingCanvas(props: DrawingCanvasProps) {
     );
   }
 
-  // Lazy require keeps PencilKit out of the app startup path. The
-  // require() is intentionally inside the render body — if we moved it to
-  // module scope we'd be back in the black-screen trap.
-  let GraphitePencilKitView: React.ComponentType<{
-    style?: any;
-    initialStrokes?: unknown[];
-    onStrokesChanged?: (event: {
-      nativeEvent: { strokes: InkStroke[] };
-    }) => void;
-  }> | null = null;
+  return <PencilKitSurface initialDrawingBase64={initialDrawingBase64} onDrawingChange={onDrawingChange} onDone={onDone} />;
+}
+
+/**
+ * Inner component that actually mounts PencilKitView. Separated so the
+ * lazy require + ref logic lives in its own mount lifecycle.
+ */
+function PencilKitSurface({
+  initialDrawingBase64,
+  onDrawingChange,
+  onDone,
+}: DrawingCanvasProps) {
+  // Lazy require keeps PencilKit out of the app startup path.
+  let PencilKitView: any = null;
   try {
-    // Relative path (not bare import) because graphite-pencil-kit is NOT a
-    // registered yarn workspace package — root package.json's workspaces
-    // array only includes apps/* and packages/*, so Metro can't resolve
-    // `require('graphite-pencil-kit')` to the local module folder. The
-    // Swift side is still autolinked via expo-modules-autolinking's
-    // default nativeModulesDir: ./modules, so requireNativeViewManager()
-    // on the view manager name inside the module works fine. This just
-    // fixes the JS-side bundling path.
-    const mod = require('../../modules/graphite-pencil-kit/src');
-    GraphitePencilKitView = mod.GraphitePencilKitView ?? null;
+    const mod = require('react-native-pencil-kit');
+    PencilKitView = mod.default ?? mod;
   } catch (_err) {
-    GraphitePencilKitView = null;
+    PencilKitView = null;
   }
 
-  if (!GraphitePencilKitView) {
+  const pencilKitRef = React.useRef<any>(null);
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load initial drawing data after PencilKitView mounts
+  React.useEffect(() => {
+    if (initialDrawingBase64 && pencilKitRef.current) {
+      // Small delay to let the native view initialize
+      const timer = setTimeout(() => {
+        pencilKitRef.current?.loadBase64Data(initialDrawingBase64);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [initialDrawingBase64]);
+
+  // Auto-save on drawing change (debounced 500ms)
+  const handleDrawingDidChange = React.useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const b64 = await pencilKitRef.current?.getBase64Data();
+        if (b64) {
+          onDrawingChange(b64);
+        }
+      } catch (_err) {
+        // Silently ignore save failures
+      }
+    }, 500);
+  }, [onDrawingChange]);
+
+  // Save on Done press (immediate, not debounced)
+  const handleDone = React.useCallback(async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    try {
+      const b64 = await pencilKitRef.current?.getBase64Data();
+      if (b64) {
+        onDrawingChange(b64);
+      }
+    } catch (_err) {
+      // Silently ignore
+    }
+    onDone();
+  }, [onDrawingChange, onDone]);
+
+  if (!PencilKitView) {
     return (
       <DrawingStub
         message="PencilKit module is not linked in this build."
@@ -83,15 +120,14 @@ export default function DrawingCanvas(props: DrawingCanvasProps) {
 
   return (
     <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
-      <GraphitePencilKitView
+      <PencilKitView
+        ref={pencilKitRef}
         style={{ flex: 1 }}
-        initialStrokes={initialStrokes}
-        onStrokesChanged={(event) => {
-          const strokes = event?.nativeEvent?.strokes ?? [];
-          onStrokesChange(strokes);
-        }}
+        drawingPolicy="pencilOnly"
+        backgroundColor={tokens.bgBase}
+        canvasViewDrawingDidChange={handleDrawingDidChange}
       />
-      <DoneButton onPress={onDone} />
+      <DoneButton onPress={handleDone} />
     </View>
   );
 }

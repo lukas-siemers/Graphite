@@ -1,11 +1,10 @@
 import * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { tokens } from '@graphite/ui';
-import type { InkStroke } from '@graphite/db';
 
 export interface DrawingCanvasProps {
-  initialStrokes: InkStroke[];
-  onStrokesChange: (strokes: InkStroke[]) => void;
+  initialDrawingBase64: string | null;
+  onDrawingChange: (base64: string) => void;
   onDone: () => void;
 }
 

@@ -9,7 +9,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, createEmptyCanvas } from '@graphite/db';
-import type { CanvasDocument, InkStroke } from '@graphite/db';
+import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
 import DrawingCanvas from './DrawingCanvas';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
@@ -117,51 +117,39 @@ export default function Editor() {
     }, 500);
   }
 
-  // Drawing mode: debounced save of ink strokes. PencilKit fires on every
-  // stroke-end; we collapse rapid strokes into one DB write the same way
-  // handleCanvasTextChange does for text edits.
-  const strokesDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingStrokesRef = useRef<InkStroke[] | null>(null);
-
-  const persistStrokes = useCallback(async () => {
-    const noteId = activeNoteIdRef.current;
-    const strokes = pendingStrokesRef.current;
-    pendingStrokesRef.current = null;
-    if (!noteId || !strokes) return;
-    setSaveStatus('Saving...');
-    try {
-      const db = getDatabase();
-      // Object.assign instead of spread — same Hermes GC defense used elsewhere
-      // in this file when mutating the active canvas document.
-      let currentDoc: CanvasDocument;
-      const currentJson = canvasJsonRef.current;
-      if (currentJson) {
-        try {
-          currentDoc = JSON.parse(currentJson) as CanvasDocument;
-        } catch {
+  // Drawing mode: save PKDrawing base64 blob. Called by DrawingCanvas on
+  // Done press and on auto-save (debounced inside DrawingCanvas itself).
+  const handleDrawingChange = useCallback(
+    async (base64: string) => {
+      const noteId = activeNoteIdRef.current;
+      if (!noteId) return;
+      setSaveStatus('Saving...');
+      try {
+        const db = getDatabase();
+        let currentDoc: CanvasDocument;
+        const currentJson = canvasJsonRef.current;
+        if (currentJson) {
+          try {
+            currentDoc = JSON.parse(currentJson) as CanvasDocument;
+          } catch {
+            currentDoc = createEmptyCanvas();
+          }
+        } else {
           currentDoc = createEmptyCanvas();
         }
-      } else {
-        currentDoc = createEmptyCanvas();
+        const nextDoc: CanvasDocument = Object.assign({}, currentDoc, {
+          inkLayer: Object.assign({}, currentDoc.inkLayer, {
+            pkDrawingBase64: base64,
+          }),
+        });
+        await updateNoteCanvas(db, noteId, nextDoc);
+        setSaveStatus('Saved');
+      } catch (_) {
+        setSaveStatus('Saved');
       }
-      const nextDoc: CanvasDocument = Object.assign({}, currentDoc, {
-        inkLayer: { strokes },
-      });
-      await updateNoteCanvas(db, noteId, nextDoc);
-      setSaveStatus('Saved');
-    } catch (_) {
-      setSaveStatus('Saved');
-    }
-  }, [updateNoteCanvas]);
-
-  function handleStrokesChange(strokes: InkStroke[]) {
-    pendingStrokesRef.current = strokes;
-    setSaveStatus('Saving...');
-    if (strokesDebounce.current) clearTimeout(strokesDebounce.current);
-    strokesDebounce.current = setTimeout(() => {
-      void persistStrokes();
-    }, 500);
-  }
+    },
+    [updateNoteCanvas],
+  );
 
   /**
    * Called when the CanvasRenderer text layer emits a new body string.
@@ -335,8 +323,8 @@ export default function Editor() {
       <View style={{ flex: 1 }}>
         {drawMode ? (
           <DrawingCanvas
-            initialStrokes={activeCanvasDoc.inkLayer.strokes}
-            onStrokesChange={handleStrokesChange}
+            initialDrawingBase64={activeCanvasDoc.inkLayer.pkDrawingBase64 ?? null}
+            onDrawingChange={handleDrawingChange}
             onDone={() => setDrawMode(false)}
           />
         ) : (

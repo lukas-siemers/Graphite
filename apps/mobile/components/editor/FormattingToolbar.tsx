@@ -154,11 +154,8 @@ export function FormattingToolbar() {
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
 
-        {/* Group 6 — Draw (iOS only). Disabled in build 55: PencilKit
-            native module shows "Unimplemented component" on Fabric/new-arch
-            and entering drawMode during note transitions crashes the app.
-            Re-enable once the module is debugged with Xcode. */}
-        {Platform.OS === 'ios' && false && (
+        {/* Group 6 — Draw (iOS only). Backed by react-native-pencil-kit. */}
+        {Platform.OS === 'ios' && (
           <>
             <Separator />
             <Pressable
