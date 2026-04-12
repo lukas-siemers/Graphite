@@ -123,9 +123,9 @@ function PencilKitSurface({
       <PencilKitView
         ref={pencilKitRef}
         style={{ flex: 1 }}
-        drawingPolicy="pencilOnly"
+        drawingPolicy="pencilonly"
         backgroundColor={tokens.bgBase}
-        canvasViewDrawingDidChange={handleDrawingDidChange}
+        onCanvasViewDrawingDidChange={handleDrawingDidChange}
       />
       <DoneButton onPress={handleDone} />
     </View>
