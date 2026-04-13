@@ -6,14 +6,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('graphite', {
-  env: {
-    // Returns { data: { url, anonKey } } on success or { error } on failure.
-    // The renderer-side hook uses this to configure the Supabase client
-    // without ever shipping credentials in the JS bundle — they're read
-    // from an env file at app startup and handed to the renderer via IPC.
-    // NEVER expose `SUPABASE_SERVICE_ROLE_KEY` here; it's server-only.
-    getSupabaseConfig: () => ipcRenderer.invoke('env:getSupabaseConfig'),
-  },
   db: {
     getNotebooks: () =>
       ipcRenderer.invoke('db:getNotebooks'),

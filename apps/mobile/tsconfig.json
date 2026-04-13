@@ -12,9 +12,6 @@
       ],
       "@graphite/db": [
         "../../packages/db/src/index"
-      ],
-      "graphite-pencil-kit": [
-        "./modules/graphite-pencil-kit/src/index"
       ]
     }
   },

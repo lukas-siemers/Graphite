@@ -4,6 +4,11 @@ import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
 import { useEditorStore } from '../../stores/use-editor-store';
 
+interface FormattingToolbarProps {
+  onToggleDrawing?: () => void;
+  drawingOpen?: boolean;
+}
+
 function Separator() {
   return (
     <View
@@ -72,13 +77,11 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
   );
 }
 
-export function FormattingToolbar() {
+export function FormattingToolbar({ onToggleDrawing, drawingOpen = false }: FormattingToolbarProps) {
   const activeFormats = useEditorStore((s) => s.activeFormats);
   const hasSelection = useEditorStore((s) => s.hasSelection);
   const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
   const dispatchCommand = useEditorStore((s) => s.dispatchCommand);
-  const drawMode = useEditorStore((s) => s.drawMode);
-  const toggleDrawMode = useEditorStore((s) => s.toggleDrawMode);
 
   function isActive(cmd: FormatCommand) {
     return activeFormats.includes(cmd);
@@ -153,38 +156,43 @@ export function FormattingToolbar() {
 
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
-
-        {/* Group 6 — Draw (iOS only). Backed by react-native-pencil-kit. */}
-        {Platform.OS === 'ios' && (
-          <>
-            <Separator />
-            <Pressable
-              onPress={toggleDrawMode}
-              accessibilityLabel="Toggle drawing mode"
-              style={({ pressed }) => ({
-                width: 30,
-                height: 30,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: drawMode
-                  ? tokens.bgHover
-                  : pressed
-                  ? tokens.bgBright
-                  : 'transparent',
-                marginHorizontal: 1,
-                borderBottomWidth: drawMode ? 2 : 0,
-                borderBottomColor: tokens.accent,
-              })}
-            >
-              <MaterialCommunityIcons
-                name="draw"
-                size={16}
-                color={drawMode ? tokens.accentLight : tokens.textMuted}
-              />
-            </Pressable>
-          </>
-        )}
       </ScrollView>
+
+      {/* Right side — fixed */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingRight: 8,
+          gap: 2,
+        }}
+      >
+        {/* Draw toggle — iPad / native only */}
+        {Platform.OS !== 'web' && (
+          <Pressable
+            onPress={onToggleDrawing}
+            style={({ pressed }) => ({
+              width: 30,
+              height: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: drawingOpen
+                ? tokens.bgHover
+                : pressed
+                ? tokens.bgBright
+                : 'transparent',
+              borderBottomWidth: drawingOpen ? 2 : 0,
+              borderBottomColor: tokens.accent,
+            })}
+          >
+            <MaterialCommunityIcons
+              name="draw"
+              size={16}
+              color={drawingOpen ? tokens.accentLight : tokens.textMuted}
+            />
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }

@@ -249,6 +249,100 @@ describe('reorderNotes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// deleteIfEmpty — auto-delete empty notes on navigate-away
+// ---------------------------------------------------------------------------
+
+describe('deleteIfEmpty', () => {
+  beforeEach(async () => {
+    const db = await import('@graphite/db');
+    (db.deleteNote as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (db.deleteNote as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    useNoteStore.setState({ notes: [], activeNoteId: null });
+  });
+
+  it('deletes a fresh Untitled note with empty body', async () => {
+    const empty: Note = { ...note1, id: 'e-1', title: 'Untitled', body: '', canvasJson: null };
+    useNoteStore.setState({ notes: [empty] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-1');
+    expect(deleted).toBe(true);
+    expect(useNoteStore.getState().notes.find((n) => n.id === 'e-1')).toBeUndefined();
+    const db = await import('@graphite/db');
+    expect(db.deleteNote as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(fakeDb, 'e-1');
+  });
+
+  it('does NOT delete a note that has only a title (no body)', async () => {
+    const titled: Note = { ...note1, id: 'e-2', title: 'My Title', body: '', canvasJson: null };
+    useNoteStore.setState({ notes: [titled] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-2');
+    expect(deleted).toBe(false);
+    expect(useNoteStore.getState().notes.find((n) => n.id === 'e-2')).toBeDefined();
+  });
+
+  it('does NOT delete a note that has only body text', async () => {
+    const bodied: Note = { ...note1, id: 'e-3', title: 'Untitled', body: 'hello', canvasJson: null };
+    useNoteStore.setState({ notes: [bodied] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-3');
+    expect(deleted).toBe(false);
+    expect(useNoteStore.getState().notes.find((n) => n.id === 'e-3')).toBeDefined();
+  });
+
+  it('deletes when title is empty string and body is empty', async () => {
+    const blank: Note = { ...note1, id: 'e-4', title: '', body: '', canvasJson: null };
+    useNoteStore.setState({ notes: [blank] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-4');
+    expect(deleted).toBe(true);
+  });
+
+  it('does NOT delete a note with ink strokes but no text', async () => {
+    const canvasWithInk: CanvasDocument = {
+      version: 1,
+      textContent: { body: '' },
+      inkLayer: {
+        strokes: [
+          { id: 's-1', points: [], color: '#FFFFFF', width: 2, opacity: 1 },
+        ],
+      },
+    };
+    const inkOnly: Note = {
+      ...note1,
+      id: 'e-5',
+      title: 'Untitled',
+      body: '',
+      canvasJson: JSON.stringify(canvasWithInk),
+    };
+    useNoteStore.setState({ notes: [inkOnly] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-5');
+    expect(deleted).toBe(false);
+    expect(useNoteStore.getState().notes.find((n) => n.id === 'e-5')).toBeDefined();
+  });
+
+  it('clears activeNoteId when the deleted empty note was active', async () => {
+    const empty: Note = { ...note1, id: 'e-6', title: 'Untitled', body: '', canvasJson: null };
+    useNoteStore.setState({ notes: [empty], activeNoteId: 'e-6' });
+    await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-6');
+    expect(useNoteStore.getState().activeNoteId).toBeNull();
+  });
+
+  it('reads body from canvasJson textContent when present', async () => {
+    const canvasWithText: CanvasDocument = {
+      version: 1,
+      textContent: { body: 'real content' },
+      inkLayer: { strokes: [] },
+    };
+    const note: Note = {
+      ...note1,
+      id: 'e-7',
+      title: 'Untitled',
+      body: '',
+      canvasJson: JSON.stringify(canvasWithText),
+    };
+    useNoteStore.setState({ notes: [note] });
+    const deleted = await useNoteStore.getState().deleteIfEmpty(fakeDb, 'e-7');
+    expect(deleted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // moveNoteToNotebook — move note between notebooks
 // ---------------------------------------------------------------------------
 

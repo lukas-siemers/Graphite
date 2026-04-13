@@ -18,7 +18,6 @@ export interface InkStroke {
 
 export interface InkLayer {
   strokes: InkStroke[];
-  pkDrawingBase64?: string | null;  // opaque PKDrawing data from react-native-pencil-kit
 }
 
 export interface TextContent {
@@ -35,6 +34,6 @@ export function createEmptyCanvas(): CanvasDocument {
   return {
     version: 1,
     textContent: { body: '' },
-    inkLayer: { strokes: [], pkDrawingBase64: null },
+    inkLayer: { strokes: [] },
   };
 }

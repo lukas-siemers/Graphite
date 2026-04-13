@@ -33,7 +33,7 @@ const stubDir = path.resolve(projectRoot, 'stubs');
 
 config.resolver.extraNodeModules = {
   'react-native-draggable-flatlist': path.join(stubDir, 'react-native-draggable-flatlist-stub.js'),
-  'react-native-pencil-kit':      path.join(stubDir, 'react-native-pencil-kit-stub.js'),
+  '@shopify/react-native-skia':   path.join(stubDir, 'react-native-skia-stub.js'),
   'react-native-worklets-core':   path.join(stubDir, 'react-native-worklets-stub.js'),
   'expo-file-system':             path.join(stubDir, 'expo-file-system-stub.js'),
   'expo-file-system/legacy':      path.join(stubDir, 'expo-file-system-stub.js'),
@@ -43,6 +43,7 @@ config.resolver.extraNodeModules = {
   'tldraw':                       path.join(stubDir, 'tldraw-stub.js'),
   'tldraw/tldraw.css':            path.join(stubDir, 'empty.js'),
   'expo-clipboard':               path.join(stubDir, 'expo-clipboard-stub.js'),
+  'react-native-webview':         path.join(stubDir, 'react-native-webview-stub.js'),
   'nanoid':                       path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/non-secure':            path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/async':                 path.join(stubDir, 'nanoid-stub.js'),
@@ -110,7 +111,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 // without this exception.
 // ---------------------------------------------------------------------------
 config.transformer.transformIgnorePatterns = [
-  'node_modules/(?!(nanoid|@graphite|react-native-pencil-kit)/)',
+  'node_modules/(?!(nanoid|@graphite)/)',
 ];
 
 module.exports = config;
