@@ -494,7 +494,12 @@ export async function applyRemoteNote(
   },
 ): Promise<void> {
   const local = await db.getFirstAsync<RawNote>('SELECT * FROM notes WHERE id = ?', [remote.id]);
-  const canvasVersion = remote.canvas_version ?? 1;
+  // Preserve the existing local canvas_version when the remote omits it
+  // (older payloads didn't include it). For new inserts with no remote value,
+  // default to 2 — v2 is the current canvas model and defaulting to 1 was
+  // silently downgrading v2 notes on pull in builds 75-77.
+  const canvasVersion =
+    remote.canvas_version ?? (local?.canvas_version ?? 2);
   const graphiteBlob = remote.graphite_blob ?? null;
   const ftsBody = remote.fts_body ?? null;
   // The FTS body column mirrors the updateNote() precedence: caller-provided

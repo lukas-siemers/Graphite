@@ -73,6 +73,10 @@ export default function Editor() {
   // mitigation pattern in app/_layout.tsx and keeps Skia off the startup path.
   const [SpatialCanvasRendererModule, setSpatialCanvasRendererModule] =
     useState<typeof SpatialCanvasRendererType | null>(null);
+  // Captures any failure during the lazy-require so the UI can surface the
+  // error instead of rendering an empty view. Build 75-77 shipped a silent
+  // failure path here that left users staring at a blank editor body.
+  const [spatialLoadError, setSpatialLoadError] = useState<string | null>(null);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
@@ -95,10 +99,21 @@ export default function Editor() {
     // Lazy-require: keep Skia out of the startup path per iOS production trap
     // (CLAUDE.md iOS startup trap section). The require() runs only after a v2
     // note is opened, well past initial route render.
-    const mod = require('@graphite/editor') as {
-      SpatialCanvasRenderer: typeof SpatialCanvasRendererType;
-    };
-    setSpatialCanvasRendererModule(() => mod.SpatialCanvasRenderer);
+    //
+    // Wrapped in try/catch so a Skia/Hermes init failure doesn't silently
+    // leave the renderer null. Failures are surfaced to the UI via
+    // spatialLoadError below instead of collapsing to an empty view.
+    try {
+      const mod = require('@graphite/editor') as {
+        SpatialCanvasRenderer: typeof SpatialCanvasRendererType;
+      };
+      setSpatialCanvasRendererModule(() => mod.SpatialCanvasRenderer);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSpatialLoadError(message);
+      // eslint-disable-next-line no-console
+      console.error('[Editor] Failed to lazy-load @graphite/editor:', err);
+    }
   }, [activeNote?.canvasVersion, SpatialCanvasRendererModule]);
 
   // v2 spatial canvas migration: resolves the SpatialCanvasDocument for the
@@ -438,7 +453,28 @@ export default function Editor() {
               focusKey={activeNoteId}
               inkMode={inkMode}
             />
-          ) : null
+          ) : spatialLoadError ? (
+            <View
+              style={{
+                padding: 16,
+                backgroundColor: tokens.accentTint,
+              }}
+            >
+              <Text
+                style={{
+                  color: tokens.accentLight,
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 12,
+                }}
+              >
+                Spatial renderer failed to load: {spatialLoadError}
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ padding: 16, color: tokens.textMuted }}>
+              Loading editor…
+            </Text>
+          )
         ) : (
           <CanvasRenderer
             canvasDoc={activeCanvasDoc}

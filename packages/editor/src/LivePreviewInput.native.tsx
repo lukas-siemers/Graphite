@@ -21,7 +21,7 @@
  *   { type: 'error', message: string }
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { buildEditorHtml } from './live-preview/editorHtml';
 import type { FormatCommand } from './types';
@@ -107,6 +107,10 @@ export function LivePreviewInput({
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
   const [contentHeight, setContentHeight] = useState<number>(500);
+  // Surface WebView errors in a red overlay — temporary diagnostic for
+  // Build 78. Hiding errors behind __DEV__ meant production users saw a
+  // silent dead editor when the WebView bundle failed.
+  const [webViewError, setWebViewError] = useState<string | null>(null);
 
   // Refs to latest prop values — same pattern as the web component, needed so
   // the `ready` handler seeds the editor with the CURRENT value rather than
@@ -162,6 +166,9 @@ export function LivePreviewInput({
     switch (msg.type) {
       case 'ready': {
         readyRef.current = true;
+        // A successful ready handshake means the bundle is alive — clear any
+        // stale error banner from a previous failed load.
+        setWebViewError(null);
         const initValue = valueRef.current ?? '';
         lastSentValueRef.current = initValue;
         postToFrame({ type: 'set-value', value: initValue });
@@ -199,15 +206,11 @@ export function LivePreviewInput({
         break;
 
       case 'error':
-        // Surface WebView errors so they don't disappear silently in release
-        // builds. Wrapped in a conditional so dev-only console usage does not
-        // ship as a production log.
-        // Surface WebView errors in dev only — guarded via the RN __DEV__
-        // global which is always defined at runtime on native.
-        if (typeof (globalThis as any).__DEV__ !== 'undefined' && (globalThis as any).__DEV__) {
-          // eslint-disable-next-line no-console
-          console.warn('[LivePreviewInput.native] WebView error:', msg.message);
-        }
+        // Surface WebView errors as a visible overlay (not gated on __DEV__)
+        // so release users see the failure instead of a dead editor. This is
+        // a temporary Build 78 diagnostic — hiding errors is worse than
+        // showing them.
+        setWebViewError(typeof msg.message === 'string' ? msg.message : 'Unknown WebView error');
         break;
     }
   }
@@ -259,7 +262,16 @@ export function LivePreviewInput({
       style={[styles.container, { height: Math.max(contentHeight, 500) }]}
       pointerEvents={inkMode ? 'none' : 'auto'}
       onTouchStart={() => {
-        if (!inkMode) onFocusRef.current?.();
+        if (inkMode) return;
+        onFocusRef.current?.();
+        // WKWebView OS policy (WebKit #195884) requires focus() to originate
+        // from an evaluateJavaScript call on the RN side before the keyboard
+        // is allowed to show. `keyboardDisplayRequiresUserAction={false}` only
+        // covers RN-initiated focus. Re-posting a 'focus' message through
+        // injectJavaScript satisfies that contract.
+        if (readyRef.current) {
+          postToFrame({ type: 'focus' });
+        }
       }}
     >
       <WebView
@@ -284,6 +296,9 @@ export function LivePreviewInput({
         opaque={false}
         backgroundColor="transparent"
       />
+      {webViewError !== null && (
+        <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
+      )}
     </View>
   );
 }
@@ -299,5 +314,15 @@ const styles = StyleSheet.create({
   },
   webViewContainer: {
     backgroundColor: 'transparent',
+  },
+  errorBanner: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    right: 4,
+    backgroundColor: 'rgba(139, 0, 0, 0.85)',
+    color: '#fff',
+    padding: 6,
+    fontSize: 11,
   },
 });

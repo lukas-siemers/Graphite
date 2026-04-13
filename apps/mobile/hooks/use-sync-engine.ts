@@ -116,6 +116,12 @@ export function useSyncEngine(
             title: n.title,
             body: n.body,
             canvas_json: n.canvasJson,
+            // Include canvas_version + graphite_blob so a v2 note that round-
+            // trips through the sync engine isn't silently downgraded to v1
+            // on the next pull (which flipped the toolbar toggle off and
+            // swapped the renderer in builds 75-77).
+            canvas_version: n.canvasVersion ?? 2,
+            graphite_blob: n.graphiteBlob ?? null,
             sort_order: n.sortOrder,
             created_at: n.createdAt,
             updated_at: n.updatedAt,
