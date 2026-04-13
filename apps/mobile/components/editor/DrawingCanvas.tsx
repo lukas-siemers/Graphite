@@ -67,6 +67,11 @@ function PencilKitSurface({
 
   const pencilKitRef = React.useRef<any>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Seamless-exit timer: when the user lifts their Pencil and no new stroke
+  // arrives within this window, we auto-save and exit draw mode so the user
+  // doesn't have to hunt for the Back button. Reset on every drawing change.
+  const autoExitRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const AUTO_EXIT_MS = 2500;
 
   // On mount: ALWAYS clear the native PKCanvasView first, then load the
   // initial base64 if present. PencilKitView retains its drawing across React
@@ -88,7 +93,23 @@ function PencilKitSurface({
     return () => clearTimeout(timer);
   }, []);
 
-  // Auto-save on drawing change (debounced 500ms)
+  // Save on Done press / auto-exit (immediate, not debounced)
+  const handleDone = React.useCallback(async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (autoExitRef.current) clearTimeout(autoExitRef.current);
+    try {
+      const b64 = await pencilKitRef.current?.getBase64Data();
+      if (b64) {
+        onDrawingChange(b64);
+      }
+    } catch (_err) {
+      // Silently ignore
+    }
+    onDone();
+  }, [onDrawingChange, onDone]);
+
+  // Auto-save on drawing change (debounced 500ms) + queue seamless auto-exit
+  // 2.5s after the last change. Any fresh stroke cancels both timers.
   const handleDrawingDidChange = React.useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
@@ -101,21 +122,21 @@ function PencilKitSurface({
         // Silently ignore save failures
       }
     }, 500);
-  }, [onDrawingChange]);
 
-  // Save on Done press (immediate, not debounced)
-  const handleDone = React.useCallback(async () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    try {
-      const b64 = await pencilKitRef.current?.getBase64Data();
-      if (b64) {
-        onDrawingChange(b64);
-      }
-    } catch (_err) {
-      // Silently ignore
-    }
-    onDone();
-  }, [onDrawingChange, onDone]);
+    if (autoExitRef.current) clearTimeout(autoExitRef.current);
+    autoExitRef.current = setTimeout(() => {
+      void handleDone();
+    }, AUTO_EXIT_MS);
+  }, [onDrawingChange, handleDone]);
+
+  // Cleanup pending timers on unmount so a late auto-exit can't fire into
+  // a stale parent setDrawMode callback.
+  React.useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (autoExitRef.current) clearTimeout(autoExitRef.current);
+    };
+  }, []);
 
   if (!PencilKitView) {
     return (
@@ -147,30 +168,30 @@ function DoneButton({ onPress }: { onPress: () => void }) {
       style={{
         position: 'absolute',
         top: 12,
-        right: 12,
+        left: 12,
       }}
     >
       <Pressable
         onPress={onPress}
         accessibilityLabel="Exit drawing mode"
         style={({ pressed }) => ({
-          paddingHorizontal: 14,
+          width: 32,
           height: 32,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+          backgroundColor: pressed ? tokens.bgHover : 'transparent',
+          borderWidth: 1,
+          borderColor: tokens.border,
         })}
       >
         <Text
           style={{
-            fontSize: 12,
-            fontWeight: '700',
-            color: tokens.textPrimary,
-            letterSpacing: 0.5,
-            textTransform: 'uppercase',
+            fontSize: 20,
+            color: tokens.textMuted,
+            lineHeight: 20,
           }}
         >
-          Done
+          ×
         </Text>
       </Pressable>
     </View>
