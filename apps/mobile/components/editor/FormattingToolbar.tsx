@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
 import { useEditorStore } from '../../stores/use-editor-store';
+import { useNoteStore } from '../../stores/use-note-store';
 
 function Separator() {
   return (
@@ -72,11 +73,54 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
   );
 }
 
+function InkToggleButton() {
+  const inkMode = useEditorStore((s) => s.inkMode);
+  const toggleInkMode = useEditorStore((s) => s.toggleInkMode);
+
+  return (
+    <Pressable
+      onPress={toggleInkMode}
+      accessibilityLabel="Toggle drawing mode"
+      accessibilityState={{ selected: inkMode }}
+      style={({ pressed }) => ({
+        width: 30,
+        height: 30,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: inkMode
+          ? tokens.accentTint
+          : pressed
+          ? tokens.bgBright
+          : 'transparent',
+        marginHorizontal: 1,
+      })}
+    >
+      {({ pressed }) => (
+        <MaterialCommunityIcons
+          name="pencil"
+          size={16}
+          color={
+            inkMode
+              ? pressed
+                ? tokens.accentPressed
+                : tokens.accent
+              : tokens.textMuted
+          }
+        />
+      )}
+    </Pressable>
+  );
+}
+
 export function FormattingToolbar() {
   const activeFormats = useEditorStore((s) => s.activeFormats);
   const hasSelection = useEditorStore((s) => s.hasSelection);
   const selectionSpansLines = useEditorStore((s) => s.selectionSpansLines);
   const dispatchCommand = useEditorStore((s) => s.dispatchCommand);
+  const activeNoteId = useNoteStore((s) => s.activeNoteId);
+  const notes = useNoteStore((s) => s.notes);
+  const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
+  const isV2 = activeNote?.canvasVersion === 2;
   function isActive(cmd: FormatCommand) {
     return activeFormats.includes(cmd);
   }
@@ -150,6 +194,13 @@ export function FormattingToolbar() {
 
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
+
+        {isV2 && (
+          <>
+            <Separator />
+            <InkToggleButton />
+          </>
+        )}
       </ScrollView>
     </View>
   );

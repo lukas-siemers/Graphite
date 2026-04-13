@@ -61,6 +61,8 @@ export default function Editor() {
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
   const syncState = useEditorStore((s) => s.syncState);
+  const inkMode = useEditorStore((s) => s.inkMode);
+  const setInkMode = useEditorStore((s) => s.setInkMode);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -165,6 +167,12 @@ export default function Editor() {
     },
     [scheduleSpatialSave],
   );
+
+  // Reset ink mode when the active note changes so the toggle doesn't leak
+  // between notes.
+  useEffect(() => {
+    setInkMode(false);
+  }, [activeNote?.id, setInkMode]);
 
   // Sync local state when active note changes
   useEffect(() => {
@@ -428,6 +436,7 @@ export default function Editor() {
               onCommandApplied={clearCommand}
               onActiveFormatsChange={setActiveFormats}
               focusKey={activeNoteId}
+              inkMode={inkMode}
             />
           ) : null
         ) : (
