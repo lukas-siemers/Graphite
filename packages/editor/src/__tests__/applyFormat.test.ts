@@ -134,13 +134,69 @@ describe('applyFormat — link', () => {
   });
 });
 
-describe('applyFormat — unsupported command passthrough', () => {
-  it('returns the input unchanged for strikethrough (not wired in v1)', () => {
+describe('applyFormat — strikethrough', () => {
+  it('wraps selection in ~~...~~', () => {
     const result = applyFormat('foo', sel(0, 3), 'strikethrough');
-    expect(result.text).toBe('foo');
-    expect(result.selection).toEqual({ start: 0, end: 3 });
+    expect(result.text).toBe('~~foo~~');
+    expect(result.selection).toEqual({ start: 7, end: 7 });
   });
 
+  it('inserts ~~~~ with caret between when no selection', () => {
+    const result = applyFormat('hello', sel(2), 'strikethrough');
+    expect(result.text).toBe('he~~~~llo');
+    expect(result.selection).toEqual({ start: 4, end: 4 });
+  });
+});
+
+describe('applyFormat — h2 / h3', () => {
+  it('prepends ## to the current line', () => {
+    const result = applyFormat('hello', sel(2), 'h2');
+    expect(result.text).toBe('## hello');
+    expect(result.selection).toEqual({ start: 5, end: 5 });
+  });
+
+  it('replaces an existing h1 with h2', () => {
+    const result = applyFormat('# title', sel(4), 'h2');
+    expect(result.text).toBe('## title');
+    expect(result.selection).toEqual({ start: 5, end: 5 });
+  });
+
+  it('prepends ### for h3', () => {
+    const result = applyFormat('hello', sel(0), 'h3');
+    expect(result.text).toBe('### hello');
+    expect(result.selection).toEqual({ start: 4, end: 4 });
+  });
+
+  it('toggles off h2 when already h2', () => {
+    const result = applyFormat('## title', sel(5), 'h2');
+    expect(result.text).toBe('title');
+    expect(result.selection).toEqual({ start: 2, end: 2 });
+  });
+});
+
+describe('applyFormat — lists + blockquote', () => {
+  it('prepends - to a single-line selection for bullet-list', () => {
+    const result = applyFormat('foo', sel(0, 3), 'bullet-list');
+    expect(result.text).toBe('- foo');
+  });
+
+  it('prepends numbered items across multi-line selection', () => {
+    const result = applyFormat('a\nb\nc', sel(0, 5), 'numbered-list');
+    expect(result.text).toBe('1. a\n2. b\n3. c');
+  });
+
+  it('prepends > for blockquote on current line', () => {
+    const result = applyFormat('foo', sel(1), 'blockquote');
+    expect(result.text).toBe('> foo');
+  });
+
+  it('toggles off bullet-list when all lines already have -', () => {
+    const result = applyFormat('- a\n- b', sel(0, 7), 'bullet-list');
+    expect(result.text).toBe('a\nb');
+  });
+});
+
+describe('applyFormat — unsupported command passthrough', () => {
   it('returns the input unchanged for undo (handled by the host component)', () => {
     const result = applyFormat('bar', sel(1), 'undo');
     expect(result.text).toBe('bar');
