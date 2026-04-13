@@ -159,7 +159,7 @@ export function applyFormatCommand(
       return `${before}\n\`\`\`\ncode here\n\`\`\`\n${after}`;
     }
 
-    // 'undo' is handled by the host component (not a pure string transform)
+    // 'undo' is handled specially in CanvasTextInput via prevValueRef
     case 'undo':
       return text;
 

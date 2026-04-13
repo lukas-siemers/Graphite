@@ -7,8 +7,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "nanoid": "^5.0.0",
-    "zod": "^4.3.6"
+    "nanoid": "^5.0.0"
   },
   "peerDependencies": {
     "expo-sqlite": ">=14.0.0"

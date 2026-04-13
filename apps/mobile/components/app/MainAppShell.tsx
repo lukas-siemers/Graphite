@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, View, Text, Pressable, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -19,10 +19,9 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useEditorStore } from '../../stores/use-editor-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
-import { useSupabaseConfig } from '../../hooks/use-supabase-config';
 import { getCurrentSession } from '../../components/auth/AuthGate';
-import { setSupabaseCredentials } from '@graphite/sync';
 import Sidebar from '../../components/sidebar/Sidebar';
 import NoteList from '../../components/note-list/NoteList';
 import Editor from '../../components/editor/Editor';
@@ -55,6 +54,8 @@ function PhoneLayout() {
   const [screen, setScreen] = useState<PhoneScreen>('sidebar');
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
   const handleCreateNote = useCreateNoteAction(() => setScreen('editor'));
 
   useEffect(() => {
@@ -77,7 +78,7 @@ function PhoneLayout() {
     screen === 'sidebar' ? 'Graphite' : screen === 'list' ? 'Notes' : 'Editor';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       <View
         style={{
           flexDirection: 'row',
@@ -135,6 +136,28 @@ function PhoneLayout() {
         {screen === 'editor' && (
           <View style={{ flex: 1, position: 'relative' }}>
             <Editor />
+            {Platform.OS !== 'web' && (
+              <Pressable
+                onPress={toggleInputMode}
+                style={({ pressed }) => ({
+                  position: 'absolute',
+                  bottom: 24,
+                  right: 24,
+                  width: 48,
+                  height: 48,
+                  borderRadius: 0,
+                  backgroundColor: pressed
+                    ? tokens.accentPressed
+                    : inputMode === 'ink'
+                      ? tokens.accentPressed
+                      : tokens.accent,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                })}
+              >
+                <Text style={{ fontSize: 22, color: '#4D2600' }}>{'✏'}</Text>
+              </Pressable>
+            )}
           </View>
         )}
       </View>
@@ -144,10 +167,12 @@ function PhoneLayout() {
 
 function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
   const handleCreateNote = useCreateNoteAction();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
         <View
           style={{
@@ -186,7 +211,10 @@ function IPadLayout() {
               <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
             </Pressable>
 
-            <FormattingToolbar />
+            <FormattingToolbar
+              onToggleDrawing={toggleInputMode}
+              drawingOpen={inputMode === 'ink'}
+            />
             <Pressable
               onPress={handleCreateNote}
               hitSlop={10}
@@ -205,6 +233,28 @@ function IPadLayout() {
 
           <View style={{ flex: 1, position: 'relative' }}>
             <Editor />
+            {Platform.OS !== 'web' && (
+              <Pressable
+                onPress={toggleInputMode}
+                style={({ pressed }) => ({
+                  position: 'absolute',
+                  bottom: 24,
+                  right: 24,
+                  width: 48,
+                  height: 48,
+                  borderRadius: 0,
+                  backgroundColor: pressed
+                    ? tokens.accentPressed
+                    : inputMode === 'ink'
+                      ? tokens.accentPressed
+                      : tokens.accent,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                })}
+              >
+                <Text style={{ fontSize: 22, color: '#4D2600' }}>{'✏'}</Text>
+              </Pressable>
+            )}
           </View>
         </View>
       </View>
@@ -240,26 +290,10 @@ export default function MainAppShell() {
   const setNotes = useNoteStore((s) => s.setNotes);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
 
-  // Supabase creds come from Expo-baked env on mobile and from the
-  // Electron main process (via IPC) on desktop. `userId` stays null
-  // until the session resolves, so the engine won't start until creds
-  // AND auth are both ready.
-  const supabaseConfig = useSupabaseConfig();
-
-  // Push the desktop-sourced creds into `packages/sync`'s singleton
-  // client as soon as they're available, so every subsequent call to
-  // `getSupabaseClient()` (including the one inside AuthGate) sees the
-  // real URL/key instead of the placeholder.
-  useEffect(() => {
-    if (supabaseConfig.loaded && supabaseConfig.url && supabaseConfig.anonKey) {
-      setSupabaseCredentials(supabaseConfig.url, supabaseConfig.anonKey);
-    }
-  }, [supabaseConfig.loaded, supabaseConfig.url, supabaseConfig.anonKey]);
-
   useSyncEngine(
-    supabaseConfig.loaded ? userId : null,
-    supabaseConfig.url,
-    supabaseConfig.anonKey,
+    userId,
+    process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
   );
 
   useEffect(() => {

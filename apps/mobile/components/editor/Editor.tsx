@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   TextInput,
+  ScrollView,
   Pressable,
   Platform,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase, createEmptyCanvas, CanvasSchemaV1 } from '@graphite/db';
+import { getDatabase } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
-import { CanvasRenderer } from '@graphite/editor';
-import DrawingCanvas from './DrawingCanvas';
-import { extractStrokes } from 'graphite-pencil-kit';
-import { shouldMountInkOverlay } from './ink-overlay-mount';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -24,17 +21,50 @@ import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
 
-// Lazy-load the Skia ink overlay so `@shopify/react-native-skia` is kept
-// out of the production startup path. See CLAUDE.md "iOS production
-// startup trap" — static imports of native-heavy modules in the editor
-// route were the root cause of the builds 46-50 black-screen regression.
-// The lazy chunk is only fetched once we have strokes to render on iPad,
-// gated by the `shouldMountInkOverlay` check inside the component below.
-const InkOverlay = React.lazy(() =>
-  import('@graphite/editor').then((m) => ({ default: m.InkOverlay })),
-);
-
 type SaveStatus = 'Saved' | 'Saving...';
+
+interface CanvasRendererProps {
+  canvasDoc: CanvasDocument;
+  width?: number;
+  onInkChange?: (inkLayer: CanvasDocument['inkLayer']) => void;
+  onTextChange?: (text: string) => void;
+  inputMode?: 'ink' | 'scroll';
+  pendingCommand?: string | null;
+  onCommandApplied?: () => void;
+  onActiveFormatsChange?: (formats: any[]) => void;
+}
+
+type CanvasRendererComponent = (props: CanvasRendererProps) => JSX.Element;
+
+let cachedCanvasRenderer: CanvasRendererComponent | null | undefined;
+let cachedCanvasRendererError: string | null = null;
+
+function loadCanvasRenderer(): CanvasRendererComponent | null {
+  if (typeof cachedCanvasRenderer !== 'undefined') {
+    return cachedCanvasRenderer;
+  }
+
+  try {
+    const editorModule = require('../../../../packages/editor/src/CanvasRenderer') as {
+      CanvasRenderer?: CanvasRendererComponent;
+    };
+    cachedCanvasRenderer = editorModule.CanvasRenderer ?? null;
+
+    if (!cachedCanvasRenderer) {
+      cachedCanvasRendererError = 'Canvas renderer export was not available.';
+    }
+  } catch (error) {
+    cachedCanvasRenderer = null;
+    cachedCanvasRendererError =
+      error instanceof Error ? error.message : String(error);
+  }
+
+  return cachedCanvasRenderer;
+}
+
+function getCanvasRendererError(): string | null {
+  return cachedCanvasRendererError;
+}
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -45,6 +75,7 @@ export default function Editor() {
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
   const updateNoteCanvas = useNoteStore((s) => s.updateNoteCanvas);
+  const deleteIfEmpty = useNoteStore((s) => s.deleteIfEmpty);
 
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
@@ -54,50 +85,75 @@ export default function Editor() {
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const { width: windowWidth } = useWindowDimensions();
+  const inputMode = useEditorStore((s) => s.inputMode);
+  const setInputMode = useEditorStore((s) => s.setInputMode);
 
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
   const syncState = useEditorStore((s) => s.syncState);
-  const drawMode = useEditorStore((s) => s.drawMode);
-  const setDrawMode = useEditorStore((s) => s.setDrawMode);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
-  // Measured size of the editor body frame. Used to size the read-only
-  // Skia ink overlay so strokes can render at absolute coordinates across
-  // the full viewport width. Defaults are large enough to avoid the
-  // first-frame "0x0 canvas" case where Skia would render nothing until
-  // onLayout fires.
-  const [editorLayout, setEditorLayout] = useState<{ width: number; height: number }>({
-    width: 0,
-    height: 0,
-  });
-  const handleEditorLayout = useCallback((event: { nativeEvent: { layout: { width: number; height: number } } }) => {
-    const { width, height } = event.nativeEvent.layout;
-    setEditorLayout((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
-  }, []);
+  const [AdvancedCanvasRenderer, setAdvancedCanvasRenderer] =
+    useState<CanvasRendererComponent | null>(null);
+  const [advancedEditorError, setAdvancedEditorError] = useState<string | null>(null);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
   const activeNoteIdRef = useRef<string | null>(activeNoteId ?? null);
-  useEffect(() => {
-    activeNoteIdRef.current = activeNoteId ?? null;
-  }, [activeNoteId]);
+  useEffect(() => { activeNoteIdRef.current = activeNoteId ?? null; }, [activeNoteId]);
   // Ref keeps the latest canvasJson current inside debounce callbacks
   const canvasJsonRef = useRef<string | null>(activeNote?.canvasJson ?? null);
-  useEffect(() => {
-    canvasJsonRef.current = activeNote?.canvasJson ?? null;
-  }, [activeNote?.canvasJson]);
+  useEffect(() => { canvasJsonRef.current = activeNote?.canvasJson ?? null; }, [activeNote?.canvasJson]);
 
-  // Auto-migrate legacy notes to CanvasDocument on open
+  // Task 6 — auto-migrate legacy notes to CanvasDocument on open
   useNoteCanvasMigration(activeNote);
+
+  // Auto-delete empty notes when the user navigates away.
+  // Track the previous activeNoteId across renders; when it changes, run
+  // deleteIfEmpty against the previous id exactly once per transition.
+  const prevActiveNoteIdRef = useRef<string | null>(activeNoteId ?? null);
+  useEffect(() => {
+    const prevId = prevActiveNoteIdRef.current;
+    const nextId = activeNoteId ?? null;
+    if (prevId && prevId !== nextId) {
+      try {
+        const db = getDatabase();
+        void deleteIfEmpty(db, prevId);
+      } catch (_) {
+        // Best-effort cleanup — must not break navigation.
+      }
+    }
+    prevActiveNoteIdRef.current = nextId;
+  }, [activeNoteId, deleteIfEmpty]);
+
+  // On unmount (editor closed / app backgrounded), clean up the last active note.
+  useEffect(() => {
+    return () => {
+      const prevId = prevActiveNoteIdRef.current;
+      if (!prevId) return;
+      try {
+        const db = getDatabase();
+        void deleteIfEmpty(db, prevId);
+      } catch (_) {
+        // Best-effort cleanup.
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setInputMode('scroll');
+  }, [activeNoteId, setInputMode]);
 
   // Sync local state when active note changes
   useEffect(() => {
     if (activeNote) {
       setLocalTitle(activeNote.title);
+      // Prefer canvas body if migrated, fall back to legacy body
       const displayBody = activeNote.canvasJson
         ? (() => {
             try {
@@ -112,12 +168,6 @@ export default function Editor() {
       setSaveStatus('Saved');
     }
   }, [activeNoteId]);
-
-  // Always exit draw mode when the active note changes. Otherwise the user
-  // would land on a different note's ink layer while still in drawing mode.
-  useEffect(() => {
-    setDrawMode(false);
-  }, [activeNoteId, setDrawMode]);
 
   const persistSave = useCallback(
     async (patch: { title?: string; body?: string }) => {
@@ -143,102 +193,10 @@ export default function Editor() {
     }, 500);
   }
 
-  // Drawing mode: save PKDrawing base64 blob + extracted cross-platform
-  // strokes[]. Called by DrawingCanvas on Done press and on auto-save
-  // (debounced inside DrawingCanvas itself).
-  //
-  // Stage 2 dual-write (see docs/specs — ink extractor PR):
-  //   1. Keep `inkLayer.pkDrawingBase64` for iPad re-edit fidelity (PencilKit
-  //      is the only renderer that can consume the opaque blob).
-  //   2. Also extract `inkLayer.strokes[]` via the `graphite-pencil-kit`
-  //      native module so the desktop SVG renderer has something to draw.
-  //
-  // If extraction fails (module not registered, bad blob) we still write the
-  // blob so the user never loses data — `strokes` just stays empty and the
-  // desktop will render nothing until the next successful extract. This is
-  // the same "fail loud only in schema validation" policy used elsewhere.
-  const handleDrawingChange = useCallback(
-    async (base64: string) => {
-      const noteId = activeNoteIdRef.current;
-      if (!noteId) return;
-      setSaveStatus('Saving...');
-      try {
-        const db = getDatabase();
-
-        // Read current doc so we preserve textContent + any existing
-        // contentLayer objects. Legacy docs may be missing fields — fall
-        // back to an empty canvas and let Zod fill defaults on serialize.
-        let currentDoc: CanvasDocument;
-        const currentJson = canvasJsonRef.current;
-        if (currentJson) {
-          try {
-            currentDoc = JSON.parse(currentJson) as CanvasDocument;
-          } catch {
-            currentDoc = createEmptyCanvas();
-          }
-        } else {
-          currentDoc = createEmptyCanvas();
-        }
-
-        // Extract structured strokes. Any failure (native module missing,
-        // invalid PKDrawing, schema drift) is swallowed so the save path
-        // never crashes — but we do keep the base64 blob either way.
-        let extractedStrokes: CanvasSchemaV1.InkStroke[] = [];
-        try {
-          extractedStrokes = await extractStrokes(base64);
-          // eslint-disable-next-line no-console
-          console.log(
-            '[editor] extractStrokes ok — strokes=',
-            extractedStrokes.length,
-          );
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('[editor] extractStrokes failed; writing blob only', err);
-          extractedStrokes = [];
-        }
-
-        // Build a v1-shape document. We normalize the legacy fields in case
-        // currentDoc came from a pre-v1 row. `CanvasSchemaV1.canvasDocumentSchema`
-        // will validate strictly on serialize.
-        const v1Doc: CanvasSchemaV1.CanvasDocument = {
-          version: 1,
-          inkLayer: {
-            strokes: extractedStrokes,
-            pkDrawingBase64: base64,
-          },
-          contentLayer: {
-            objects: [],
-          },
-          textContent: {
-            body: currentDoc.textContent?.body ?? '',
-          },
-        };
-
-        // Re-validate via Zod before persisting. Throws ZodError on drift.
-        const canvasJson = CanvasSchemaV1.serializeCanvasDocument(v1Doc);
-
-        // Hand off to the existing store writer. The legacy `CanvasDocument`
-        // type here is shape-compatible with the v1 doc except for the
-        // `strokes[]` inner shape — cast through unknown until the cutover
-        // lands and both types converge.
-        await updateNoteCanvas(
-          db,
-          noteId,
-          JSON.parse(canvasJson) as unknown as CanvasDocument,
-        );
-        setSaveStatus('Saved');
-      } catch (_) {
-        setSaveStatus('Saved');
-      }
-    },
-    [updateNoteCanvas],
-  );
-
   /**
    * Called when the CanvasRenderer text layer emits a new body string.
-   * CanvasRenderer already debounces at 500ms — this fires at most once
-   * per save window. Reads note ID and canvasJson from refs so the closure
-   * is never stale.
+   * CanvasTextInput already debounces — this fires at most once per 500ms.
+   * Reads note ID and canvasJson from refs so the closure is never stale.
    */
   async function handleCanvasTextChange(text: string) {
     const noteId = activeNoteIdRef.current;
@@ -251,12 +209,10 @@ export default function Editor() {
       let currentDoc: CanvasDocument;
       const currentJson = canvasJsonRef.current;
       if (currentJson) {
-        try {
-          currentDoc = JSON.parse(currentJson) as CanvasDocument;
-        } catch {
-          currentDoc = createEmptyCanvas();
-        }
+        try { currentDoc = JSON.parse(currentJson) as CanvasDocument; }
+        catch { const { createEmptyCanvas } = await import('@graphite/db'); currentDoc = createEmptyCanvas(); }
       } else {
+        const { createEmptyCanvas } = await import('@graphite/db');
         currentDoc = createEmptyCanvas();
       }
       currentDoc.textContent.body = text;
@@ -265,6 +221,28 @@ export default function Editor() {
     } catch (_) {
       setSaveStatus('Saved');
     }
+  }
+
+  function handleBodyChange(text: string) {
+    setLocalBody(text);
+    setSaveStatus('Saving...');
+    if (bodyDebounce.current) clearTimeout(bodyDebounce.current);
+    bodyDebounce.current = setTimeout(() => {
+      persistSave({ body: text });
+    }, 500);
+  }
+
+  function handleFallbackBodyChange(text: string) {
+    setLocalBody(text);
+    setSaveStatus('Saving...');
+    if (bodyDebounce.current) clearTimeout(bodyDebounce.current);
+    bodyDebounce.current = setTimeout(() => {
+      if (activeCanvasDoc) {
+        void handleCanvasTextChange(text);
+        return;
+      }
+      persistSave({ body: text });
+    }, 500);
   }
 
   const activeNotebook = notebooks.find((n) => n.id === activeNotebookId);
@@ -276,37 +254,53 @@ export default function Editor() {
 
   const wordCount = countWords(localBody);
 
-  // Derive the CanvasDocument to pass to CanvasRenderer. If the note has
-  // no canvasJson yet (migration hook hasn't landed), synthesize one from
-  // the legacy body so the editor has something to render immediately.
-  let activeCanvasDoc: CanvasDocument;
+  // Derive the CanvasDocument to pass to CanvasRenderer
+  let activeCanvasDoc: CanvasDocument | null = null;
   if (activeNote?.canvasJson) {
     try {
       activeCanvasDoc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
     } catch {
-      activeCanvasDoc = createEmptyCanvas();
-      activeCanvasDoc.textContent.body = activeNote.body;
+      activeCanvasDoc = null;
     }
-  } else {
-    activeCanvasDoc = createEmptyCanvas();
-    if (activeNote) activeCanvasDoc.textContent.body = activeNote.body;
   }
 
-  // Fixed column width: capped at 680, down to windowWidth on phone
+  // Canvas column width: full width minus sidebar/padding on iPad, full width on phone
   const canvasWidth = Math.min(windowWidth, 680);
 
-  // Mount the Skia ink overlay only when the note actually has strokes
-  // AND we've measured the editor frame at least once. Both guards keep
-  // Skia out of the happy-path initial render on a fresh note — the
-  // lazy chunk won't be fetched at all until there's something to draw.
-  const strokeCount = activeCanvasDoc.inkLayer?.strokes?.length ?? 0;
-  const mountInkOverlay = shouldMountInkOverlay({
-    drawMode,
-    strokeCount,
-    layoutWidth: editorLayout.width,
-    layoutHeight: editorLayout.height,
-    platform: Platform.OS,
-  });
+  useEffect(() => {
+    if (!activeCanvasDoc) {
+      setAdvancedCanvasRenderer(null);
+      setAdvancedEditorError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const renderer = loadCanvasRenderer();
+      if (cancelled) return;
+
+      if (renderer) {
+        setAdvancedCanvasRenderer(() => renderer);
+        setAdvancedEditorError(null);
+        return;
+      }
+
+      setAdvancedCanvasRenderer(null);
+      setAdvancedEditorError(
+        getCanvasRendererError() ?? 'The advanced editor could not be loaded.',
+      );
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeCanvasDoc]);
+
+  const loadingAdvancedEditor =
+    activeCanvasDoc !== null &&
+    AdvancedCanvasRenderer === null &&
+    advancedEditorError === null;
 
   if (!activeNote) {
     return (
@@ -342,6 +336,7 @@ export default function Editor() {
           onChangeText={handleTitleChange}
           placeholder="Untitled"
           placeholderTextColor={tokens.textHint}
+          editable={inputMode !== 'ink'}
           style={{
             flex: 1,
             fontSize: 28,
@@ -413,55 +408,88 @@ export default function Editor() {
         </View>
       )}
 
-      {/* Editor body — DrawingCanvas and the text+ink stack are mutually
-          exclusive. We never mount both at once (see CLAUDE.md "iOS
-          production startup trap" and the builds 46-50 regressions). */}
-      <View style={{ flex: 1 }} onLayout={handleEditorLayout}>
-        {drawMode ? (
-          <DrawingCanvas
-            key={activeNoteId ?? 'no-note'}
-            initialDrawingBase64={activeCanvasDoc.inkLayer.pkDrawingBase64 ?? null}
-            onDrawingChange={handleDrawingChange}
-            onDone={() => setDrawMode(false)}
+      {/* Content area — live-preview canvas is always on */}
+      {activeCanvasDoc !== null && AdvancedCanvasRenderer ? (
+        /* ── Primary surface — always open for writing ── */
+        <View style={{ flex: 1 }}>
+          <AdvancedCanvasRenderer
+            canvasDoc={activeCanvasDoc}
+            width={canvasWidth}
+            onTextChange={handleCanvasTextChange}
+            onInkChange={(inkLayer) => {
+              if (!activeNote) return;
+              // Object.assign instead of spread — avoids Hermes GC crash on iOS 26
+              const updated: CanvasDocument = Object.assign({}, activeCanvasDoc, { inkLayer });
+              const db = getDatabase();
+              updateNoteCanvas(db, activeNote.id, updated);
+            }}
+            inputMode={inputMode}
+            pendingCommand={pendingCommand}
+            onCommandApplied={clearCommand}
+            onActiveFormatsChange={setActiveFormats}
+            focusKey={activeNoteId}
           />
-        ) : (
-          <>
-            <CanvasRenderer
-              canvasDoc={activeCanvasDoc}
-              width={canvasWidth}
-              onTextChange={handleCanvasTextChange}
-              pendingCommand={pendingCommand}
-              onCommandApplied={clearCommand}
-              onActiveFormatsChange={setActiveFormats}
-              focusKey={activeNoteId}
+        </View>
+      ) : loadingAdvancedEditor ? (
+        <View
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: tokens.bgBase,
+          }}
+        >
+          <Text style={{ fontSize: 12, color: tokens.textMuted }}>
+            Loading editor...
+          </Text>
+        </View>
+      ) : (
+        /* ── Fallback while canvas migration runs ── */
+        <View style={{ flex: 1 }}>
+          {advancedEditorError && (
+            <View
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 10,
+                borderBottomWidth: 1,
+                borderBottomColor: tokens.border,
+                backgroundColor: tokens.bgHover,
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: tokens.accentLight }}>
+                Advanced editor unavailable in this build
+              </Text>
+              <Text style={{ marginTop: 4, fontSize: 12, color: tokens.textMuted }}>
+                Graphite switched to plain text so the app can keep running.
+              </Text>
+              <Text style={{ marginTop: 6, fontSize: 11, color: tokens.textHint }}>
+                {advancedEditorError}
+              </Text>
+            </View>
+          )}
+          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+            <TextInput
+              value={localBody}
+              onChangeText={activeCanvasDoc ? handleFallbackBodyChange : handleBodyChange}
+              multiline
+              placeholder="Start writing..."
+              placeholderTextColor={tokens.textHint}
+              editable={inputMode !== 'ink'}
+              style={{
+                fontSize: 16,
+                lineHeight: 24,
+                color: tokens.textBody,
+                backgroundColor: 'transparent',
+                borderWidth: 0,
+                padding: 24,
+                minHeight: 300,
+                textAlignVertical: 'top',
+                ...(Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none', resize: 'none', boxShadow: 'none' } as any : {}),
+              }}
             />
-            {/* Read-only ink overlay — v1.5 Stage 3. Mounted only when
-                the note actually has strokes so Skia is never pulled
-                into the editor route load path on empty notes. Uses an
-                absolute-positioned, `pointerEvents='none'` Skia canvas
-                so taps pass through to the TextInput below. Ink at
-                absolute x coordinates outside the 680px text column is
-                rendered (it uses the full viewport width). */}
-            {mountInkOverlay && (
-              <Suspense fallback={null}>
-                {/* The `as never` cast bridges the legacy `CanvasDocument`
-                    ink shape (from `canvas-types.ts`) to the v1 Zod shape
-                    (from `canvas-schema.ts`) during the canvas_json
-                    dual-write cutover. Once the editor read path moves
-                    to v1 this cast goes away. Strokes are only populated
-                    by Stage 2's native extractor, so until that ships
-                    the array is always empty and this branch is dead
-                    code anyway (gated by `mountInkOverlay`). */}
-                <InkOverlay
-                  strokes={activeCanvasDoc.inkLayer.strokes as never}
-                  width={editorLayout.width}
-                  height={editorLayout.height}
-                />
-              </Suspense>
-            )}
-          </>
-        )}
-      </View>
+          </ScrollView>
+        </View>
+      )}
 
       {/* Status bar */}
       <View
