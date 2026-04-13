@@ -11,7 +11,6 @@ import { tokens } from '@graphite/ui';
 import { getDatabase, createEmptyCanvas } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
 import { CanvasRenderer } from '@graphite/editor';
-import DrawingCanvas from './DrawingCanvas';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -46,8 +45,6 @@ export default function Editor() {
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
   const syncState = useEditorStore((s) => s.syncState);
-  const drawMode = useEditorStore((s) => s.drawMode);
-  const setDrawMode = useEditorStore((s) => s.setDrawMode);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -87,12 +84,6 @@ export default function Editor() {
     }
   }, [activeNoteId]);
 
-  // Always exit draw mode when the active note changes. Otherwise the user
-  // would land on a different note's ink layer while still in drawing mode.
-  useEffect(() => {
-    setDrawMode(false);
-  }, [activeNoteId, setDrawMode]);
-
   const persistSave = useCallback(
     async (patch: { title?: string; body?: string }) => {
       if (!activeNoteId) return;
@@ -116,40 +107,6 @@ export default function Editor() {
       persistSave({ title: text });
     }, 500);
   }
-
-  // Drawing mode: save PKDrawing base64 blob. Called by DrawingCanvas on
-  // Done press and on auto-save (debounced inside DrawingCanvas itself).
-  const handleDrawingChange = useCallback(
-    async (base64: string) => {
-      const noteId = activeNoteIdRef.current;
-      if (!noteId) return;
-      setSaveStatus('Saving...');
-      try {
-        const db = getDatabase();
-        let currentDoc: CanvasDocument;
-        const currentJson = canvasJsonRef.current;
-        if (currentJson) {
-          try {
-            currentDoc = JSON.parse(currentJson) as CanvasDocument;
-          } catch {
-            currentDoc = createEmptyCanvas();
-          }
-        } else {
-          currentDoc = createEmptyCanvas();
-        }
-        const nextDoc: CanvasDocument = Object.assign({}, currentDoc, {
-          inkLayer: Object.assign({}, currentDoc.inkLayer, {
-            pkDrawingBase64: base64,
-          }),
-        });
-        await updateNoteCanvas(db, noteId, nextDoc);
-        setSaveStatus('Saved');
-      } catch (_) {
-        setSaveStatus('Saved');
-      }
-    },
-    [updateNoteCanvas],
-  );
 
   /**
    * Called when the CanvasRenderer text layer emits a new body string.
@@ -317,27 +274,17 @@ export default function Editor() {
         </View>
       )}
 
-      {/* Editor body — mutually exclusive with DrawingCanvas. We never mount
-          both at once (see CLAUDE.md "iOS production startup trap" and the
-          builds 46-50 regressions). */}
+      {/* Editor body — markdown-only. */}
       <View style={{ flex: 1 }}>
-        {drawMode ? (
-          <DrawingCanvas
-            initialDrawingBase64={activeCanvasDoc.inkLayer.pkDrawingBase64 ?? null}
-            onDrawingChange={handleDrawingChange}
-            onDone={() => setDrawMode(false)}
-          />
-        ) : (
-          <CanvasRenderer
-            canvasDoc={activeCanvasDoc}
-            width={canvasWidth}
-            onTextChange={handleCanvasTextChange}
-            pendingCommand={pendingCommand}
-            onCommandApplied={clearCommand}
-            onActiveFormatsChange={setActiveFormats}
-            focusKey={activeNoteId}
-          />
-        )}
+        <CanvasRenderer
+          canvasDoc={activeCanvasDoc}
+          width={canvasWidth}
+          onTextChange={handleCanvasTextChange}
+          pendingCommand={pendingCommand}
+          onCommandApplied={clearCommand}
+          onActiveFormatsChange={setActiveFormats}
+          focusKey={activeNoteId}
+        />
       </View>
 
       {/* Status bar */}
