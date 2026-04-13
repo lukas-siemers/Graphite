@@ -23,6 +23,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+
+// react-native-webview does not re-export its error event types from the
+// package root, and the package exports map blocks the /lib/WebViewTypes
+// subpath. Define the minimal shape we consume here — only { nativeEvent }
+// is touched, so this stays forward-compatible with any library bump.
+type WebViewNativeErrorEvent = { nativeEvent: unknown };
 import { buildEditorHtml } from './live-preview/editorHtml';
 import type { FormatCommand } from './types';
 
@@ -282,6 +288,25 @@ export function LivePreviewInput({
         domStorageEnabled
         injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM}
         onMessage={handleMessage}
+        // Build 81: surface native WebView load failures through the same
+        // red-banner path as in-JS errors. Before this, a failed bundle
+        // load (e.g. CSP/ATS blocking a remote import, or a pre-Build-81
+        // esm.sh fetch error) would leave the user with a silent dead
+        // editor and no typing ability. Errors are now visible.
+        onError={(e: WebViewNativeErrorEvent) => {
+          try {
+            setWebViewError('native onError: ' + JSON.stringify(e.nativeEvent));
+          } catch {
+            setWebViewError('native onError (unserializable)');
+          }
+        }}
+        onHttpError={(e: WebViewNativeErrorEvent) => {
+          try {
+            setWebViewError('native onHttpError: ' + JSON.stringify(e.nativeEvent));
+          } catch {
+            setWebViewError('native onHttpError (unserializable)');
+          }
+        }}
         scrollEnabled={false}
         hideKeyboardAccessoryView
         keyboardDisplayRequiresUserAction={false}

@@ -19,6 +19,15 @@
  *   { type: 'command-applied' }
  *   { type: 'block-heights', blocks: Array<{ lineStart, lineEnd, height }> }
  */
+// Build 81: CodeMirror 6 is now bundled locally via scripts/bundle-cm6.mjs
+// and inlined into the editor HTML as a single <script> tag. The previous
+// `import { ... } from 'https://esm.sh/...'` approach worked in Expo Go's
+// WebView but silently failed in TestFlight/standalone WKWebView — the
+// editor never initialized, no placeholder, no input. CM6_BUNDLE is a
+// minified IIFE (~800KB) that attaches `window.CM6` before the editor
+// setup code runs.
+import { CM6_BUNDLE } from './cm6-bundle.generated';
+
 export function buildEditorHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -241,58 +250,28 @@ window.addEventListener('error', (e) => reportError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 </script>
 
-<script type="module">
-import { EditorState, Compartment } from 'https://esm.sh/@codemirror/state@6';
-import {
-  EditorView,
-  keymap,
-  placeholder,
-  ViewPlugin,
-  Decoration,
-} from 'https://esm.sh/@codemirror/view@6';
-import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-  undo,
-  redo,
-  indentWithTab,
-} from 'https://esm.sh/@codemirror/commands@6';
-import { markdown, markdownLanguage } from 'https://esm.sh/@codemirror/lang-markdown@6';
-import {
-  HighlightStyle,
-  syntaxHighlighting,
-  LanguageDescription,
-  LanguageSupport,
-  StreamLanguage,
-  syntaxTree,
-} from 'https://esm.sh/@codemirror/language@6';
-import { tags as t } from 'https://esm.sh/@lezer/highlight@1';
+<!-- Build 81: inline the locally-bundled CodeMirror IIFE. Attaches window.CM6. -->
+<script>${CM6_BUNDLE}</script>
 
-// ---------------------------------------------------------------------------
-// Static language imports — @codemirror/language-data uses dynamic import()
-// which does not work reliably via esm.sh in an iframe srcdoc without an
-// import map. Importing the grammars directly is a few more kB but avoids
-// the duplicate-@codemirror/state runtime error.
-// ---------------------------------------------------------------------------
-import { python }     from 'https://esm.sh/@codemirror/lang-python@6';
-import { javascript } from 'https://esm.sh/@codemirror/lang-javascript@6';
-import { cpp }        from 'https://esm.sh/@codemirror/lang-cpp@6';
-import { rust }       from 'https://esm.sh/@codemirror/lang-rust@6';
-import { java }       from 'https://esm.sh/@codemirror/lang-java@6';
-import { html as htmlLang } from 'https://esm.sh/@codemirror/lang-html@6';
-import { css as cssLang }   from 'https://esm.sh/@codemirror/lang-css@6';
-import { json as jsonLang } from 'https://esm.sh/@codemirror/lang-json@6';
-import { sql }        from 'https://esm.sh/@codemirror/lang-sql@6';
-// C# / Kotlin / Scala / Objective-C via the StreamLanguage clike parser
-import { csharp, kotlin, scala, objectiveC } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/clike';
-import { shell }      from 'https://esm.sh/@codemirror/legacy-modes@6/mode/shell';
-import { go as goMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/go';
-import { ruby }       from 'https://esm.sh/@codemirror/legacy-modes@6/mode/ruby';
-import { lua }        from 'https://esm.sh/@codemirror/legacy-modes@6/mode/lua';
-import { yaml as yamlMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/yaml';
-import { toml as tomlMode } from 'https://esm.sh/@codemirror/legacy-modes@6/mode/toml';
-import { swift }      from 'https://esm.sh/@codemirror/legacy-modes@6/mode/swift';
+<script>
+// Destructure everything from the window.CM6 namespace that the bundle above
+// installs. The names match what we previously imported from esm.sh so the
+// rest of the editor setup code below is unchanged. If CM6 is missing here
+// the bundle failed to load — surface that to the host and bail.
+if (!window.CM6) {
+  reportError('CM6 bundle did not attach to window — editor cannot start');
+  throw new Error('CM6 bundle missing');
+}
+const {
+  EditorState, Compartment,
+  EditorView, keymap, placeholder, ViewPlugin, Decoration,
+  defaultKeymap, history, historyKeymap, undo, redo, indentWithTab,
+  markdown, markdownLanguage,
+  HighlightStyle, syntaxHighlighting, LanguageDescription, LanguageSupport, StreamLanguage, syntaxTree,
+  t,
+  python, javascript, cpp, rust, java, htmlLang, cssLang, jsonLang, sql,
+  csharp, kotlin, scala, objectiveC, shell, goMode, ruby, lua, yamlMode, tomlMode, swift,
+} = window.CM6;
 
 // Build a LanguageDescription list. The load function is async but we
 // resolve synchronously from closures — CodeMirror awaits the promise
