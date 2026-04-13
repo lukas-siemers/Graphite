@@ -15,6 +15,13 @@ import {
   setSetting,
   seedSampleNotebook,
 } from '@graphite/db';
+import {
+  assignYPositions,
+  chunksFromMarkdown,
+  createEmptySpatialCanvas,
+  extractSearchableText,
+  serializeToGraphite,
+} from '@graphite/canvas';
 import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
@@ -132,7 +139,25 @@ function PhoneLayout() {
         )}
         {screen === 'editor' && (
           <View style={{ flex: 1, position: 'relative' }}>
-            <Editor />
+            {/* Phone toolbar row — mounts FormattingToolbar so iPhone users
+                reach Bold/Italic/Code/Link/Pencil. The iPad branch renders
+                the same component inline in its chrome row; phone puts it
+                just below the header and above the editor body. */}
+            <View
+              style={{
+                height: 44,
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: tokens.bgBase,
+                borderBottomWidth: 1,
+                borderBottomColor: tokens.border,
+              }}
+            >
+              <FormattingToolbar />
+            </View>
+            <View style={{ flex: 1, position: 'relative' }}>
+              <Editor />
+            </View>
           </View>
         )}
       </View>
@@ -297,9 +322,27 @@ export default function MainAppShell() {
       const nb = await createNotebook(db, 'My Notebook');
       const folder = await createFolder(db, nb.id, 'General');
       const note = await createNote(db, nb.id, folder.id);
+
+      // Seed the welcome note as a v2 SpatialCanvasDocument so the v2
+      // migration hook (v2 + no blob = empty canvas) doesn't silently drop
+      // the welcome text. Build the blocks via the same block-chunking
+      // helper the editor uses, serialize via serializeToGraphite, and
+      // persist blob + ftsBody together so search works on day one.
+      const welcomeBody = '# Welcome\n\nStart writing your notes here.';
+      const spatialDoc = createEmptySpatialCanvas();
+      spatialDoc.blocks = assignYPositions(
+        chunksFromMarkdown(welcomeBody),
+        24,
+        16,
+      );
+      const graphiteBlob = await serializeToGraphite(spatialDoc);
+      const ftsBody = extractSearchableText(spatialDoc);
       await updateNote(db, note.id, {
         title: 'Welcome to Graphite',
-        body: '# Welcome\n\nStart writing your notes here.',
+        graphiteBlob,
+        ftsBody,
+        canvasVersion: 2,
+        body: '',
       });
 
       notebooks = await getNotebooks(db);

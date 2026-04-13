@@ -62,7 +62,12 @@ interface NoteCardProps {
 }
 
 function NoteCard({ note, isActive, onPress, onLongPress, onDelete }: NoteCardProps) {
-  const preview = stripMarkdown(note.body);
+  // v2 notes clear `body` on save (see use-note-store.updateNoteSpatialCanvas),
+  // so prefer ftsBody for the preview. Fall back to body for v1 legacy notes
+  // that haven't been migrated yet.
+  const previewSource =
+    note.ftsBody && note.ftsBody.trim().length > 0 ? note.ftsBody : note.body;
+  const preview = stripMarkdown(previewSource);
   const swipeableRef = useRef<Swipeable | null>(null);
 
   // Right-action renderer — red destructive button revealed on swipe-left.
@@ -211,13 +216,16 @@ export default function NoteList() {
           const results = await searchNotes(db, activeNotebookId, text.trim());
           setDisplayedNotes(results);
         } catch (_) {
-          // fallback to local filter
+          // Fallback to local filter when FTS5 path fails. Search BOTH ftsBody
+          // (v2 notes) and body (v1 notes) so the fallback covers both
+          // storage models without dropping matches on either side.
           const lower = text.toLowerCase();
           setDisplayedNotes(
             notes.filter(
               (n) =>
                 n.title.toLowerCase().includes(lower) ||
-                n.body.toLowerCase().includes(lower),
+                n.body.toLowerCase().includes(lower) ||
+                (n.ftsBody?.toLowerCase().includes(lower) ?? false),
             ),
           );
         }

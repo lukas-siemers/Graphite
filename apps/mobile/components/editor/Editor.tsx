@@ -471,9 +471,21 @@ export default function Editor() {
               </Text>
             </View>
           ) : (
-            <Text style={{ padding: 16, color: tokens.textMuted }}>
-              Loading editor…
-            </Text>
+            // v2 is still loading (lazy-require of @graphite/editor, or the
+            // spatial doc hasn't resolved yet). Rather than show a bare
+            // "Loading…" text and risk the user perceiving a blank editor,
+            // fall back to the v1 CanvasRenderer using the legacy body /
+            // canvasJson. Once the v2 pipeline is ready this branch is
+            // replaced by SpatialCanvasRendererModule on the next render.
+            <CanvasRenderer
+              canvasDoc={activeCanvasDoc}
+              width={canvasWidth}
+              onTextChange={handleCanvasTextChange}
+              pendingCommand={pendingCommand}
+              onCommandApplied={clearCommand}
+              onActiveFormatsChange={setActiveFormats}
+              focusKey={activeNoteId}
+            />
           )
         ) : (
           <CanvasRenderer

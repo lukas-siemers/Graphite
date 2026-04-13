@@ -9,7 +9,6 @@ import {
   deleteNote,
   updateNoteSortOrder,
   moveNoteToNotebook as dbMoveNoteToNotebook,
-  createEmptyCanvas,
   moveNote as dbMoveNote,
   extractTags,
   syncNoteTags,
@@ -137,13 +136,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     notebookId: string,
     folderId?: string,
   ) => {
+    // createNote() returns a row with canvas_version=2 and graphite_blob=null.
+    // The v2 migration hook (use-spatial-canvas-migration) treats that pair as
+    // an empty canvas and hands back createEmptySpatialCanvas() without any
+    // DB write. The first user edit will then fire updateNoteSpatialCanvas
+    // which serializes the blob. No canvasJson pre-population here — that path
+    // was dead on v2 and risked confusing the v1 branch of the migration hook
+    // for any edge-case note that flipped back to canvasVersion !== 2.
     const note = await createNote(db, notebookId, folderId);
-    // Pre-populate canvas_json so new notes go straight to CanvasRenderer
-    // without waiting for the migration hook to run.
-    const canvasDoc = createEmptyCanvas();
-    const canvasJson = JSON.stringify(canvasDoc);
-    await updateNote(db, note.id, { canvasJson, skipTimestamp: true });
-    const noteWithCanvas = { ...note, canvasJson };
 
     // Folder-context awareness: if the new note targets a different folder
     // than the currently active one in the sidebar, switch the active folder
@@ -158,7 +158,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     if (sameFolder) {
       // Fast path: optimistic prepend for the currently viewed folder.
       set((state) => ({
-        notes: [noteWithCanvas, ...state.notes],
+        notes: [note, ...state.notes],
         activeNoteId: note.id,
       }));
     } else {
@@ -172,7 +172,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const reloaded = await getNotes(db, notebookId, targetFolderId);
       set({ notes: reloaded, activeNoteId: note.id });
     }
-    return noteWithCanvas;
+    return note;
   },
 
   saveNote: async (
