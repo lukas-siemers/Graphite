@@ -65,7 +65,6 @@ interface NoteState {
     noteId: string,
     targetFolderId: string | null,
   ) => Promise<void>;
-  deleteIfEmpty: (db: SQLiteDatabase, id: string) => Promise<boolean>;
   reorderNotes: (db: SQLiteDatabase, orderedIds: string[]) => Promise<void>;
   moveNoteToNotebook: (
     db: SQLiteDatabase,
@@ -278,44 +277,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         ),
       };
     });
-  },
-
-  /**
-   * Auto-delete an abandoned empty note. Called from the editor on
-   * navigate-away (active note transition or unmount). Returns true if the
-   * note was deleted, false otherwise.
-   *
-   * A note is considered empty when:
-   *   - title is '' or 'Untitled' (the default), AND
-   *   - canvas text body (preferred) or legacy body is whitespace-only, AND
-   *   - the canvas ink layer has zero strokes (drawing-only notes are kept).
-   *
-   * The deletion goes through the DB deleteNote op so FTS5 cleanup runs.
-   */
-  deleteIfEmpty: async (db: SQLiteDatabase, id: string) => {
-    const note = get().notes.find((n) => n.id === id);
-    if (!note) return false;
-    const titleEmpty = note.title === '' || note.title === 'Untitled';
-    // Prefer canvas text body if migrated, else the legacy body field.
-    let bodyText = note.body ?? '';
-    let hasInk = false;
-    if (note.canvasJson) {
-      try {
-        const doc = JSON.parse(note.canvasJson) as CanvasDocument;
-        bodyText = doc.textContent?.body ?? '';
-        hasInk = (doc.inkLayer?.strokes?.length ?? 0) > 0;
-      } catch {
-        // Fall through with legacy body; assume no ink on parse failure.
-      }
-    }
-    const bodyEmpty = bodyText.trim() === '';
-    if (!(titleEmpty && bodyEmpty) || hasInk) return false;
-    await deleteNote(db, id);
-    set((s) => ({
-      notes: s.notes.filter((n) => n.id !== id),
-      activeNoteId: s.activeNoteId === id ? null : s.activeNoteId,
-    }));
-    return true;
   },
 
   reorderNotes: async (db: SQLiteDatabase, orderedIds: string[]) => {

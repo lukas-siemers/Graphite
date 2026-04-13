@@ -1,7 +1,7 @@
 export { Editor } from './Editor';
 export { CanvasRenderer } from './CanvasRenderer';
 export type { CanvasRendererProps } from './CanvasRenderer';
-export { CanvasTextInput } from './CanvasTextInput';
-export { LivePreviewInput } from './LivePreviewInput';
+export { applyFormat } from './applyFormat';
+export type { SelectionRange, FormatResult } from './applyFormat';
 export type { FormatCommand } from './types';
 export { applyFormatCommand, detectActiveFormats } from './types';
