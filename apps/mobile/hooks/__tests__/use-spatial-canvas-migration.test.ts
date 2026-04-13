@@ -148,6 +148,38 @@ describe('resolveSpatialDoc', () => {
     expect(doc.inkStrokes).toEqual([]);
   });
 
+  it('v2 note with no blob but legacy body content rescues via migration', async () => {
+    // Build 80 rescue path: if any pre-Build-80 write (or future race) lands
+    // on body/canvasJson of a v2 note, the resolver migrates that content
+    // forward instead of returning an empty canvas.
+    const note = baseNote({
+      canvasVersion: 2,
+      graphiteBlob: null,
+      body: '# Rescued heading\n\nparagraph survives',
+    });
+    const { doc, didMigrate } = await resolveSpatialDoc(note);
+    expect(didMigrate).toBe(true);
+    expect(doc.version).toBe(2);
+    expect(doc.blocks.length).toBeGreaterThanOrEqual(2);
+    expect(doc.blocks[0].content).toContain('# Rescued heading');
+  });
+
+  it('v2 note with no blob but legacy canvasJson content rescues via migration', async () => {
+    const note = baseNote({
+      canvasVersion: 2,
+      graphiteBlob: null,
+      body: '',
+      canvasJson: JSON.stringify({
+        version: 1,
+        textContent: { body: 'canvasJson rescue text' },
+        inkLayer: { strokes: [] },
+      }),
+    });
+    const { doc, didMigrate } = await resolveSpatialDoc(note);
+    expect(didMigrate).toBe(true);
+    expect(doc.blocks[0]?.content).toBe('canvasJson rescue text');
+  });
+
   it('null canvasVersion falls back to v1 migration path', async () => {
     const note = baseNote({
       canvasVersion: 0 as unknown as number,

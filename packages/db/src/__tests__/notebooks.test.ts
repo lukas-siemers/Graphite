@@ -139,13 +139,18 @@ describe('notebooks operations', () => {
     expect(gettingStarted).toHaveLength(1);
   });
 
-  it('seedSampleNotebook notes have valid markdown bodies', async () => {
+  it('seedSampleNotebook notes ship as v2 .graphite blobs with ftsBody populated', async () => {
     const nb = await seedSampleNotebook(db);
     const notes = await getNotes(db, nb.id);
 
     for (const note of notes) {
-      expect(note.body.length).toBeGreaterThan(0);
-      expect(note.body).toContain('#');
+      // Build 80: seed notes are v2 from the ground up — no legacy body.
+      expect(note.canvasVersion).toBe(2);
+      expect(note.body).toBe('');
+      expect(note.graphiteBlob).not.toBeNull();
+      expect((note.graphiteBlob as Uint8Array).byteLength).toBeGreaterThan(0);
+      expect(note.ftsBody ?? '').toContain('#');
+      expect((note.ftsBody ?? '').length).toBeGreaterThan(0);
     }
   });
 

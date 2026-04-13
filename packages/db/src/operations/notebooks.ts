@@ -1,5 +1,12 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { nanoid } from 'nanoid/non-secure';
+import {
+  assignYPositions,
+  chunksFromMarkdown,
+  createEmptySpatialCanvas,
+  extractSearchableText,
+  serializeToGraphite,
+} from '@graphite/canvas';
 import type { Notebook, Note } from '../types';
 
 interface RawNotebook {
@@ -220,13 +227,23 @@ export async function seedSampleNotebook(
   for (let i = 0; i < SAMPLE_NOTES.length; i++) {
     const { title, body } = SAMPLE_NOTES[i];
     const noteId = nanoid();
+    // Build a v2 SpatialCanvasDocument from the sample markdown so onboarding
+    // lands on the same storage model as normal note creation (canvas_version
+    // = 2 + graphite_blob populated). The legacy `body` column stays empty —
+    // FTS and the editor read from graphite_blob / fts_body.
+    const chunks = chunksFromMarkdown(body);
+    const blocks = assignYPositions(chunks, 24, 16);
+    const doc = { ...createEmptySpatialCanvas(), blocks };
+    const graphiteBlob = await serializeToGraphite(doc);
+    const ftsBody = extractSearchableText(doc);
     await db.runAsync(
       `INSERT INTO notes
-         (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, sort_order, created_at, updated_at, synced_at)
-       VALUES (?, NULL, ?, ?, ?, NULL, 0, ?, ?, ?, NULL)`,
-      [noteId, nb.id, title, body, i, now, now],
+         (id, folder_id, notebook_id, title, body, drawing_asset_id, canvas_version, graphite_blob, fts_body, is_dirty, sort_order, created_at, updated_at, synced_at)
+       VALUES (?, NULL, ?, ?, '', NULL, 2, ?, ?, 0, ?, ?, ?, NULL)`,
+      [noteId, nb.id, title, graphiteBlob, ftsBody, i, now, now],
     );
-    // Populate FTS index
+    // Populate FTS index — searchable text comes from extractSearchableText,
+    // not the (now empty) legacy body column.
     const inserted = await db.getFirstAsync<{ rowid: number }>(
       'SELECT rowid FROM notes WHERE id = ?',
       [noteId],
@@ -234,7 +251,7 @@ export async function seedSampleNotebook(
     if (inserted) {
       await db.runAsync(
         'INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)',
-        [inserted.rowid, title, body],
+        [inserted.rowid, title, ftsBody],
       );
     }
   }

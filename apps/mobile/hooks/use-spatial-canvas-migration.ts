@@ -15,9 +15,32 @@ interface SpatialCanvasMigrationResult {
 }
 
 /**
+ * Pull the best-available legacy markdown body out of a note. Prefers the
+ * canvasJson textContent payload over the flat body column (matching the
+ * v1-migrate branch), falling back to the latter when canvasJson is null or
+ * malformed. Returns an empty string when nothing is present.
+ */
+function extractLegacyBody(note: Note): string {
+  let body = note.body ?? '';
+  if (note.canvasJson) {
+    try {
+      const parsed = JSON.parse(note.canvasJson) as {
+        textContent?: { body?: string };
+      };
+      if (typeof parsed.textContent?.body === 'string') {
+        body = parsed.textContent.body;
+      }
+    } catch {
+      // Malformed canvasJson — fall back to the already-assigned legacy body.
+    }
+  }
+  return body;
+}
+
+/**
  * Pure resolution logic used by the hook. Exported so tests can exercise the
- * three branches (v2-with-blob, v2-empty, v1-migrate) without needing a React
- * renderer.
+ * three branches (v2-with-blob, v2-empty-rescue, v1-migrate) without needing a
+ * React renderer.
  *
  * Returns `{ doc, didMigrate }` where `didMigrate` signals that the caller
  * should persist `doc` via updateNoteSpatialCanvas(silent=true).
@@ -30,21 +53,22 @@ export async function resolveSpatialDoc(
     return { doc, didMigrate: false };
   }
   if (note.canvasVersion === 2) {
+    // v2 note with no graphiteBlob yet. Belt-and-suspenders: if any code path
+    // wrote legacy content to this row (pre-Build-80 fallback races, stray
+    // v1 writes, etc.), rescue that content by migrating it forward instead
+    // of returning an empty canvas and silently discarding the user's text.
+    const legacyBody = extractLegacyBody(note);
+    if (legacyBody.length > 0) {
+      const migrated = migrateCanvasDocumentToSpatial({
+        version: 1,
+        textContent: { body: legacyBody },
+        inkLayer: { strokes: [] },
+      });
+      return { doc: migrated, didMigrate: true };
+    }
     return { doc: createEmptySpatialCanvas(), didMigrate: false };
   }
-  let v1Body = note.body;
-  if (note.canvasJson) {
-    try {
-      const parsed = JSON.parse(note.canvasJson) as {
-        textContent?: { body?: string };
-      };
-      if (typeof parsed.textContent?.body === 'string') {
-        v1Body = parsed.textContent.body;
-      }
-    } catch {
-      // Malformed canvasJson — fall back to legacy body.
-    }
-  }
+  const v1Body = extractLegacyBody(note);
   const v1Doc = {
     version: 1,
     textContent: { body: v1Body },

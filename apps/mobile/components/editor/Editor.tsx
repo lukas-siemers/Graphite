@@ -18,6 +18,7 @@ import type { SpatialCanvasRenderer as SpatialCanvasRendererType } from '@graphi
 import {
   chunksFromMarkdown,
   assignYPositions,
+  createEmptySpatialCanvas,
   extractSearchableText,
   type SpatialCanvasDocument,
   type SpatialInkStroke,
@@ -160,6 +161,30 @@ export default function Editor() {
       if (!current) return;
       setLocalBody(markdown);
       const chunks = chunksFromMarkdown(markdown);
+      const blocks = assignYPositions(chunks, 24, 16);
+      const next: SpatialCanvasDocument = {
+        ...current,
+        blocks,
+      };
+      scheduleSpatialSave(next);
+    },
+    [scheduleSpatialSave],
+  );
+
+  /**
+   * Fallback path for v2 notes while the SpatialCanvasRenderer is still
+   * loading (lazy-require not fired, or useSpatialCanvasMigration still
+   * resolving). Typing in the CanvasRenderer stand-in used to route through
+   * handleCanvasTextChange and write to legacy body / canvasJson — when the
+   * v2 renderer took over it read graphiteBlob (empty) and the user's text
+   * vanished. Routing the fallback through scheduleSpatialSave lands typed
+   * text directly on the graphiteBlob so the handoff is seamless.
+   */
+  const handleFallbackV2TextChange = useCallback(
+    (text: string) => {
+      setLocalBody(text);
+      const current = spatialDocRef.current ?? createEmptySpatialCanvas();
+      const chunks = chunksFromMarkdown(text);
       const blocks = assignYPositions(chunks, 24, 16);
       const next: SpatialCanvasDocument = {
         ...current,
@@ -477,10 +502,15 @@ export default function Editor() {
             // fall back to the v1 CanvasRenderer using the legacy body /
             // canvasJson. Once the v2 pipeline is ready this branch is
             // replaced by SpatialCanvasRendererModule on the next render.
+            //
+            // The onTextChange handler routes through the spatial save path
+            // (see handleFallbackV2TextChange) so any keystrokes during the
+            // load window land on graphiteBlob — not on legacy body — and
+            // survive the hand-off to SpatialCanvasRenderer.
             <CanvasRenderer
               canvasDoc={activeCanvasDoc}
               width={canvasWidth}
-              onTextChange={handleCanvasTextChange}
+              onTextChange={handleFallbackV2TextChange}
               pendingCommand={pendingCommand}
               onCommandApplied={clearCommand}
               onActiveFormatsChange={setActiveFormats}
