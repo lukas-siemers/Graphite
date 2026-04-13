@@ -99,13 +99,6 @@ export function CanvasRenderer({
     start: 0,
     end: 0,
   });
-  // Controlled selection payload — fed to TextInput only when we need to
-  // restore the cursor after a format command. Setting it to `undefined`
-  // during normal typing lets the native input manage its own caret.
-  const [controlledSelection, setControlledSelection] = useState<
-    { start: number; end: number } | undefined
-  >(undefined);
-
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDirtyRef = useRef(false);
   const localValueRef = useRef(localValue);
@@ -173,19 +166,19 @@ export function CanvasRenderer({
       const currentText = localValueRef.current;
       const currentSel = selectionRef.current;
       const result = applyFormat(currentText, currentSel, pendingCommand);
-      if (result.text === currentText && result.selection.start === currentSel.start) {
+      if (result.text === currentText) {
         return;
       }
 
-      // Defensively clamp the selection to the new text bounds — iOS
-      // TextInput can native-crash on out-of-range selections.
-      const clamped = {
-        start: Math.max(0, Math.min(result.text.length, result.selection.start)),
-        end: Math.max(0, Math.min(result.text.length, result.selection.end)),
-      };
-
+      // Only update the text. We deliberately do NOT set a controlled
+      // `selection` on TextInput after a format: iOS UITextView validates
+      // the incoming selectedRange against the PREVIOUS textStorage length
+      // during the same commit (before the new text lands), and an
+      // out-of-range range raises NSRangeException that bubbles up as
+      // RCTFatal / SIGABRT. Leaving the cursor for iOS to re-position
+      // is a small UX compromise that trades a crash for an imperfect
+      // caret landing.
       setLocalValue(result.text);
-      setControlledSelection(clamped);
       isDirtyRef.current = true;
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -193,10 +186,6 @@ export function CanvasRenderer({
         isDirtyRef.current = false;
         onTextChange?.(result.text);
       }, DEBOUNCE_MS);
-
-      // Release controlled selection so subsequent typing is unconstrained
-      const releaseHandle = setTimeout(() => setControlledSelection(undefined), 0);
-      return () => clearTimeout(releaseHandle);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[CanvasRenderer] format apply failed', err);
@@ -234,7 +223,6 @@ export function CanvasRenderer({
           value={localValue}
           onChangeText={handleChange}
           onSelectionChange={handleSelectionChange}
-          selection={controlledSelection}
           multiline
           editable={!readOnly}
           autoCorrect={false}
