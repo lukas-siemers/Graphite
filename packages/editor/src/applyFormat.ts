@@ -105,25 +105,22 @@ export function applyFormat(
       const lineEnd = nextNl === -1 ? text.length : nextNl;
       const line = text.slice(lineStart, lineEnd);
 
-      // Detect any existing heading prefix on the line (#, ##, ###) so we can
-      // replace it instead of stacking. Also allows toggle-off when prefixes match.
       const headingMatch = line.match(/^(#{1,6}) /);
       const existingPrefix = headingMatch ? headingMatch[0] : '';
       const bodyWithoutHeading = line.slice(existingPrefix.length);
 
-      // Toggle off when tapping the exact same heading level.
       if (existingPrefix === prefix) {
         const newText = text.slice(0, lineStart) + bodyWithoutHeading + text.slice(lineEnd);
-        const shift = -prefix.length;
-        const newStart = Math.max(lineStart, start + shift);
+        const rawStart = start - prefix.length;
+        const newStart = Math.max(lineStart, Math.min(newText.length, rawStart));
         return { text: newText, selection: { start: newStart, end: newStart } };
       }
 
-      // Replace existing heading with the new level, or prepend if none.
       const prefixed = prefix + bodyWithoutHeading;
       const newText = text.slice(0, lineStart) + prefixed + text.slice(lineEnd);
       const delta = prefix.length - existingPrefix.length;
-      const newStart = start + delta;
+      const rawStart = start + delta;
+      const newStart = Math.max(lineStart, Math.min(newText.length, rawStart));
       return { text: newText, selection: { start: newStart, end: newStart } };
     }
 
@@ -166,7 +163,8 @@ export function applyFormat(
       const newBlock = transformed.join('\n');
       const newText = text.slice(0, lineStart) + newBlock + text.slice(lineEnd);
       const delta = newBlock.length - block.length;
-      const newEnd = end + delta;
+      const rawEnd = end + delta;
+      const newEnd = Math.max(0, Math.min(newText.length, rawEnd));
       return { text: newText, selection: { start: newEnd, end: newEnd } };
     }
 
