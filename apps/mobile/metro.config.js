@@ -33,6 +33,7 @@ const stubDir = path.resolve(projectRoot, 'stubs');
 
 config.resolver.extraNodeModules = {
   'react-native-draggable-flatlist': path.join(stubDir, 'react-native-draggable-flatlist-stub.js'),
+  'react-native-webview':         path.join(stubDir, 'react-native-webview-stub.js'),
   'react-native-worklets-core':   path.join(stubDir, 'react-native-worklets-stub.js'),
   'expo-file-system':             path.join(stubDir, 'expo-file-system-stub.js'),
   'expo-file-system/legacy':      path.join(stubDir, 'expo-file-system-stub.js'),
