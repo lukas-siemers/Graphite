@@ -4,24 +4,29 @@
  * Renders a SpatialCanvasDocument as:
  *   - a single LivePreviewInput (CodeMirror 6 WebView/iframe) showing the
  *     joined markdown of every text block,
- *   - an InkOverlay sibling layered inside the same scroll content at
- *     absolute canvas coordinates.
+ *   - an InkOverlay that mounts only while inkMode is active, layered on
+ *     top of the editor via StyleSheet.absoluteFill.
  *
  * The single-CodeMirror-instance decision is explicit (see
  *   docs/specs/plan shimmering-percolating-crayon.md, "Design decisions").
- * The spatial layout is measurement-only: the iframe reports block heights
- * via the opt-in `block-heights` plugin, and this component recomputes
- * yPosition + height of each SpatialBlock accordingly. Ink strokes carry
- * absolute Y and are unaffected by text reflow.
+ * The spatial data model is preserved — block heights from the iframe are
+ * still captured via the `block-heights` plugin and used to keep the
+ * SpatialBlock[] Y positions in sync for future free-positioned content —
+ * but layout no longer uses absolute positioning or a scale transform.
  *
- * Scale transform: the outer content is rendered at the logical canvas
- * width (`canvasWidth`, typically 816) and then scaled uniformly to fit
- * the parent viewport width. Ink and text share the same transform so their
- * coordinate space stays identical across devices.
+ * Build 75 (2026-04-13): the previous implementation wrapped the editor
+ * in a scaled absolutely-positioned stage so a fixed logical canvas width
+ * would fit the viewport uniformly across devices. On iPad TestFlight that
+ * combination broke text input — WKWebView's internal scroll fought the
+ * parent ScrollView's pan responder and the scale transform shifted the
+ * hit-test region without updating WKWebView's inner coordinate mapping,
+ * so tapping the editor didn't land keyboard focus. Cross-device pixel
+ * fidelity is deferred; text input correctness wins. The renderer now
+ * mirrors CanvasRenderer's plain flex stack.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, ScrollView, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, ScrollView, StyleSheet } from 'react-native';
 import { tokens } from '@graphite/ui';
 import {
   chunksFromMarkdown,
@@ -37,17 +42,21 @@ import type { FormatCommand } from './types';
 import {
   isBlockHeightsMessage,
   recomputeBlockPositions,
-  computeCanvasHeight,
   type MeasuredBlockHeight,
 } from './spatial-block-layout';
 
 const DEFAULT_LINE_HEIGHT = 24;
 const DEFAULT_BLOCK_GAP = 16;
-const DEFAULT_BOTTOM_PADDING = 240;
 const DEBOUNCE_MS = 500;
 
 export interface SpatialCanvasRendererProps {
   spatialDoc: SpatialCanvasDocument;
+  /**
+   * Logical canvas width. Kept in the signature for API stability; the
+   * renderer no longer scales content to this width (Build 75) — text
+   * reflows to the actual viewport. Still forwarded by callers for when
+   * the scaled-stage model is revived.
+   */
   canvasWidth: number;
   onTextChange?: (markdown: string) => void;
   onInkChange?: (strokes: SpatialInkStroke[]) => void;
@@ -58,9 +67,10 @@ export interface SpatialCanvasRendererProps {
   autoFocusFirst?: boolean;
   focusKey?: string | null;
   /**
-   * Defaults to `false`. When `true` the InkOverlay captures pointer input
-   * instead of forwarding to the text layer. Phase 3H wires this to the
-   * toolbar toggle; for now the renderer just accepts it as a prop.
+   * Defaults to `false`. When `true` the InkOverlay is mounted over the
+   * editor and captures pointer input; when `false` the overlay is not
+   * in the tree at all — removes any hit-test ambiguity during normal
+   * text editing.
    */
   inkMode?: boolean;
   /** Override for tests / tweaking; defaults to 24px. */
@@ -71,7 +81,8 @@ export interface SpatialCanvasRendererProps {
 
 export function SpatialCanvasRenderer({
   spatialDoc,
-  canvasWidth,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  canvasWidth: _canvasWidth,
   onTextChange,
   onInkChange,
   readOnly = false,
@@ -84,17 +95,19 @@ export function SpatialCanvasRenderer({
   lineHeightPx = DEFAULT_LINE_HEIGHT,
   blockGapPx = DEFAULT_BLOCK_GAP,
 }: SpatialCanvasRendererProps) {
-  // Seed internal block array from the incoming doc. When measured heights
-  // arrive from the iframe we upgrade this to the measured layout; until
-  // then we fall back to the doc's pre-computed estimate (from the chunker).
+  // Seed internal block array from the incoming doc. Measured heights from
+  // the iframe upgrade this in place. Kept (not yet used for layout) so
+  // future free-positioned content can pick up where the scaled stage left
+  // off without re-wiring the heights channel.
   const [blocks, setBlocks] = useState<SpatialBlock[]>(() => spatialDoc.blocks);
-  const [viewportWidth, setViewportWidth] = useState<number>(canvasWidth);
+  const [contentSize, setContentSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep the internal blocks in sync when the incoming doc changes identity
-  // (note switch, remote sync, etc). A shallow reference check on the array
-  // is enough — the hook chain always produces a new array when the doc
-  // content changes.
+  // Keep internal blocks in sync when the incoming doc changes identity
+  // (note switch, remote sync, etc).
   useEffect(() => {
     setBlocks(spatialDoc.blocks);
   }, [spatialDoc.blocks]);
@@ -146,96 +159,43 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
-  const canvasHeight = useMemo(
-    () =>
-      computeCanvasHeight(
-        { ...spatialDoc, blocks },
-        DEFAULT_BOTTOM_PADDING,
-      ),
-    [spatialDoc, blocks],
-  );
-
-  // Scale factor applied to the whole canvas surface so that a fixed logical
-  // canvasWidth fits the measured viewport. Defaults to 1 until layout
-  // reports a width.
-  const scale = viewportWidth > 0 ? viewportWidth / canvasWidth : 1;
-
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0) setViewportWidth(w);
-  }, []);
-
-  // The inner "canvas stage" is sized in logical canvas units; scale it so
-  // it fills the viewport width. React Native's transform property has no
-  // notion of transform-origin, so we pre-shift the stage up/left by half
-  // its size * (scale - 1) to achieve a top-left origin (scaling pivots on
-  // the layout center by default). On web RN maps transform onto CSS and
-  // we can additionally set transformOrigin via style.
-  const stageWidth = canvasWidth;
-  const stageHeight = canvasHeight;
-  const scaledWidth = stageWidth * scale;
-  const scaledHeight = stageHeight * scale;
-  const translateX = -(stageWidth - scaledWidth) / 2;
-  const translateY = -(stageHeight - scaledHeight) / 2;
+  // Silence "blocks is set but never read" — we keep the state + listener
+  // live so the heights channel stays warm for the spatial revival.
+  void blocks;
 
   return (
-    <View style={styles.root} onLayout={handleLayout}>
+    <View style={styles.root}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={{
-          width: scaledWidth,
-          height: scaledHeight,
-          alignSelf: 'flex-start',
-        }}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={(w: number, h: number) =>
+          setContentSize({ width: w, height: h })
+        }
       >
-        <View
-          style={{
-            width: stageWidth,
-            height: stageHeight,
-            transform: [
-              { translateX },
-              { translateY },
-              { scale },
-            ],
-          }}
-        >
-          {/*
-            The ink layer sits BELOW the text layer in z-order so typed text
-            reads cleanly over sketches. pointerEvents gating is handled
-            inside InkOverlay by the `pointerEvents` prop.
-          */}
-          <InkOverlay
-            strokes={spatialDoc.inkStrokes}
-            width={stageWidth}
-            height={stageHeight}
-            pointerEvents={inkMode ? 'auto' : 'none'}
-            onNewStroke={handleInkChange}
-          />
-          <View
-            pointerEvents={inkMode ? 'none' : 'auto'}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              width: stageWidth,
-              minHeight: stageHeight,
-            }}
-          >
-            <LivePreviewInput
-              key={focusKey ?? 'no-note'}
-              value={joinedMarkdown}
-              onChange={handleTextChange}
-              inputMode={readOnly || inkMode ? 'ink' : 'scroll'}
-              pendingCommand={pendingCommand}
-              onCommandApplied={onCommandApplied}
-              onActiveFormatsChange={onActiveFormatsChange}
-              autoFocus={autoFocusFirst}
-              enableBlockHeights
-              onBlockHeights={handleBlockHeights}
+        <LivePreviewInput
+          key={focusKey ?? 'no-note'}
+          value={joinedMarkdown}
+          onChange={handleTextChange}
+          inputMode={readOnly || inkMode ? 'ink' : 'scroll'}
+          pendingCommand={pendingCommand}
+          onCommandApplied={onCommandApplied}
+          onActiveFormatsChange={onActiveFormatsChange}
+          autoFocus={autoFocusFirst}
+          enableBlockHeights
+          onBlockHeights={handleBlockHeights}
+        />
+        {inkMode ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+            <InkOverlay
+              strokes={spatialDoc.inkStrokes}
+              width={contentSize.width}
+              height={contentSize.height}
+              pointerEvents="auto"
+              onNewStroke={handleInkChange}
             />
           </View>
-        </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -244,4 +204,10 @@ export function SpatialCanvasRenderer({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: tokens.bgBase },
   scroll: { flex: 1, backgroundColor: tokens.bgBase },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 48,
+    flexGrow: 1,
+  },
 });
