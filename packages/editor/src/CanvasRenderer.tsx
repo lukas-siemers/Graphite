@@ -1,28 +1,35 @@
 /**
- * CanvasRenderer — plain React Native TextInput editor body.
+ * CanvasRenderer — ground-up markdown editor (Build 70 rewrite).
  *
- * Emergency rewrite (build 51): the CodeMirror + iframe + WebView stack
- * was dropped after builds 46-50 shipped with a production-only rendering
- * regression on iOS TestFlight. This file now renders a single multiline
- * TextInput inside a ScrollView — it has no native-heavy dependencies, so
- * the component can be imported at module load time instead of lazily.
+ * After Builds 67/68/69 shipped with different flavors of the same crash
+ * (iOS UITextView NSRangeException when React's controlled `selection`
+ * prop got validated against a stale textStorage during a commit that
+ * also changed the text), this file throws away the controlled pattern
+ * entirely and uses an uncontrolled TextInput driven by refs +
+ * setNativeProps for imperative updates.
  *
- * What stayed:
- *   - canvas_json storage schema (inkLayer.strokes is always empty in v1
- *     but the shape is preserved for Phase 2 sync).
- *   - The pendingCommand / onCommandApplied / onActiveFormatsChange
- *     contract that the FormattingToolbar uses.
+ * Contract kept intact:
+ *   - pendingCommand / onCommandApplied is still how the toolbar
+ *     delivers format commands. The toolbar is unchanged.
+ *   - applyFormat is still the pure-function transform layer.
+ *   - onTextChange fires debounced so the host can persist to SQLite.
  *
- * What's gone:
- *   - Skia ink layer (no @shopify/react-native-skia imports).
- *   - LivePreviewInput and the editorHtml iframe bundle.
- *   - perfect-freehand and inkPath helpers.
- *   - inputMode switching — there is no drawing mode in v1.
+ * Why uncontrolled:
+ *   A controlled TextInput passes `value` + `selection` props on every
+ *   render. Applying a format synchronously updates both, and iOS
+ *   UITextView does not tolerate a selection range past the previous
+ *   textStorage length in the same commit — it raises NSRangeException
+ *   which crosses the bridge as RCTFatal / SIGABRT. An uncontrolled
+ *   TextInput only sees text updates through setNativeProps; the
+ *   native view never re-validates a selection it did not receive.
  *
- * Apple Pencil drawing comes back as a clean separate slice later.
+ * Note-switching:
+ *   `focusKey` doubles as the TextInput's `key`. When the active note
+ *   changes we fully remount the TextInput, giving iOS a fresh native
+ *   view seeded with the new note's text via defaultValue. No drift.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -37,33 +44,19 @@ import type { CanvasDocument } from '@graphite/db';
 import { applyFormat } from './applyFormat';
 import type { FormatCommand } from './types';
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
-
 export interface CanvasRendererProps {
   canvasDoc: CanvasDocument;
-  /** Fixed column width. Defaults to 680. */
   width?: number;
   onTextChange?: (text: string) => void;
   readOnly?: boolean;
-  /** Format command dispatched from the toolbar */
   pendingCommand?: FormatCommand | null;
-  /** Called when the pending command has been consumed */
   onCommandApplied?: () => void;
-  /** Reports which formats are active at the cursor (empty array in v1) */
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
-  /** Auto-focus the editor when first mounted */
   autoFocusFirst?: boolean;
-  /** Refocus the editor when the active note changes */
   focusKey?: string | null;
 }
 
 const DEBOUNCE_MS = 500;
-
-// ---------------------------------------------------------------------------
-// Web-only style reset — remove textarea outline and resize handle
-// ---------------------------------------------------------------------------
 
 const webReset =
   Platform.OS === 'web'
@@ -77,13 +70,8 @@ const webReset =
       } as any)
     : {};
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export function CanvasRenderer({
   canvasDoc,
-  width = 680,
   onTextChange,
   readOnly = false,
   pendingCommand,
@@ -92,123 +80,88 @@ export function CanvasRenderer({
   autoFocusFirst = false,
   focusKey = null,
 }: CanvasRendererProps) {
-  const externalValue = canvasDoc.textContent.body;
+  const initialText = canvasDoc.textContent.body;
 
-  const [localValue, setLocalValue] = useState(externalValue);
-  const [selection, setSelection] = useState<{ start: number; end: number }>({
-    start: 0,
-    end: 0,
-  });
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isDirtyRef = useRef(false);
-  const localValueRef = useRef(localValue);
-  const selectionRef = useRef(selection);
+  // All mutable editor state lives in refs, not useState. We never drive
+  // TextInput with `value=` — keeping it uncontrolled is the whole point
+  // of this rewrite. The component itself almost never re-renders.
+  const textRef = useRef(initialText);
+  const selectionRef = useRef({ start: 0, end: 0 });
   const inputRef = useRef<TextInput | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep refs mirrored to state so effects can read the latest values
-  // without re-subscribing on every keystroke.
+  // Reset ref-backed text when the active note changes. focusKey doubles
+  // as the TextInput key below, so the view remounts with the new
+  // defaultValue; this just keeps textRef in sync for save debouncing.
   useEffect(() => {
-    localValueRef.current = localValue;
-  }, [localValue]);
-  useEffect(() => {
-    selectionRef.current = selection;
-  }, [selection]);
+    textRef.current = initialText;
+    selectionRef.current = { start: 0, end: 0 };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey]);
 
-  // Sync external value when not actively typing (e.g. switching notes)
+  // Toolbar's active-format highlight logic is not populated in v1;
+  // hand it an empty array so the prop contract stays stable.
   useEffect(() => {
-    if (!isDirtyRef.current) {
-      setLocalValue(externalValue);
-    }
-  }, [externalValue]);
+    onActiveFormatsChange?.([]);
+  }, [onActiveFormatsChange]);
 
-  // Refocus when the active note changes
-  useEffect(() => {
-    if (focusKey && !readOnly) {
-      const handle = setTimeout(() => inputRef.current?.focus(), 0);
-      return () => clearTimeout(handle);
-    }
-    return undefined;
-  }, [focusKey, readOnly]);
-
-  // Cleanup debounce on unmount (don't lose the last write)
+  // Save on unmount — don't lose the last edit.
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, []);
 
-  // Active formats are not detected in v1 — the toolbar still gets an
-  // empty array so its highlighted-state logic works without branching.
-  useEffect(() => {
-    onActiveFormatsChange?.([]);
-  }, [onActiveFormatsChange]);
+  const scheduleSave = useCallback(
+    (text: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onTextChange?.(text);
+      }, DEBOUNCE_MS);
+    },
+    [onTextChange],
+  );
 
-  // Apply an incoming format command. We read current text+selection from
-  // refs (never from stale state) and dispatch through the pure applyFormat
-  // helper. After applying we set controlledSelection once so the TextInput
-  // caret matches the new anchor, then clear it on the next tick so native
-  // typing regains control.
+  // Apply an incoming format command imperatively. We:
+  //   1. Compute the new text from applyFormat (pure).
+  //   2. Update our ref so the next read sees the formatted text.
+  //   3. Push the new text into the native TextInput via setNativeProps.
+  //      No `value` / `selection` props cross the bridge, so iOS never
+  //      re-validates a selection range against stale text storage.
+  //   4. Schedule the debounced save.
   useEffect(() => {
     if (!pendingCommand) return;
     onCommandApplied?.();
+    if (pendingCommand === 'undo') return;
 
-    if (pendingCommand === 'undo') {
-      // Not implemented in v1 — let the native TextInput's built-in undo
-      // handle it. Still consume the pending command so it doesn't loop.
-      return;
-    }
-
-    // Wrap everything in try/catch: any throw inside applyFormat or the
-    // subsequent setState calls would propagate up to RN's JS thread run
-    // loop and crash the app via RCTFatal (SIGABRT). A format that fails
-    // silently is much better UX than a force-close.
     try {
-      const currentText = localValueRef.current;
-      const currentSel = selectionRef.current;
-      const result = applyFormat(currentText, currentSel, pendingCommand);
-      if (result.text === currentText) {
-        return;
-      }
+      const result = applyFormat(
+        textRef.current,
+        selectionRef.current,
+        pendingCommand,
+      );
+      if (result.text === textRef.current) return;
 
-      // Only update the text. We deliberately do NOT set a controlled
-      // `selection` on TextInput after a format: iOS UITextView validates
-      // the incoming selectedRange against the PREVIOUS textStorage length
-      // during the same commit (before the new text lands), and an
-      // out-of-range range raises NSRangeException that bubbles up as
-      // RCTFatal / SIGABRT. Leaving the cursor for iOS to re-position
-      // is a small UX compromise that trades a crash for an imperfect
-      // caret landing.
-      setLocalValue(result.text);
-      isDirtyRef.current = true;
-
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        isDirtyRef.current = false;
-        onTextChange?.(result.text);
-      }, DEBOUNCE_MS);
+      textRef.current = result.text;
+      inputRef.current?.setNativeProps({ text: result.text });
+      scheduleSave(result.text);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[CanvasRenderer] format apply failed', err);
-      return;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCommand]);
 
   function handleChange(text: string) {
-    setLocalValue(text);
-    isDirtyRef.current = true;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      isDirtyRef.current = false;
-      onTextChange?.(text);
-    }, DEBOUNCE_MS);
+    textRef.current = text;
+    scheduleSave(text);
   }
 
   function handleSelectionChange(
     e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
   ) {
     const next = e.nativeEvent.selection;
-    setSelection({ start: next.start, end: next.end });
+    selectionRef.current = { start: next.start, end: next.end };
   }
 
   return (
@@ -219,8 +172,9 @@ export function CanvasRenderer({
         keyboardShouldPersistTaps="handled"
       >
         <TextInput
+          key={focusKey ?? 'no-note'}
           ref={inputRef}
-          value={localValue}
+          defaultValue={initialText}
           onChangeText={handleChange}
           onSelectionChange={handleSelectionChange}
           multiline
@@ -241,13 +195,6 @@ export function CanvasRenderer({
 }
 
 const styles = StyleSheet.create({
-  // Left-aligned to match Editor.tsx's title area at paddingHorizontal 24.
-  // flexGrow: 1 is load-bearing: without it the ScrollView content only
-  // occupies the TextInput's intrinsic 400 minHeight, leaving dead space
-  // between the text and the status bar and making the app look "cut off
-  // at the bottom" (reported on build 52). flexGrow stretches the content
-  // container to fill the ScrollView vertically, so the TextInput
-  // background reaches all the way down to the status bar.
   scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 16,
