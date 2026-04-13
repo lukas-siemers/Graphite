@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -19,7 +19,6 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
-import { useEditorStore } from '../../stores/use-editor-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
 import { getCurrentSession } from '../../components/auth/AuthGate';
 import Sidebar from '../../components/sidebar/Sidebar';
@@ -54,8 +53,6 @@ function PhoneLayout() {
   const [screen, setScreen] = useState<PhoneScreen>('sidebar');
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const setActiveNote = useNoteStore((s) => s.setActiveNote);
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
   const handleCreateNote = useCreateNoteAction(() => setScreen('editor'));
 
   useEffect(() => {
@@ -78,7 +75,7 @@ function PhoneLayout() {
     screen === 'sidebar' ? 'Graphite' : screen === 'list' ? 'Notes' : 'Editor';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
       <View
         style={{
           flexDirection: 'row',
@@ -136,28 +133,6 @@ function PhoneLayout() {
         {screen === 'editor' && (
           <View style={{ flex: 1, position: 'relative' }}>
             <Editor />
-            {Platform.OS !== 'web' && (
-              <Pressable
-                onPress={toggleInputMode}
-                style={({ pressed }) => ({
-                  position: 'absolute',
-                  bottom: 24,
-                  right: 24,
-                  width: 48,
-                  height: 48,
-                  borderRadius: 0,
-                  backgroundColor: pressed
-                    ? tokens.accentPressed
-                    : inputMode === 'ink'
-                      ? tokens.accentPressed
-                      : tokens.accent,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                })}
-              >
-                <Text style={{ fontSize: 22, color: '#4D2600' }}>{'✏'}</Text>
-              </Pressable>
-            )}
           </View>
         )}
       </View>
@@ -167,12 +142,10 @@ function PhoneLayout() {
 
 function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const toggleInputMode = useEditorStore((s) => s.toggleInputMode);
   const handleCreateNote = useCreateNoteAction();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
         <View
           style={{
@@ -211,10 +184,7 @@ function IPadLayout() {
               <Text style={{ fontSize: 16, color: tokens.textMuted }}>{'\u2630'}</Text>
             </Pressable>
 
-            <FormattingToolbar
-              onToggleDrawing={toggleInputMode}
-              drawingOpen={inputMode === 'ink'}
-            />
+            <FormattingToolbar />
             <Pressable
               onPress={handleCreateNote}
               hitSlop={10}
@@ -233,28 +203,6 @@ function IPadLayout() {
 
           <View style={{ flex: 1, position: 'relative' }}>
             <Editor />
-            {Platform.OS !== 'web' && (
-              <Pressable
-                onPress={toggleInputMode}
-                style={({ pressed }) => ({
-                  position: 'absolute',
-                  bottom: 24,
-                  right: 24,
-                  width: 48,
-                  height: 48,
-                  borderRadius: 0,
-                  backgroundColor: pressed
-                    ? tokens.accentPressed
-                    : inputMode === 'ink'
-                      ? tokens.accentPressed
-                      : tokens.accent,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                })}
-              >
-                <Text style={{ fontSize: 22, color: '#4D2600' }}>{'✏'}</Text>
-              </Pressable>
-            )}
           </View>
         </View>
       </View>

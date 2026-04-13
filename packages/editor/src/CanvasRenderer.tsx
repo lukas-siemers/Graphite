@@ -1,294 +1,267 @@
-import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Platform } from 'react-native';
-import Constants from 'expo-constants';
-import { nanoid } from 'nanoid';
+/**
+ * CanvasRenderer — plain React Native TextInput editor body.
+ *
+ * Emergency rewrite (build 51): the CodeMirror + iframe + WebView stack
+ * was dropped after builds 46-50 shipped with a production-only rendering
+ * regression on iOS TestFlight. This file now renders a single multiline
+ * TextInput inside a ScrollView — it has no native-heavy dependencies, so
+ * the component can be imported at module load time instead of lazily.
+ *
+ * What stayed:
+ *   - canvas_json storage schema (inkLayer.strokes is always empty in v1
+ *     but the shape is preserved for Phase 2 sync).
+ *   - The pendingCommand / onCommandApplied / onActiveFormatsChange
+ *     contract that the FormattingToolbar uses.
+ *
+ * What's gone:
+ *   - Skia ink layer (no @shopify/react-native-skia imports).
+ *   - LivePreviewInput and the editorHtml iframe bundle.
+ *   - perfect-freehand and inkPath helpers.
+ *   - inputMode switching — there is no drawing mode in v1.
+ *
+ * Apple Pencil drawing comes back as a clean separate slice later.
+ */
+
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  ScrollView,
+  TextInput,
+  StyleSheet,
+  Platform,
+  type NativeSyntheticEvent,
+  type TextInputSelectionChangeEventData,
+} from 'react-native';
 import { tokens } from '@graphite/ui';
-import type { CanvasDocument, InkLayer, InkStroke, StrokePoint } from '@graphite/db';
-import { LivePreviewInput } from './LivePreviewInput';
+import type { CanvasDocument } from '@graphite/db';
+import { applyFormat } from './applyFormat';
 import type { FormatCommand } from './types';
 
 // ---------------------------------------------------------------------------
-// Skia — dynamic import so the component works in Expo Go (no native module)
-// ---------------------------------------------------------------------------
-const isExpoGo = Constants.appOwnership === 'expo';
-let SkiaCanvas: any = null;
-let Path: any = null;
-let Skia: any = null;
-if (Platform.OS !== 'web' && !isExpoGo) {
-  const skia = require('@shopify/react-native-skia');
-  SkiaCanvas = skia.Canvas;
-  Path = skia.Path;
-  Skia = skia.Skia;
-}
-
-// ---------------------------------------------------------------------------
-// Types
+// Props
 // ---------------------------------------------------------------------------
 
 export interface CanvasRendererProps {
   canvasDoc: CanvasDocument;
   /** Fixed column width. Defaults to 680. */
   width?: number;
-  onInkChange?: (inkLayer: InkLayer) => void;
   onTextChange?: (text: string) => void;
   readOnly?: boolean;
-  /** Controls whether the text layer accepts keyboard input */
-  inputMode?: 'ink' | 'scroll';
-  /** Format command dispatched from the toolbar — routed to the CodeMirror host */
+  /** Format command dispatched from the toolbar */
   pendingCommand?: FormatCommand | null;
   /** Called when the pending command has been consumed */
   onCommandApplied?: () => void;
-  /** Reports which formats are active at the cursor — for toolbar highlighting */
+  /** Reports which formats are active at the cursor (empty array in v1) */
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
-  /** Auto-focus the editor — set true when entering edit mode from preview */
+  /** Auto-focus the editor when first mounted */
   autoFocusFirst?: boolean;
   /** Refocus the editor when the active note changes */
   focusKey?: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Ink layer renderer — Skia paths for each stroke
-// ---------------------------------------------------------------------------
-
-interface InkLayerViewProps {
-  inkLayer: InkLayer;
-  width: number;
-  height: number;
-  activeStroke?: InkStroke | null;
-}
-
-function InkLayerView({ inkLayer, width, height, activeStroke = null }: InkLayerViewProps) {
-  if (Platform.OS === 'web' || isExpoGo || !SkiaCanvas || !Path || !Skia) {
-    // Skia is native-only — no ink layer on web or Expo Go
-    return null;
-  }
-
-  const strokes = activeStroke
-    ? inkLayer.strokes.concat(activeStroke)
-    : inkLayer.strokes;
-
-  return (
-    <SkiaCanvas style={[StyleSheet.absoluteFill, { width, height }]}>
-      {strokes.map((stroke) => {
-        if (stroke.points.length < 2) return null;
-
-        const svgParts: string[] = [];
-        const { x: x0, y: y0 } = stroke.points[0];
-        svgParts.push(`M ${x0} ${y0}`);
-        for (let i = 1; i < stroke.points.length; i++) {
-          const { x, y } = stroke.points[i];
-          svgParts.push(`L ${x} ${y}`);
-        }
-        const pathStr = svgParts.join(' ');
-
-        const avgPressure =
-          stroke.points.reduce((sum, p) => sum + p.pressure, 0) /
-          stroke.points.length;
-        const paintWidth = stroke.width * Math.max(0.3, avgPressure);
-
-        const paint = Skia.Paint();
-        paint.setColor(Skia.Color(stroke.color));
-        paint.setStrokeWidth(paintWidth);
-        paint.setStyle(1 /* stroke */);
-        paint.setAntiAlias(true);
-        paint.setStrokeCap(1 /* round */);
-        paint.setStrokeJoin(1 /* round */);
-        paint.setAlphaf(stroke.opacity);
-
-        return <Path key={stroke.id} path={pathStr} paint={paint} />;
-      })}
-    </SkiaCanvas>
-  );
-}
+const DEBOUNCE_MS = 500;
 
 // ---------------------------------------------------------------------------
-// Main component
+// Web-only style reset — remove textarea outline and resize handle
 // ---------------------------------------------------------------------------
 
-/**
- * Renders a CanvasDocument on a fixed-width infinite-scroll surface.
- *
- * Unified editor model (v1.5):
- *   - Text layer: a single CodeMirror 6 live-preview editor hosted in a
- *     react-native-webview (native) or <iframe> (web). Code blocks, headings,
- *     inline formatting are all rendered by CodeMirror — no React Native
- *     segment parsing, no separate <CodeBlock> component.
- *   - Ink layer: Skia strokes overlaid on native, no-op on web.
- */
+const webReset =
+  Platform.OS === 'web'
+    ? ({
+        outlineWidth: 0,
+        outlineStyle: 'none',
+        resize: 'none',
+        boxShadow: 'none',
+        fontFamily:
+          'JetBrainsMono, "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
+      } as any)
+    : {};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function CanvasRenderer({
   canvasDoc,
   width = 680,
-  onInkChange,
   onTextChange,
   readOnly = false,
-  inputMode = 'scroll',
   pendingCommand,
   onCommandApplied,
   onActiveFormatsChange,
   autoFocusFirst = false,
   focusKey = null,
 }: CanvasRendererProps) {
-  const [contentHeight, setContentHeight] = useState(600);
-  const [activeStroke, setActiveStroke] = useState<InkStroke | null>(null);
-  const canDraw = inputMode === 'ink' && !readOnly && !!onInkChange;
+  const externalValue = canvasDoc.textContent.body;
 
-  function createStrokePoint(event: any): StrokePoint {
-    const native = event.nativeEvent;
-    const pressure =
-      typeof native.force === 'number' && native.force > 0
-        ? native.force
-        : typeof native.pressure === 'number' && native.pressure > 0
-          ? native.pressure
-          : 0.5;
-    const altitudeAngle =
-      typeof native.altitudeAngle === 'number' ? native.altitudeAngle : null;
-    const tilt =
-      altitudeAngle !== null
-        ? Math.max(0, Math.min(90, 90 - (altitudeAngle * 180) / Math.PI))
-        : Math.hypot(
-            typeof native.tiltX === 'number' ? native.tiltX : 0,
-            typeof native.tiltY === 'number' ? native.tiltY : 0,
-          );
+  const [localValue, setLocalValue] = useState(externalValue);
+  const [selection, setSelection] = useState<{ start: number; end: number }>({
+    start: 0,
+    end: 0,
+  });
+  // Controlled selection payload — fed to TextInput only when we need to
+  // restore the cursor after a format command. Setting it to `undefined`
+  // during normal typing lets the native input manage its own caret.
+  const [controlledSelection, setControlledSelection] = useState<
+    { start: number; end: number } | undefined
+  >(undefined);
 
-    return {
-      x: native.locationX,
-      y: native.locationY,
-      pressure,
-      tilt,
-      timestamp: Date.now(),
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDirtyRef = useRef(false);
+  const localValueRef = useRef(localValue);
+  const selectionRef = useRef(selection);
+  const inputRef = useRef<TextInput | null>(null);
+
+  // Keep refs mirrored to state so effects can read the latest values
+  // without re-subscribing on every keystroke.
+  useEffect(() => {
+    localValueRef.current = localValue;
+  }, [localValue]);
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
+
+  // Sync external value when not actively typing (e.g. switching notes)
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setLocalValue(externalValue);
+    }
+  }, [externalValue]);
+
+  // Refocus when the active note changes
+  useEffect(() => {
+    if (focusKey && !readOnly) {
+      const handle = setTimeout(() => inputRef.current?.focus(), 0);
+      return () => clearTimeout(handle);
+    }
+    return undefined;
+  }, [focusKey, readOnly]);
+
+  // Cleanup debounce on unmount (don't lose the last write)
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }
+  }, []);
 
-  function handleInkStart(event: any) {
-    if (!canDraw) return;
-    setActiveStroke({
-      id: nanoid(),
-      points: [createStrokePoint(event)],
-      color: tokens.textPrimary,
-      width: 2,
-      opacity: 1,
-    });
-  }
+  // Active formats are not detected in v1 — the toolbar still gets an
+  // empty array so its highlighted-state logic works without branching.
+  useEffect(() => {
+    onActiveFormatsChange?.([]);
+  }, [onActiveFormatsChange]);
 
-  function handleInkMove(event: any) {
-    if (!canDraw) return;
-    setActiveStroke((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        points: current.points.concat(createStrokePoint(event)),
-      };
-    });
-  }
+  // Apply an incoming format command. We read current text+selection from
+  // refs (never from stale state) and dispatch through the pure applyFormat
+  // helper. After applying we set controlledSelection once so the TextInput
+  // caret matches the new anchor, then clear it on the next tick so native
+  // typing regains control.
+  useEffect(() => {
+    if (!pendingCommand) return;
+    onCommandApplied?.();
 
-  function finishInkStroke() {
-    if (!canDraw) {
-      setActiveStroke(null);
+    if (pendingCommand === 'undo') {
+      // Not implemented in v1 — let the native TextInput's built-in undo
+      // handle it. Still consume the pending command so it doesn't loop.
       return;
     }
 
-    setActiveStroke((current) => {
-      if (!current || current.points.length < 2) {
-        return null;
-      }
+    const currentText = localValueRef.current;
+    const currentSel = selectionRef.current;
+    const result = applyFormat(currentText, currentSel, pendingCommand);
+    if (result.text === currentText && result.selection.start === currentSel.start) {
+      return;
+    }
 
-      const updatedLayer: InkLayer = {
-        strokes: canvasDoc.inkLayer.strokes.concat(current),
-      };
-      onInkChange?.(updatedLayer);
-      return null;
-    });
+    setLocalValue(result.text);
+    setControlledSelection(result.selection);
+    isDirtyRef.current = true;
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      isDirtyRef.current = false;
+      onTextChange?.(result.text);
+    }, DEBOUNCE_MS);
+
+    // Release controlled selection so subsequent typing is unconstrained
+    const releaseHandle = setTimeout(() => setControlledSelection(undefined), 0);
+    return () => clearTimeout(releaseHandle);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCommand]);
+
+  function handleChange(text: string) {
+    setLocalValue(text);
+    isDirtyRef.current = true;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      isDirtyRef.current = false;
+      onTextChange?.(text);
+    }, DEBOUNCE_MS);
   }
 
-  function handleLayout(event: { nativeEvent: { layout: { height: number } } }) {
-    setContentHeight(event.nativeEvent.layout.height);
+  function handleSelectionChange(
+    e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
+  ) {
+    const next = e.nativeEvent.selection;
+    setSelection({ start: next.start, end: next.end });
   }
-
-  // ── Web path ─────────────────────────────────────────────────────────────
-  // Skia ink layer is a no-op on web, so we skip the ScrollView + gesture
-  // wrapper entirely and let the live preview component manage its own
-  // height and scrolling.
-  if (Platform.OS === 'web') {
-    return (
-      <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
-        <LivePreviewInput
-          value={canvasDoc.textContent.body}
-          onChange={(text) => onTextChange?.(text)}
-          inputMode={readOnly ? 'ink' : inputMode}
-          placeholder="Start writing..."
-          pendingCommand={pendingCommand}
-          onCommandApplied={onCommandApplied}
-          onActiveFormatsChange={onActiveFormatsChange}
-          autoFocus={autoFocusFirst}
-          focusKey={focusKey}
-        />
-      </View>
-    );
-  }
-
-  // ── Native path ──────────────────────────────────────────────────────────
-  // Same unified editor, plus the Skia ink layer rendered on top so Apple
-  // Pencil strokes visually sit above the CodeMirror-rendered text.
-  //
-  const scrollContent = (
-    <ScrollView
-      bounces={false}
-      style={{ backgroundColor: tokens.bgBase }}
-      contentContainerStyle={{ width }}
-      scrollEnabled={inputMode !== 'ink'}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={{ width }} onLayout={handleLayout}>
-        <View style={styles.contentLayer}>
-          <LivePreviewInput
-            value={canvasDoc.textContent.body}
-            onChange={(text) => onTextChange?.(text)}
-            inputMode={readOnly ? 'ink' : inputMode}
-            placeholder="Start writing..."
-            pendingCommand={pendingCommand}
-            onCommandApplied={onCommandApplied}
-            onActiveFormatsChange={onActiveFormatsChange}
-            autoFocus={autoFocusFirst}
-            focusKey={focusKey}
-          />
-        </View>
-
-        {/* Ink layer — absolutely positioned ON TOP of the content.
-            Pointer events are disabled unless we're in ink mode so
-            keyboard text entry still reaches the WebView underneath. */}
-        <View
-          style={StyleSheet.absoluteFill}
-          pointerEvents={canDraw ? 'auto' : 'none'}
-          onStartShouldSetResponder={() => canDraw}
-          onMoveShouldSetResponder={() => canDraw}
-          onResponderGrant={handleInkStart}
-          onResponderMove={handleInkMove}
-          onResponderRelease={finishInkStroke}
-          onResponderTerminate={finishInkStroke}
-          onResponderTerminationRequest={() => false}
-        >
-          <InkLayerView
-            inkLayer={canvasDoc.inkLayer}
-            width={width}
-            height={contentHeight}
-            activeStroke={activeStroke}
-          />
-        </View>
-      </View>
-    </ScrollView>
-  );
 
   return (
-    <View style={{ flex: 1 }}>
-      {scrollContent}
+    <View style={{ flex: 1, backgroundColor: tokens.bgBase }}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: tokens.bgBase }}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <TextInput
+          ref={inputRef}
+          value={localValue}
+          onChangeText={handleChange}
+          onSelectionChange={handleSelectionChange}
+          selection={controlledSelection}
+          multiline
+          editable={!readOnly}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
+          autoFocus={autoFocusFirst}
+          placeholder="Start writing..."
+          placeholderTextColor={tokens.textHint}
+          textAlignVertical="top"
+          scrollEnabled={false}
+          style={[styles.input, webReset]}
+        />
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  contentLayer: {
+  // Left-aligned to match Editor.tsx's title area at paddingHorizontal 24.
+  // flexGrow: 1 is load-bearing: without it the ScrollView content only
+  // occupies the TextInput's intrinsic 400 minHeight, leaving dead space
+  // between the text and the status bar and making the app look "cut off
+  // at the bottom" (reported on build 52). flexGrow stretches the content
+  // container to fill the ScrollView vertically, so the TextInput
+  // background reaches all the way down to the status bar.
+  scrollContent: {
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 48,
+    flexGrow: 1,
+  },
+  input: {
+    width: '100%',
+    minHeight: 400,
+    fontSize: 16,
+    lineHeight: 24,
+    color: tokens.textBody,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    padding: 0,
+    fontFamily: Platform.select({
+      ios: 'JetBrainsMono-Regular',
+      android: 'JetBrainsMono-Regular',
+      default: undefined,
+    }),
   },
 });

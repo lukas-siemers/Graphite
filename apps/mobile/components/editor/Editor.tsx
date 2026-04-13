@@ -3,15 +3,15 @@ import {
   View,
   Text,
   TextInput,
-  ScrollView,
   Pressable,
-  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import { getDatabase } from '@graphite/db';
+import { getDatabase, createEmptyCanvas } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
+import { CanvasRenderer } from '@graphite/editor';
+import DrawingCanvas from './DrawingCanvas';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
@@ -23,49 +23,6 @@ import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
 
 type SaveStatus = 'Saved' | 'Saving...';
 
-interface CanvasRendererProps {
-  canvasDoc: CanvasDocument;
-  width?: number;
-  onInkChange?: (inkLayer: CanvasDocument['inkLayer']) => void;
-  onTextChange?: (text: string) => void;
-  inputMode?: 'ink' | 'scroll';
-  pendingCommand?: string | null;
-  onCommandApplied?: () => void;
-  onActiveFormatsChange?: (formats: any[]) => void;
-}
-
-type CanvasRendererComponent = (props: CanvasRendererProps) => JSX.Element;
-
-let cachedCanvasRenderer: CanvasRendererComponent | null | undefined;
-let cachedCanvasRendererError: string | null = null;
-
-function loadCanvasRenderer(): CanvasRendererComponent | null {
-  if (typeof cachedCanvasRenderer !== 'undefined') {
-    return cachedCanvasRenderer;
-  }
-
-  try {
-    const editorModule = require('../../../../packages/editor/src/CanvasRenderer') as {
-      CanvasRenderer?: CanvasRendererComponent;
-    };
-    cachedCanvasRenderer = editorModule.CanvasRenderer ?? null;
-
-    if (!cachedCanvasRenderer) {
-      cachedCanvasRendererError = 'Canvas renderer export was not available.';
-    }
-  } catch (error) {
-    cachedCanvasRenderer = null;
-    cachedCanvasRendererError =
-      error instanceof Error ? error.message : String(error);
-  }
-
-  return cachedCanvasRenderer;
-}
-
-function getCanvasRendererError(): string | null {
-  return cachedCanvasRendererError;
-}
-
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -75,7 +32,6 @@ export default function Editor() {
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
   const updateNoteCanvas = useNoteStore((s) => s.updateNoteCanvas);
-  const deleteIfEmpty = useNoteStore((s) => s.deleteIfEmpty);
 
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
@@ -85,75 +41,37 @@ export default function Editor() {
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
 
   const { width: windowWidth } = useWindowDimensions();
-  const inputMode = useEditorStore((s) => s.inputMode);
-  const setInputMode = useEditorStore((s) => s.setInputMode);
 
   const pendingCommand = useEditorStore((s) => s.pendingCommand);
   const clearCommand = useEditorStore((s) => s.clearCommand);
   const setActiveFormats = useEditorStore((s) => s.setActiveFormats);
   const syncState = useEditorStore((s) => s.syncState);
+  const drawMode = useEditorStore((s) => s.drawMode);
+  const setDrawMode = useEditorStore((s) => s.setDrawMode);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
-  const [AdvancedCanvasRenderer, setAdvancedCanvasRenderer] =
-    useState<CanvasRendererComponent | null>(null);
-  const [advancedEditorError, setAdvancedEditorError] = useState<string | null>(null);
 
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bodyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
   const activeNoteIdRef = useRef<string | null>(activeNoteId ?? null);
-  useEffect(() => { activeNoteIdRef.current = activeNoteId ?? null; }, [activeNoteId]);
+  useEffect(() => {
+    activeNoteIdRef.current = activeNoteId ?? null;
+  }, [activeNoteId]);
   // Ref keeps the latest canvasJson current inside debounce callbacks
   const canvasJsonRef = useRef<string | null>(activeNote?.canvasJson ?? null);
-  useEffect(() => { canvasJsonRef.current = activeNote?.canvasJson ?? null; }, [activeNote?.canvasJson]);
+  useEffect(() => {
+    canvasJsonRef.current = activeNote?.canvasJson ?? null;
+  }, [activeNote?.canvasJson]);
 
-  // Task 6 — auto-migrate legacy notes to CanvasDocument on open
+  // Auto-migrate legacy notes to CanvasDocument on open
   useNoteCanvasMigration(activeNote);
-
-  // Auto-delete empty notes when the user navigates away.
-  // Track the previous activeNoteId across renders; when it changes, run
-  // deleteIfEmpty against the previous id exactly once per transition.
-  const prevActiveNoteIdRef = useRef<string | null>(activeNoteId ?? null);
-  useEffect(() => {
-    const prevId = prevActiveNoteIdRef.current;
-    const nextId = activeNoteId ?? null;
-    if (prevId && prevId !== nextId) {
-      try {
-        const db = getDatabase();
-        void deleteIfEmpty(db, prevId);
-      } catch (_) {
-        // Best-effort cleanup — must not break navigation.
-      }
-    }
-    prevActiveNoteIdRef.current = nextId;
-  }, [activeNoteId, deleteIfEmpty]);
-
-  // On unmount (editor closed / app backgrounded), clean up the last active note.
-  useEffect(() => {
-    return () => {
-      const prevId = prevActiveNoteIdRef.current;
-      if (!prevId) return;
-      try {
-        const db = getDatabase();
-        void deleteIfEmpty(db, prevId);
-      } catch (_) {
-        // Best-effort cleanup.
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    setInputMode('scroll');
-  }, [activeNoteId, setInputMode]);
 
   // Sync local state when active note changes
   useEffect(() => {
     if (activeNote) {
       setLocalTitle(activeNote.title);
-      // Prefer canvas body if migrated, fall back to legacy body
       const displayBody = activeNote.canvasJson
         ? (() => {
             try {
@@ -168,6 +86,12 @@ export default function Editor() {
       setSaveStatus('Saved');
     }
   }, [activeNoteId]);
+
+  // Always exit draw mode when the active note changes. Otherwise the user
+  // would land on a different note's ink layer while still in drawing mode.
+  useEffect(() => {
+    setDrawMode(false);
+  }, [activeNoteId, setDrawMode]);
 
   const persistSave = useCallback(
     async (patch: { title?: string; body?: string }) => {
@@ -193,10 +117,45 @@ export default function Editor() {
     }, 500);
   }
 
+  // Drawing mode: save PKDrawing base64 blob. Called by DrawingCanvas on
+  // Done press and on auto-save (debounced inside DrawingCanvas itself).
+  const handleDrawingChange = useCallback(
+    async (base64: string) => {
+      const noteId = activeNoteIdRef.current;
+      if (!noteId) return;
+      setSaveStatus('Saving...');
+      try {
+        const db = getDatabase();
+        let currentDoc: CanvasDocument;
+        const currentJson = canvasJsonRef.current;
+        if (currentJson) {
+          try {
+            currentDoc = JSON.parse(currentJson) as CanvasDocument;
+          } catch {
+            currentDoc = createEmptyCanvas();
+          }
+        } else {
+          currentDoc = createEmptyCanvas();
+        }
+        const nextDoc: CanvasDocument = Object.assign({}, currentDoc, {
+          inkLayer: Object.assign({}, currentDoc.inkLayer, {
+            pkDrawingBase64: base64,
+          }),
+        });
+        await updateNoteCanvas(db, noteId, nextDoc);
+        setSaveStatus('Saved');
+      } catch (_) {
+        setSaveStatus('Saved');
+      }
+    },
+    [updateNoteCanvas],
+  );
+
   /**
    * Called when the CanvasRenderer text layer emits a new body string.
-   * CanvasTextInput already debounces — this fires at most once per 500ms.
-   * Reads note ID and canvasJson from refs so the closure is never stale.
+   * CanvasRenderer already debounces at 500ms — this fires at most once
+   * per save window. Reads note ID and canvasJson from refs so the closure
+   * is never stale.
    */
   async function handleCanvasTextChange(text: string) {
     const noteId = activeNoteIdRef.current;
@@ -209,10 +168,12 @@ export default function Editor() {
       let currentDoc: CanvasDocument;
       const currentJson = canvasJsonRef.current;
       if (currentJson) {
-        try { currentDoc = JSON.parse(currentJson) as CanvasDocument; }
-        catch { const { createEmptyCanvas } = await import('@graphite/db'); currentDoc = createEmptyCanvas(); }
+        try {
+          currentDoc = JSON.parse(currentJson) as CanvasDocument;
+        } catch {
+          currentDoc = createEmptyCanvas();
+        }
       } else {
-        const { createEmptyCanvas } = await import('@graphite/db');
         currentDoc = createEmptyCanvas();
       }
       currentDoc.textContent.body = text;
@@ -221,28 +182,6 @@ export default function Editor() {
     } catch (_) {
       setSaveStatus('Saved');
     }
-  }
-
-  function handleBodyChange(text: string) {
-    setLocalBody(text);
-    setSaveStatus('Saving...');
-    if (bodyDebounce.current) clearTimeout(bodyDebounce.current);
-    bodyDebounce.current = setTimeout(() => {
-      persistSave({ body: text });
-    }, 500);
-  }
-
-  function handleFallbackBodyChange(text: string) {
-    setLocalBody(text);
-    setSaveStatus('Saving...');
-    if (bodyDebounce.current) clearTimeout(bodyDebounce.current);
-    bodyDebounce.current = setTimeout(() => {
-      if (activeCanvasDoc) {
-        void handleCanvasTextChange(text);
-        return;
-      }
-      persistSave({ body: text });
-    }, 500);
   }
 
   const activeNotebook = notebooks.find((n) => n.id === activeNotebookId);
@@ -254,53 +193,24 @@ export default function Editor() {
 
   const wordCount = countWords(localBody);
 
-  // Derive the CanvasDocument to pass to CanvasRenderer
-  let activeCanvasDoc: CanvasDocument | null = null;
+  // Derive the CanvasDocument to pass to CanvasRenderer. If the note has
+  // no canvasJson yet (migration hook hasn't landed), synthesize one from
+  // the legacy body so the editor has something to render immediately.
+  let activeCanvasDoc: CanvasDocument;
   if (activeNote?.canvasJson) {
     try {
       activeCanvasDoc = JSON.parse(activeNote.canvasJson) as CanvasDocument;
     } catch {
-      activeCanvasDoc = null;
+      activeCanvasDoc = createEmptyCanvas();
+      activeCanvasDoc.textContent.body = activeNote.body;
     }
+  } else {
+    activeCanvasDoc = createEmptyCanvas();
+    if (activeNote) activeCanvasDoc.textContent.body = activeNote.body;
   }
 
-  // Canvas column width: full width minus sidebar/padding on iPad, full width on phone
+  // Fixed column width: capped at 680, down to windowWidth on phone
   const canvasWidth = Math.min(windowWidth, 680);
-
-  useEffect(() => {
-    if (!activeCanvasDoc) {
-      setAdvancedCanvasRenderer(null);
-      setAdvancedEditorError(null);
-      return;
-    }
-
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const renderer = loadCanvasRenderer();
-      if (cancelled) return;
-
-      if (renderer) {
-        setAdvancedCanvasRenderer(() => renderer);
-        setAdvancedEditorError(null);
-        return;
-      }
-
-      setAdvancedCanvasRenderer(null);
-      setAdvancedEditorError(
-        getCanvasRendererError() ?? 'The advanced editor could not be loaded.',
-      );
-    }, 0);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [activeCanvasDoc]);
-
-  const loadingAdvancedEditor =
-    activeCanvasDoc !== null &&
-    AdvancedCanvasRenderer === null &&
-    advancedEditorError === null;
 
   if (!activeNote) {
     return (
@@ -336,7 +246,6 @@ export default function Editor() {
           onChangeText={handleTitleChange}
           placeholder="Untitled"
           placeholderTextColor={tokens.textHint}
-          editable={inputMode !== 'ink'}
           style={{
             flex: 1,
             fontSize: 28,
@@ -408,88 +317,28 @@ export default function Editor() {
         </View>
       )}
 
-      {/* Content area — live-preview canvas is always on */}
-      {activeCanvasDoc !== null && AdvancedCanvasRenderer ? (
-        /* ── Primary surface — always open for writing ── */
-        <View style={{ flex: 1 }}>
-          <AdvancedCanvasRenderer
+      {/* Editor body — mutually exclusive with DrawingCanvas. We never mount
+          both at once (see CLAUDE.md "iOS production startup trap" and the
+          builds 46-50 regressions). */}
+      <View style={{ flex: 1 }}>
+        {drawMode ? (
+          <DrawingCanvas
+            initialDrawingBase64={activeCanvasDoc.inkLayer.pkDrawingBase64 ?? null}
+            onDrawingChange={handleDrawingChange}
+            onDone={() => setDrawMode(false)}
+          />
+        ) : (
+          <CanvasRenderer
             canvasDoc={activeCanvasDoc}
             width={canvasWidth}
             onTextChange={handleCanvasTextChange}
-            onInkChange={(inkLayer) => {
-              if (!activeNote) return;
-              // Object.assign instead of spread — avoids Hermes GC crash on iOS 26
-              const updated: CanvasDocument = Object.assign({}, activeCanvasDoc, { inkLayer });
-              const db = getDatabase();
-              updateNoteCanvas(db, activeNote.id, updated);
-            }}
-            inputMode={inputMode}
             pendingCommand={pendingCommand}
             onCommandApplied={clearCommand}
             onActiveFormatsChange={setActiveFormats}
             focusKey={activeNoteId}
           />
-        </View>
-      ) : loadingAdvancedEditor ? (
-        <View
-          style={{
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: tokens.bgBase,
-          }}
-        >
-          <Text style={{ fontSize: 12, color: tokens.textMuted }}>
-            Loading editor...
-          </Text>
-        </View>
-      ) : (
-        /* ── Fallback while canvas migration runs ── */
-        <View style={{ flex: 1 }}>
-          {advancedEditorError && (
-            <View
-              style={{
-                paddingHorizontal: 24,
-                paddingVertical: 10,
-                borderBottomWidth: 1,
-                borderBottomColor: tokens.border,
-                backgroundColor: tokens.bgHover,
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: '600', color: tokens.accentLight }}>
-                Advanced editor unavailable in this build
-              </Text>
-              <Text style={{ marginTop: 4, fontSize: 12, color: tokens.textMuted }}>
-                Graphite switched to plain text so the app can keep running.
-              </Text>
-              <Text style={{ marginTop: 6, fontSize: 11, color: tokens.textHint }}>
-                {advancedEditorError}
-              </Text>
-            </View>
-          )}
-          <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-            <TextInput
-              value={localBody}
-              onChangeText={activeCanvasDoc ? handleFallbackBodyChange : handleBodyChange}
-              multiline
-              placeholder="Start writing..."
-              placeholderTextColor={tokens.textHint}
-              editable={inputMode !== 'ink'}
-              style={{
-                fontSize: 16,
-                lineHeight: 24,
-                color: tokens.textBody,
-                backgroundColor: 'transparent',
-                borderWidth: 0,
-                padding: 24,
-                minHeight: 300,
-                textAlignVertical: 'top',
-                ...(Platform.OS === 'web' ? { outlineWidth: 0, outlineStyle: 'none', resize: 'none', boxShadow: 'none' } as any : {}),
-              }}
-            />
-          </ScrollView>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Status bar */}
       <View
