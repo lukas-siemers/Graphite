@@ -9,44 +9,39 @@
  *
  * The single-CodeMirror-instance decision is explicit (see
  *   docs/specs/plan shimmering-percolating-crayon.md, "Design decisions").
- * The spatial data model is preserved — block heights from the iframe are
- * still captured via the `block-heights` plugin and used to keep the
- * SpatialBlock[] Y positions in sync for future free-positioned content —
- * but layout no longer uses absolute positioning or a scale transform.
  *
- * Build 75 (2026-04-13): the previous implementation wrapped the editor
- * in a scaled absolutely-positioned stage so a fixed logical canvas width
- * would fit the viewport uniformly across devices. On iPad TestFlight that
- * combination broke text input — WKWebView's internal scroll fought the
- * parent ScrollView's pan responder and the scale transform shifted the
- * hit-test region without updating WKWebView's inner coordinate mapping,
- * so tapping the editor didn't land keyboard focus. Cross-device pixel
- * fidelity is deferred; text input correctness wins. The renderer now
- * mirrors CanvasRenderer's plain flex stack.
+ * Build 75 (2026-04-13): removed the scaled absolutely-positioned stage —
+ * on iPad TestFlight WKWebView's internal scroll fought the parent
+ * ScrollView's pan responder and the scale transform shifted the hit-test
+ * region without updating WKWebView's inner coordinate mapping, so tapping
+ * the editor didn't land keyboard focus. Cross-device pixel fidelity is
+ * deferred; text input correctness wins.
+ *
+ * Build 76 (2026-04-13): disabled `enableBlockHeights` on the
+ * LivePreviewInput. That prop was the last behavioral difference between
+ * this renderer and the working CanvasRenderer — opting into the
+ * block-heights ViewPlugin inside the CM6 iframe was blocking keyboard
+ * focus and pen capture on v2 notes. The ViewPlugin stays in editorHtml.ts,
+ * dormant, so the spatial measurement pipeline can be revived cleanly when
+ * free-positioned content lands; we just don't activate it today.
+ * Also set `scrollEnabled={!inkMode}` on the outer ScrollView so its
+ * native pan recognizer steps aside while the pen is active — previously
+ * it won the gesture race and InkOverlay's `onStartShouldSetResponder`
+ * never fired.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, ScrollView, StyleSheet } from 'react-native';
 import { tokens } from '@graphite/ui';
 import {
-  chunksFromMarkdown,
   markdownFromChunks,
-  assignYPositions,
-  type SpatialBlock,
   type SpatialCanvasDocument,
   type SpatialInkStroke,
 } from '@graphite/canvas';
 import { LivePreviewInput } from './LivePreviewInput';
 import { InkOverlay } from './InkOverlay';
 import type { FormatCommand } from './types';
-import {
-  isBlockHeightsMessage,
-  recomputeBlockPositions,
-  type MeasuredBlockHeight,
-} from './spatial-block-layout';
 
-const DEFAULT_LINE_HEIGHT = 24;
-const DEFAULT_BLOCK_GAP = 16;
 const DEBOUNCE_MS = 500;
 
 export interface SpatialCanvasRendererProps {
@@ -73,10 +68,6 @@ export interface SpatialCanvasRendererProps {
    * text editing.
    */
   inkMode?: boolean;
-  /** Override for tests / tweaking; defaults to 24px. */
-  lineHeightPx?: number;
-  /** Override for tests / tweaking; defaults to 16px between blocks. */
-  blockGapPx?: number;
 }
 
 export function SpatialCanvasRenderer({
@@ -92,25 +83,12 @@ export function SpatialCanvasRenderer({
   autoFocusFirst = false,
   focusKey = null,
   inkMode = false,
-  lineHeightPx = DEFAULT_LINE_HEIGHT,
-  blockGapPx = DEFAULT_BLOCK_GAP,
 }: SpatialCanvasRendererProps) {
-  // Seed internal block array from the incoming doc. Measured heights from
-  // the iframe upgrade this in place. Kept (not yet used for layout) so
-  // future free-positioned content can pick up where the scaled stage left
-  // off without re-wiring the heights channel.
-  const [blocks, setBlocks] = useState<SpatialBlock[]>(() => spatialDoc.blocks);
   const [contentSize, setContentSize] = useState<{ width: number; height: number }>({
     width: 0,
     height: 0,
   });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Keep internal blocks in sync when the incoming doc changes identity
-  // (note switch, remote sync, etc).
-  useEffect(() => {
-    setBlocks(spatialDoc.blocks);
-  }, [spatialDoc.blocks]);
 
   useEffect(() => {
     return () => {
@@ -129,26 +107,12 @@ export function SpatialCanvasRenderer({
 
   const handleTextChange = useCallback(
     (markdown: string) => {
-      // Re-chunk the markdown so future `block-heights` messages can be
-      // mapped positionally. Y positions will be corrected by the next
-      // measurement pass; until then we use the estimator.
-      const chunks = chunksFromMarkdown(markdown);
-      const next = assignYPositions(chunks, lineHeightPx, blockGapPx);
-      setBlocks(next);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         onTextChange?.(markdown);
       }, DEBOUNCE_MS);
     },
-    [lineHeightPx, blockGapPx, onTextChange],
-  );
-
-  const handleBlockHeights = useCallback(
-    (msg: { type: 'block-heights'; blocks: MeasuredBlockHeight[] }) => {
-      if (!isBlockHeightsMessage(msg)) return;
-      setBlocks((prev) => recomputeBlockPositions(prev, msg.blocks, blockGapPx));
-    },
-    [blockGapPx],
+    [onTextChange],
   );
 
   const handleInkChange = useCallback(
@@ -159,16 +123,13 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
-  // Silence "blocks is set but never read" — we keep the state + listener
-  // live so the heights channel stays warm for the spatial revival.
-  void blocks;
-
   return (
     <View style={styles.root}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!inkMode}
         onContentSizeChange={(w: number, h: number) =>
           setContentSize({ width: w, height: h })
         }
@@ -182,11 +143,9 @@ export function SpatialCanvasRenderer({
           onCommandApplied={onCommandApplied}
           onActiveFormatsChange={onActiveFormatsChange}
           autoFocus={autoFocusFirst}
-          enableBlockHeights
-          onBlockHeights={handleBlockHeights}
         />
         {inkMode ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <View style={StyleSheet.absoluteFill} pointerEvents="auto">
             <InkOverlay
               strokes={spatialDoc.inkStrokes}
               width={contentSize.width}
