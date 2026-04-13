@@ -9,7 +9,7 @@
  * supporting stylus hardware).
  */
 import React, { useCallback, useEffect, useRef } from 'react';
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid/non-secure';
 import type { SpatialInkStroke, StrokePoint } from './ink-types';
 
 export interface InkOverlayProps {
