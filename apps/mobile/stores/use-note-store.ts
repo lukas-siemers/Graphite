@@ -15,6 +15,11 @@ import {
   syncNoteTags,
   searchNotesEnhanced,
 } from '@graphite/db';
+import {
+  serializeToGraphite,
+  extractSearchableText,
+  type SpatialCanvasDocument,
+} from '@graphite/canvas';
 // NOTE: imported for cross-store read only. We access via getState() inside
 // actions (never at module scope) to avoid circular-init issues.
 import { useFolderStore } from './use-folder-store';
@@ -57,6 +62,12 @@ interface NoteState {
     db: SQLiteDatabase,
     id: string,
     canvasDoc: CanvasDocument,
+    silent?: boolean,
+  ) => Promise<void>;
+  updateNoteSpatialCanvas: (
+    db: SQLiteDatabase,
+    id: string,
+    spatialDoc: SpatialCanvasDocument,
     silent?: boolean,
   ) => Promise<void>;
   deleteNote: (db: SQLiteDatabase, id: string) => Promise<void>;
@@ -208,6 +219,46 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const bodyText = canvasDoc.textContent?.body ?? '';
     if (bodyText) {
       const tags = extractTags(bodyText);
+      await syncNoteTags(db, id, tags);
+      const { useTagStore } = await import('./use-tag-store');
+      await useTagStore.getState().loadTags(db);
+    }
+  },
+
+  updateNoteSpatialCanvas: async (
+    db: SQLiteDatabase,
+    id: string,
+    spatialDoc: SpatialCanvasDocument,
+    silent = false,
+  ) => {
+    const blob = await serializeToGraphite(spatialDoc);
+    const ftsBody = extractSearchableText(spatialDoc);
+    // v2 notes no longer write user content into the legacy `body` column —
+    // blob + ftsBody are the authoritative pair. Keep `body` empty so search
+    // and list-preview fallbacks don't show stale pre-migration text.
+    await updateNote(db, id, {
+      graphiteBlob: blob,
+      ftsBody,
+      canvasVersion: 2,
+      body: '',
+      skipTimestamp: silent,
+    });
+    set((state) => ({
+      notes: state.notes.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              graphiteBlob: blob,
+              ftsBody,
+              canvasVersion: 2,
+              body: '',
+              ...(silent ? {} : { updatedAt: Date.now() }),
+            }
+          : n,
+      ),
+    }));
+    if (ftsBody) {
+      const tags = extractTags(ftsBody);
       await syncNoteTags(db, id, tags);
       const { useTagStore } = await import('./use-tag-store');
       await useTagStore.getState().loadTags(db);

@@ -11,11 +11,25 @@ interface RawNote {
   body: string;
   drawing_asset_id: string | null;
   canvas_json: string | null;
+  graphite_blob: Uint8Array | Buffer | null;
+  canvas_version: number | null;
+  fts_body: string | null;
   is_dirty: number;
   sort_order: number;
   created_at: number;
   updated_at: number;
   synced_at: number | null;
+}
+
+function toUint8Array(value: Uint8Array | Buffer | null | undefined): Uint8Array | null {
+  if (value == null) return null;
+  // better-sqlite3 returns Buffer (a Uint8Array subclass); expo-sqlite returns
+  // Uint8Array. Re-wrap as a plain Uint8Array view so callers always see a
+  // consistent type across runtimes.
+  if ((value as any).constructor && (value as any).constructor.name === 'Buffer') {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return value as Uint8Array;
 }
 
 function mapNote(row: RawNote): Note {
@@ -27,6 +41,9 @@ function mapNote(row: RawNote): Note {
     body: row.body,
     drawingAssetId: row.drawing_asset_id,
     canvasJson: row.canvas_json,
+    graphiteBlob: toUint8Array(row.graphite_blob),
+    canvasVersion: row.canvas_version ?? 1,
+    ftsBody: row.fts_body,
     isDirty: row.is_dirty,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -60,8 +77,8 @@ export async function createNote(
   const sortOrder = (maxRow?.max_order ?? -1) + 1;
   await db.runAsync(
     `INSERT INTO notes
-       (id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, sort_order, created_at, updated_at, synced_at)
-     VALUES (?, ?, ?, 'Untitled', '', NULL, 1, ?, ?, ?, NULL)`,
+       (id, folder_id, notebook_id, title, body, drawing_asset_id, canvas_version, graphite_blob, fts_body, is_dirty, sort_order, created_at, updated_at, synced_at)
+     VALUES (?, ?, ?, 'Untitled', '', NULL, 2, NULL, NULL, 1, ?, ?, ?, NULL)`,
     [id, folder, notebookId, sortOrder, now, now],
   );
   const inserted = await db.getFirstAsync<{ rowid: number }>(
@@ -82,6 +99,9 @@ export async function createNote(
     body: '',
     drawingAssetId: null,
     canvasJson: null,
+    graphiteBlob: null,
+    canvasVersion: 2,
+    ftsBody: null,
     isDirty: 1,
     sortOrder,
     createdAt: now,
@@ -130,6 +150,9 @@ export async function updateNote(
     body?: string;
     drawingAssetId?: string | null;
     canvasJson?: string | null;
+    graphiteBlob?: Uint8Array | null;
+    canvasVersion?: number;
+    ftsBody?: string | null;
     skipTimestamp?: boolean;
   },
 ): Promise<void> {
@@ -208,6 +231,48 @@ export async function updateNote(
     }
   }
 
+  if (patch.graphiteBlob !== undefined) {
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET graphite_blob = ?, is_dirty = 1 WHERE id = ?',
+        [patch.graphiteBlob, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET graphite_blob = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
+        [patch.graphiteBlob, now, id],
+      );
+    }
+  }
+
+  if (patch.canvasVersion !== undefined) {
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET canvas_version = ?, is_dirty = 1 WHERE id = ?',
+        [patch.canvasVersion, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET canvas_version = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
+        [patch.canvasVersion, now, id],
+      );
+    }
+  }
+
+  if (patch.ftsBody !== undefined) {
+    if (skipTs) {
+      await db.runAsync(
+        'UPDATE notes SET fts_body = ?, is_dirty = 1 WHERE id = ?',
+        [patch.ftsBody, id],
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE notes SET fts_body = ?, is_dirty = 1, updated_at = ? WHERE id = ?',
+        [patch.ftsBody, now, id],
+      );
+    }
+  }
+
   if (before) {
     // Remove the old FTS entry using the FTS5 'delete' command.
     await db.runAsync(
@@ -215,24 +280,36 @@ export async function updateNote(
       [before.rowid, before.title, before.body],
     );
     // Read updated title and body for the new FTS entry.
-    // When canvas_json is present, merge its textContent.body into the indexed
-    // body text so that canvas prose is searchable via the existing FTS table.
-    const after = await db.getFirstAsync<{ title: string; body: string; canvas_json: string | null }>(
-      'SELECT title, body, canvas_json FROM notes WHERE id = ?',
+    // Precedence for the FTS body column:
+    //   1. fts_body — caller-provided pre-computed text from spatial canvas
+    //      extraction. Used as-is.
+    //   2. canvas_json textContent.body merged with legacy body — the existing
+    //      v1 dual-write path.
+    //   3. body — plain legacy note body.
+    const after = await db.getFirstAsync<{
+      title: string;
+      body: string;
+      canvas_json: string | null;
+      fts_body: string | null;
+    }>(
+      'SELECT title, body, canvas_json, fts_body FROM notes WHERE id = ?',
       [id],
     );
     if (after) {
-      // Extract canvas text body; fall back to empty string when absent.
-      let canvasText = '';
-      if (after.canvas_json) {
-        const extracted = await db.getFirstAsync<{ canvas_body: string | null }>(
-          `SELECT json_extract(canvas_json, '$.textContent.body') AS canvas_body FROM notes WHERE id = ?`,
-          [id],
-        );
-        canvasText = extracted?.canvas_body ?? '';
+      let ftsBody: string;
+      if (after.fts_body !== null) {
+        ftsBody = after.fts_body;
+      } else {
+        let canvasText = '';
+        if (after.canvas_json) {
+          const extracted = await db.getFirstAsync<{ canvas_body: string | null }>(
+            `SELECT json_extract(canvas_json, '$.textContent.body') AS canvas_body FROM notes WHERE id = ?`,
+            [id],
+          );
+          canvasText = extracted?.canvas_body ?? '';
+        }
+        ftsBody = canvasText ? `${after.body}\n${canvasText}`.trim() : after.body;
       }
-      // Combine legacy body with canvas text so both are searchable.
-      const ftsBody = canvasText ? `${after.body}\n${canvasText}`.trim() : after.body;
       await db.runAsync(
         `INSERT INTO notes_fts(rowid, title, body) VALUES(?, ?, ?)`,
         [before.rowid, after.title, ftsBody],
@@ -408,17 +485,27 @@ export async function applyRemoteNote(
     title: string;
     body: string;
     canvas_json?: string | null;
+    graphite_blob?: Uint8Array | null;
+    canvas_version?: number | null;
+    fts_body?: string | null;
     sort_order?: number;
     created_at: number;
     updated_at: number;
   },
 ): Promise<void> {
   const local = await db.getFirstAsync<RawNote>('SELECT * FROM notes WHERE id = ?', [remote.id]);
+  const canvasVersion = remote.canvas_version ?? 1;
+  const graphiteBlob = remote.graphite_blob ?? null;
+  const ftsBody = remote.fts_body ?? null;
+  // The FTS body column mirrors the updateNote() precedence: caller-provided
+  // fts_body wins, otherwise fall back to body.
+  const ftsIndexBody = ftsBody !== null ? ftsBody : remote.body;
+
   if (!local) {
     // New note from another device — insert locally as clean.
     await db.runAsync(
-      `INSERT INTO notes (id, folder_id, notebook_id, title, body, canvas_json, is_dirty, sort_order, created_at, updated_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      `INSERT INTO notes (id, folder_id, notebook_id, title, body, canvas_json, graphite_blob, canvas_version, fts_body, is_dirty, sort_order, created_at, updated_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       [
         remote.id,
         remote.folder_id,
@@ -426,6 +513,9 @@ export async function applyRemoteNote(
         remote.title,
         remote.body,
         remote.canvas_json ?? null,
+        graphiteBlob,
+        canvasVersion,
+        ftsBody,
         remote.sort_order ?? 0,
         remote.created_at,
         remote.updated_at,
@@ -440,7 +530,7 @@ export async function applyRemoteNote(
     if (inserted) {
       await db.runAsync(
         'INSERT INTO notes_fts(rowid, title, body) VALUES (?, ?, ?)',
-        [inserted.rowid, remote.title, remote.body],
+        [inserted.rowid, remote.title, ftsIndexBody],
       );
     }
   } else if (remote.updated_at >= local.updated_at) {
@@ -451,6 +541,7 @@ export async function applyRemoteNote(
     );
     await db.runAsync(
       `UPDATE notes SET folder_id = ?, notebook_id = ?, title = ?, body = ?, canvas_json = ?,
+       graphite_blob = ?, canvas_version = ?, fts_body = ?,
        sort_order = ?, updated_at = ?, synced_at = ?, is_dirty = 0 WHERE id = ?`,
       [
         remote.folder_id,
@@ -458,6 +549,9 @@ export async function applyRemoteNote(
         remote.title,
         remote.body,
         remote.canvas_json ?? null,
+        graphiteBlob,
+        canvasVersion,
+        ftsBody,
         remote.sort_order ?? local.sort_order,
         remote.updated_at,
         Date.now(),
@@ -472,7 +566,7 @@ export async function applyRemoteNote(
       );
       await db.runAsync(
         'INSERT INTO notes_fts(rowid, title, body) VALUES(?, ?, ?)',
-        [before.rowid, remote.title, remote.body],
+        [before.rowid, remote.title, ftsIndexBody],
       );
     }
   }

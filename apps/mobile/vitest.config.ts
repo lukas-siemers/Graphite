@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       // Resolve workspace package aliases so Vitest can import them without
       // a bundler that understands yarn workspaces.
+      '@graphite/canvas': path.resolve(__dirname, '../../packages/canvas/src/index.ts'),
       '@graphite/db': path.resolve(__dirname, '../../packages/db/src/index.ts'),
       '@graphite/ui': path.resolve(__dirname, '../../packages/ui/src/index.ts'),
     },

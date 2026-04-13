@@ -10,8 +10,20 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import { getDatabase, createEmptyCanvas } from '@graphite/db';
 import type { CanvasDocument } from '@graphite/db';
-import { CanvasRenderer } from '@graphite/editor';
+// Deep-path import: avoid the @graphite/editor barrel so SpatialCanvasRenderer
+// (and its transitive @shopify/react-native-skia import) stays out of the
+// startup module graph. Skia is lazy-required below when a v2 note opens.
+import { CanvasRenderer } from '@graphite/editor/src/CanvasRenderer';
+import type { SpatialCanvasRenderer as SpatialCanvasRendererType } from '@graphite/editor';
+import {
+  chunksFromMarkdown,
+  assignYPositions,
+  extractSearchableText,
+  type SpatialCanvasDocument,
+  type SpatialInkStroke,
+} from '@graphite/canvas';
 import { exportNoteAsMarkdown } from '../../lib/export-markdown';
+import { exportNoteAsGraphite } from '../../lib/export-graphite';
 import { computeReadingTime } from '../../lib/reading-time';
 import { exportNoteAsPdf } from '../../lib/export-pdf';
 import { useNoteStore } from '../../stores/use-note-store';
@@ -19,6 +31,7 @@ import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteCanvasMigration } from '../../hooks/use-note-canvas-migration';
+import { useSpatialCanvasMigration } from '../../hooks/use-spatial-canvas-migration';
 
 type SaveStatus = 'Saved' | 'Saving...';
 
@@ -31,6 +44,9 @@ export default function Editor() {
   const activeNoteId = useNoteStore((s) => s.activeNoteId);
   const saveNote = useNoteStore((s) => s.saveNote);
   const updateNoteCanvas = useNoteStore((s) => s.updateNoteCanvas);
+  const updateNoteSpatialCanvas = useNoteStore(
+    (s) => s.updateNoteSpatialCanvas,
+  );
 
   const notebooks = useNotebookStore((s) => s.notebooks);
   const activeNotebookId = useNotebookStore((s) => s.activeNotebookId);
@@ -50,6 +66,12 @@ export default function Editor() {
   const [localBody, setLocalBody] = useState('');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('Saved');
 
+  // SpatialCanvasRenderer pulls in @shopify/react-native-skia. Lazy-require it
+  // only when a v2 note is first opened — this mirrors the startup-trap
+  // mitigation pattern in app/_layout.tsx and keeps Skia off the startup path.
+  const [SpatialCanvasRendererModule, setSpatialCanvasRendererModule] =
+    useState<typeof SpatialCanvasRendererType | null>(null);
+
   const titleDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref keeps activeNoteId current inside debounce callbacks (avoids stale closure)
   const activeNoteIdRef = useRef<string | null>(activeNoteId ?? null);
@@ -62,8 +84,87 @@ export default function Editor() {
     canvasJsonRef.current = activeNote?.canvasJson ?? null;
   }, [activeNote?.canvasJson]);
 
-  // Auto-migrate legacy notes to CanvasDocument on open
+  // Auto-migrate legacy notes to CanvasDocument on open (v1 path)
   useNoteCanvasMigration(activeNote);
+
+  useEffect(() => {
+    if (activeNote?.canvasVersion !== 2) return;
+    if (SpatialCanvasRendererModule) return;
+    // Lazy-require: keep Skia out of the startup path per iOS production trap
+    // (CLAUDE.md iOS startup trap section). The require() runs only after a v2
+    // note is opened, well past initial route render.
+    const mod = require('@graphite/editor') as {
+      SpatialCanvasRenderer: typeof SpatialCanvasRendererType;
+    };
+    setSpatialCanvasRendererModule(() => mod.SpatialCanvasRenderer);
+  }, [activeNote?.canvasVersion, SpatialCanvasRendererModule]);
+
+  // v2 spatial canvas migration: resolves the SpatialCanvasDocument for the
+  // active note, auto-upgrading v1 notes to v2 on first open.
+  const { spatialDoc, isReady: spatialReady } =
+    useSpatialCanvasMigration(activeNote);
+
+  // v2 save pipeline — debounced 500ms to match CanvasRenderer save cadence.
+  const spatialSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spatialDocRef = useRef<SpatialCanvasDocument | null>(spatialDoc);
+  useEffect(() => {
+    spatialDocRef.current = spatialDoc;
+  }, [spatialDoc]);
+
+  useEffect(() => {
+    return () => {
+      if (spatialSaveTimer.current) clearTimeout(spatialSaveTimer.current);
+    };
+  }, []);
+
+  const scheduleSpatialSave = useCallback(
+    (next: SpatialCanvasDocument) => {
+      const noteId = activeNoteIdRef.current;
+      if (!noteId) return;
+      spatialDocRef.current = next;
+      setSaveStatus('Saving...');
+      if (spatialSaveTimer.current) clearTimeout(spatialSaveTimer.current);
+      spatialSaveTimer.current = setTimeout(async () => {
+        try {
+          const db = getDatabase();
+          await updateNoteSpatialCanvas(db, noteId, next);
+          setSaveStatus('Saved');
+        } catch {
+          setSaveStatus('Saved');
+        }
+      }, 500);
+    },
+    [updateNoteSpatialCanvas],
+  );
+
+  const handleSpatialTextChange = useCallback(
+    (markdown: string) => {
+      const current = spatialDocRef.current;
+      if (!current) return;
+      setLocalBody(markdown);
+      const chunks = chunksFromMarkdown(markdown);
+      const blocks = assignYPositions(chunks, 24, 16);
+      const next: SpatialCanvasDocument = {
+        ...current,
+        blocks,
+      };
+      scheduleSpatialSave(next);
+    },
+    [scheduleSpatialSave],
+  );
+
+  const handleSpatialInkChange = useCallback(
+    (strokes: SpatialInkStroke[]) => {
+      const current = spatialDocRef.current;
+      if (!current) return;
+      const next: SpatialCanvasDocument = {
+        ...current,
+        inkStrokes: strokes,
+      };
+      scheduleSpatialSave(next);
+    },
+    [scheduleSpatialSave],
+  );
 
   // Sync local state when active note changes
   useEffect(() => {
@@ -83,6 +184,15 @@ export default function Editor() {
       setSaveStatus('Saved');
     }
   }, [activeNoteId]);
+
+  // When the spatial doc becomes ready for a v2 note, seed the local body from
+  // it so the word-count footer reflects v2 content. Subsequent edits route
+  // through handleSpatialTextChange which keeps localBody in sync.
+  useEffect(() => {
+    if (!spatialReady || !spatialDoc) return;
+    if (activeNote?.canvasVersion !== 2) return;
+    setLocalBody(extractSearchableText(spatialDoc));
+  }, [spatialReady, spatialDoc, activeNote?.canvasVersion]);
 
   const persistSave = useCallback(
     async (patch: { title?: string; body?: string }) => {
@@ -220,6 +330,8 @@ export default function Editor() {
               id: activeNote.id,
               title: localTitle,
               body: localBody,
+              canvasVersion: activeNote.canvasVersion,
+              graphiteBlob: activeNote.graphiteBlob,
             });
           }}
           accessibilityLabel="Export note as markdown"
@@ -234,6 +346,34 @@ export default function Editor() {
         >
           <MaterialCommunityIcons
             name="download-outline"
+            size={18}
+            color={tokens.textMuted}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            if (!activeNote) return;
+            void exportNoteAsGraphite({
+              id: activeNote.id,
+              title: localTitle,
+              body: localBody,
+              canvasJson: activeNote.canvasJson,
+              graphiteBlob: activeNote.graphiteBlob,
+              canvasVersion: activeNote.canvasVersion,
+            });
+          }}
+          accessibilityLabel="Export note as .graphite"
+          style={({ pressed }) => ({
+            width: 30,
+            height: 30,
+            marginLeft: 4,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: pressed ? tokens.bgHover : 'transparent',
+          })}
+        >
+          <MaterialCommunityIcons
+            name="package-variant-closed"
             size={18}
             color={tokens.textMuted}
           />
@@ -274,17 +414,33 @@ export default function Editor() {
         </View>
       )}
 
-      {/* Editor body — markdown-only. */}
+      {/* Editor body — v2 spatial canvas for canvasVersion===2, v1 canvas
+          renderer as a fallback during the dual-render window. */}
       <View style={{ flex: 1 }}>
-        <CanvasRenderer
-          canvasDoc={activeCanvasDoc}
-          width={canvasWidth}
-          onTextChange={handleCanvasTextChange}
-          pendingCommand={pendingCommand}
-          onCommandApplied={clearCommand}
-          onActiveFormatsChange={setActiveFormats}
-          focusKey={activeNoteId}
-        />
+        {activeNote.canvasVersion === 2 ? (
+          spatialReady && spatialDoc && SpatialCanvasRendererModule ? (
+            <SpatialCanvasRendererModule
+              spatialDoc={spatialDoc}
+              canvasWidth={canvasWidth}
+              onTextChange={handleSpatialTextChange}
+              onInkChange={handleSpatialInkChange}
+              pendingCommand={pendingCommand}
+              onCommandApplied={clearCommand}
+              onActiveFormatsChange={setActiveFormats}
+              focusKey={activeNoteId}
+            />
+          ) : null
+        ) : (
+          <CanvasRenderer
+            canvasDoc={activeCanvasDoc}
+            width={canvasWidth}
+            onTextChange={handleCanvasTextChange}
+            pendingCommand={pendingCommand}
+            onCommandApplied={clearCommand}
+            onActiveFormatsChange={setActiveFormats}
+            focusKey={activeNoteId}
+          />
+        )}
       </View>
 
       {/* Status bar */}

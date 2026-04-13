@@ -9,7 +9,8 @@
       "packages/ui",
       "packages/editor",
       "packages/db",
-      "packages/sync"
+      "packages/sync",
+      "packages/canvas"
     ],
     "nohoist": [
       "**/react-native",

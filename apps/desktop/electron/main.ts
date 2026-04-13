@@ -90,6 +90,11 @@ function startStaticServer(distDir: string): Promise<number> {
 
 let db: Database.Database;
 
+function tableHasColumn(tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info('${tableName.replace(/'/g, "''")}')`).all() as Array<{ name: string }>;
+  return rows.some((r) => r.name === columnName);
+}
+
 function initDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'graphite.db');
   db = new Database(dbPath);
@@ -133,6 +138,45 @@ function initDatabase() {
       content_rowid='rowid'
     );
   `);
+
+  // Migration 15 — spatial canvas (.graphite) storage. Idempotent ALTERs so
+  // existing installs upgrade safely without re-running on next launch.
+  if (!tableHasColumn('notes', 'graphite_blob')) {
+    db.exec('ALTER TABLE notes ADD COLUMN graphite_blob BLOB;');
+  }
+  if (!tableHasColumn('notes', 'canvas_version')) {
+    db.exec('ALTER TABLE notes ADD COLUMN canvas_version INTEGER DEFAULT 1;');
+  }
+  if (!tableHasColumn('notes', 'fts_body')) {
+    db.exec('ALTER TABLE notes ADD COLUMN fts_body TEXT;');
+  }
+}
+
+// better-sqlite3 returns Buffer for BLOB columns; the renderer is a pure web
+// context and must see plain Uint8Array. Wrap any row coming out of the IPC
+// layer through this helper.
+function normalizeNoteRow<T extends { graphite_blob?: unknown } | undefined | null>(row: T): T {
+  if (!row) return row;
+  const blob = (row as any).graphite_blob;
+  if (blob && (blob as any).constructor && (blob as any).constructor.name === 'Buffer') {
+    (row as any).graphite_blob = new Uint8Array(
+      (blob as Buffer).buffer,
+      (blob as Buffer).byteOffset,
+      (blob as Buffer).byteLength,
+    );
+  }
+  return row;
+}
+
+// Inverse of normalizeNoteRow: better-sqlite3 requires a Node Buffer when
+// binding BLOB values. IPC delivers Uint8Array from the renderer, so convert
+// at the bind site. Null / undefined pass through.
+function toBlobBuffer(value: Uint8Array | Buffer | null | undefined): Buffer | null {
+  if (value == null) return null;
+  if (Buffer.isBuffer(value)) return value;
+  // Buffer.from copies when given an ArrayBufferView; safe against later
+  // mutation on the renderer side.
+  return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,33 +219,66 @@ function registerIpcHandlers() {
   );
 
   ipcMain.handle('db:getNotes', (_e, notebookId: string) =>
-    wrap(() => db.prepare('SELECT * FROM notes WHERE notebook_id = ? ORDER BY updated_at DESC').all(notebookId))
-  );
-
-  ipcMain.handle('db:getNote', (_e, id: string) =>
-    wrap(() => db.prepare('SELECT * FROM notes WHERE id = ?').get(id))
-  );
-
-  ipcMain.handle('db:createNote', (_e, note: { id: string; notebook_id: string; folder_id?: string; title: string; body: string; created_at: number; updated_at: number }) =>
     wrap(() => {
-      db.prepare(
-        'INSERT INTO notes (id, notebook_id, folder_id, title, body, is_dirty, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)'
-      ).run(note.id, note.notebook_id, note.folder_id ?? null, note.title, note.body, note.created_at, note.updated_at);
-      db.prepare(
-        'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, body FROM notes WHERE id = ?'
-      ).run(note.id);
-      return note;
+      const rows = db.prepare('SELECT * FROM notes WHERE notebook_id = ? ORDER BY updated_at DESC').all(notebookId) as Array<Record<string, unknown>>;
+      return rows.map((r) => normalizeNoteRow(r));
     })
   );
 
-  ipcMain.handle('db:updateNote', (_e, id: string, fields: { title?: string; body?: string; drawing_asset_id?: string; canvas_json?: string | null; updated_at: number }) =>
+  ipcMain.handle('db:getNote', (_e, id: string) =>
+    wrap(() => {
+      const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+      return normalizeNoteRow(row ?? null);
+    })
+  );
+
+  ipcMain.handle('db:createNote', (_e, note: { id: string; notebook_id: string; folder_id?: string; title: string; body: string; canvas_version?: number; graphite_blob?: Uint8Array | null; fts_body?: string | null; created_at: number; updated_at: number }) =>
+    wrap(() => {
+      const canvasVersion = note.canvas_version ?? 2;
+      const graphiteBlob = toBlobBuffer(note.graphite_blob);
+      const ftsBody = note.fts_body ?? null;
+      db.prepare(
+        `INSERT INTO notes (id, notebook_id, folder_id, title, body, canvas_version, graphite_blob, fts_body, is_dirty, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+      ).run(
+        note.id,
+        note.notebook_id,
+        note.folder_id ?? null,
+        note.title,
+        note.body,
+        canvasVersion,
+        graphiteBlob,
+        ftsBody,
+        note.created_at,
+        note.updated_at,
+      );
+      db.prepare(
+        'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, COALESCE(fts_body, body) FROM notes WHERE id = ?'
+      ).run(note.id);
+      return normalizeNoteRow({ ...note, canvas_version: canvasVersion, graphite_blob: graphiteBlob, fts_body: ftsBody });
+    })
+  );
+
+  ipcMain.handle('db:updateNote', (_e, id: string, fields: {
+    title?: string;
+    body?: string;
+    drawing_asset_id?: string;
+    canvas_json?: string | null;
+    graphite_blob?: Uint8Array | null;
+    canvas_version?: number;
+    fts_body?: string | null;
+    updated_at: number;
+  }) =>
     wrap(() => {
       const sets: string[] = [];
       const values: unknown[] = [];
       if (fields.title !== undefined)            { sets.push('title = ?');            values.push(fields.title); }
       if (fields.body !== undefined)             { sets.push('body = ?');             values.push(fields.body); }
       if (fields.drawing_asset_id !== undefined) { sets.push('drawing_asset_id = ?'); values.push(fields.drawing_asset_id); }
-      if (fields.canvas_json !== undefined)       { sets.push('canvas_json = ?');       values.push(fields.canvas_json); }
+      if (fields.canvas_json !== undefined)      { sets.push('canvas_json = ?');      values.push(fields.canvas_json); }
+      if (fields.graphite_blob !== undefined)    { sets.push('graphite_blob = ?');    values.push(toBlobBuffer(fields.graphite_blob)); }
+      if (fields.canvas_version !== undefined)   { sets.push('canvas_version = ?');   values.push(fields.canvas_version); }
+      if (fields.fts_body !== undefined)         { sets.push('fts_body = ?');         values.push(fields.fts_body); }
       sets.push('updated_at = ?');
       values.push(fields.updated_at);
       if (sets.length === 1) {
@@ -209,13 +286,16 @@ function registerIpcHandlers() {
       }
       values.push(id);
       db.prepare(`UPDATE notes SET ${sets.join(', ')} WHERE id = ?`).run(...values);
-      // Keep FTS in sync — prefer extracted text from canvas_json when present
+      // Keep FTS in sync. Precedence: caller-provided fts_body > canvas_json
+      // textContent extraction > legacy body.
       db.prepare(
         `INSERT OR REPLACE INTO notes_fts(rowid, title, body)
-         SELECT rowid, title, COALESCE(json_extract(canvas_json, '$.textContent.body'), body)
+         SELECT rowid, title,
+                COALESCE(fts_body, json_extract(canvas_json, '$.textContent.body'), body)
          FROM notes WHERE id = ?`
       ).run(id);
-      return db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
+      const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+      return normalizeNoteRow(row ?? null);
     })
   );
 

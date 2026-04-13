@@ -91,6 +91,20 @@ export const ADD_NOTEBOOK_IS_DIRTY = `ALTER TABLE notebooks ADD COLUMN is_dirty 
 export const ADD_FOLDER_IS_DIRTY = `ALTER TABLE folders ADD COLUMN is_dirty INTEGER DEFAULT 0;`;
 export const ADD_FOLDER_SYNCED_AT = `ALTER TABLE folders ADD COLUMN synced_at INTEGER;`;
 
+// Migration 15 — spatial canvas (.graphite) storage
+// Adds three nullable columns to notes for the v2 spatial canvas document model:
+//   - graphite_blob:    BLOB of the serialized .graphite ZIP for v2 notes.
+//   - canvas_version:   1 for legacy flat canvas_json rows, 2 for spatial blob rows.
+//                       Existing rows remain version 1; new rows default to 1 at the
+//                       SQL layer and are explicitly set to 2 in createNote().
+//   - fts_body:         Pre-computed searchable text extracted from the spatial
+//                       document. When present, updateNote() uses it as the FTS
+//                       body instead of extracting from body/canvas_json.
+// The ALTERs are guarded for idempotency in migrations.ts.
+export const ADD_NOTE_GRAPHITE_BLOB = `ALTER TABLE notes ADD COLUMN graphite_blob BLOB;`;
+export const ADD_NOTE_CANVAS_VERSION = `ALTER TABLE notes ADD COLUMN canvas_version INTEGER DEFAULT 1;`;
+export const ADD_NOTE_FTS_BODY = `ALTER TABLE notes ADD COLUMN fts_body TEXT;`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -106,4 +120,7 @@ export const ALL_MIGRATIONS = [
   ADD_NOTEBOOK_IS_DIRTY,
   ADD_FOLDER_IS_DIRTY,
   ADD_FOLDER_SYNCED_AT,
+  ADD_NOTE_GRAPHITE_BLOB,
+  ADD_NOTE_CANVAS_VERSION,
+  ADD_NOTE_FTS_BODY,
 ] as const;

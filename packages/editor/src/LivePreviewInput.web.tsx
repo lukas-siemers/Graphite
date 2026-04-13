@@ -32,6 +32,16 @@ interface LivePreviewInputProps {
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
   autoFocus?: boolean;
   focusKey?: string | null;
+  /**
+   * When true the editor enables its dormant block-heights plugin and starts
+   * emitting `block-heights` messages. Used by SpatialCanvasRenderer.
+   */
+  enableBlockHeights?: boolean;
+  /**
+   * Called with the raw iframe message whenever a `block-heights` event
+   * arrives. The consumer owns validation and the Y-recalc step.
+   */
+  onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
 }
 
 const EDITOR_HTML = buildEditorHtml();
@@ -46,6 +56,8 @@ export function LivePreviewInput({
   onActiveFormatsChange,
   autoFocus = false,
   focusKey = null,
+  enableBlockHeights = false,
+  onBlockHeights,
 }: LivePreviewInputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -62,6 +74,8 @@ export function LivePreviewInput({
   const onActiveFormatsChangeRef = useRef(onActiveFormatsChange);
   const autoFocusRef = useRef(autoFocus);
   const inputModeRef = useRef(inputMode);
+  const enableBlockHeightsRef = useRef(enableBlockHeights);
+  const onBlockHeightsRef = useRef(onBlockHeights);
   useEffect(() => { valueRef.current = value; }, [value]);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   useEffect(() => { onFocusRef.current = onFocus; }, [onFocus]);
@@ -69,6 +83,8 @@ export function LivePreviewInput({
   useEffect(() => { onActiveFormatsChangeRef.current = onActiveFormatsChange; }, [onActiveFormatsChange]);
   useEffect(() => { autoFocusRef.current = autoFocus; }, [autoFocus]);
   useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
+  useEffect(() => { enableBlockHeightsRef.current = enableBlockHeights; }, [enableBlockHeights]);
+  useEffect(() => { onBlockHeightsRef.current = onBlockHeights; }, [onBlockHeights]);
 
   // Last value we pushed into the iframe — used to dedupe echoes from `change`
   const lastSentValueRef = useRef('');
@@ -113,9 +129,16 @@ export function LivePreviewInput({
           lastSentValueRef.current = initValue;
           postToFrame({ type: 'set-value', value: initValue });
           postToFrame({ type: 'set-readonly', readonly: inputModeRef.current === 'ink' });
+          if (enableBlockHeightsRef.current) {
+            postToFrame({ type: 'enable-block-heights' });
+          }
           if (autoFocusRef.current) postToFrame({ type: 'focus' });
           break;
         }
+
+        case 'block-heights':
+          onBlockHeightsRef.current?.(msg as { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> });
+          break;
 
         case 'change':
           // Ignore echoes of values we pushed
@@ -169,6 +192,13 @@ export function LivePreviewInput({
     if (!readyRef.current) return;
     postToFrame({ type: 'set-readonly', readonly: inputMode === 'ink' });
   }, [inputMode]);
+
+  // Enable the block-heights plugin after the editor is ready. Idempotent
+  // on the iframe side — re-sending just triggers another measurement pass.
+  useEffect(() => {
+    if (!readyRef.current || !enableBlockHeights) return;
+    postToFrame({ type: 'enable-block-heights' });
+  }, [enableBlockHeights]);
 
   useEffect(() => {
     if (!readyRef.current || !focusKey || inputMode === 'ink') return;

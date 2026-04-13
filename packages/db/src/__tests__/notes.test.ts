@@ -502,4 +502,157 @@ describe('notes operations', () => {
       expect(moved!.isDirty).toBe(1);
     });
   });
+
+  describe('spatial canvas (v2) columns', () => {
+    it('createNote defaults canvasVersion to 2 and leaves graphite_blob + fts_body null', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+
+      expect(note.canvasVersion).toBe(2);
+      expect(note.graphiteBlob).toBeNull();
+      expect(note.ftsBody).toBeNull();
+
+      const fetched = await getNote(db, note.id);
+      expect(fetched!.canvasVersion).toBe(2);
+      expect(fetched!.graphiteBlob).toBeNull();
+      expect(fetched!.ftsBody).toBeNull();
+    });
+
+    it('updateNote round-trips graphiteBlob bytes losslessly', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+
+      const bytes = new Uint8Array([1, 2, 3, 4, 5, 250, 251, 252, 253, 254, 255, 0]);
+      await updateNote(db, note.id, { graphiteBlob: bytes });
+
+      const fetched = await getNote(db, note.id);
+      expect(fetched!.graphiteBlob).not.toBeNull();
+      expect(fetched!.graphiteBlob).toBeInstanceOf(Uint8Array);
+      expect(fetched!.graphiteBlob!.length).toBe(bytes.length);
+      expect(Array.from(fetched!.graphiteBlob!)).toEqual(Array.from(bytes));
+    });
+
+    it('updateNote can clear graphiteBlob back to null', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      await updateNote(db, note.id, { graphiteBlob: new Uint8Array([9, 9, 9]) });
+      const withBlob = await getNote(db, note.id);
+      expect(withBlob!.graphiteBlob).not.toBeNull();
+
+      await updateNote(db, note.id, { graphiteBlob: null });
+      const cleared = await getNote(db, note.id);
+      expect(cleared!.graphiteBlob).toBeNull();
+    });
+
+    it('updateNote persists canvasVersion changes', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      expect(note.canvasVersion).toBe(2);
+
+      await updateNote(db, note.id, { canvasVersion: 1 });
+      const reverted = await getNote(db, note.id);
+      expect(reverted!.canvasVersion).toBe(1);
+
+      await updateNote(db, note.id, { canvasVersion: 2 });
+      const forward = await getNote(db, note.id);
+      expect(forward!.canvasVersion).toBe(2);
+    });
+
+    it('updateNote ftsBody takes precedence over body in FTS index', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      // body contains "apple" but the v2 spatial extract ("kumquat") is what
+      // the user actually typed — FTS must match the pre-computed ftsBody.
+      await updateNote(db, note.id, {
+        title: 'Fruit',
+        body: 'apple',
+        ftsBody: 'kumquat is delicious',
+      });
+
+      const hitsKumquat = await searchNotes(db, notebook.id, 'kumquat');
+      expect(hitsKumquat.length).toBe(1);
+      expect(hitsKumquat[0].id).toBe(note.id);
+
+      // The legacy body token should NOT appear in the index because ftsBody
+      // replaced it.
+      const hitsApple = await searchNotes(db, notebook.id, 'apple');
+      expect(hitsApple.length).toBe(0);
+    });
+
+    it('updateNote falls back to body/canvas extraction when ftsBody is absent', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      await updateNote(db, note.id, { title: 'Fruit', body: 'peach cobbler' });
+
+      const hits = await searchNotes(db, notebook.id, 'peach');
+      expect(hits.length).toBe(1);
+      expect(hits[0].id).toBe(note.id);
+    });
+
+    it('FTS row count matches note count after create + update + delete', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const n1 = await createNote(db, notebook.id);
+      const n2 = await createNote(db, notebook.id);
+      const n3 = await createNote(db, notebook.id);
+      await updateNote(db, n1.id, { title: 'A', body: 'alpha' });
+      await updateNote(db, n2.id, { title: 'B', ftsBody: 'bravo' });
+      await updateNote(db, n3.id, { title: 'C', body: 'charlie' });
+      await deleteNote(db, n2.id);
+
+      const notesCount = (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM notes'))!.c;
+      const ftsCount = (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM notes_fts'))!.c;
+      expect(notesCount).toBe(2);
+      expect(ftsCount).toBe(2);
+    });
+
+    it('getDirtyNotes includes graphiteBlob, canvasVersion, and ftsBody', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const note = await createNote(db, notebook.id);
+      const bytes = new Uint8Array([7, 8, 9]);
+      await updateNote(db, note.id, {
+        graphiteBlob: bytes,
+        canvasVersion: 2,
+        ftsBody: 'indexed',
+      });
+
+      const dirty = await getDirtyNotes(db);
+      const found = dirty.find((n) => n.id === note.id);
+      expect(found).toBeDefined();
+      expect(found!.canvasVersion).toBe(2);
+      expect(found!.ftsBody).toBe('indexed');
+      expect(found!.graphiteBlob).not.toBeNull();
+      expect(Array.from(found!.graphiteBlob!)).toEqual([7, 8, 9]);
+    });
+
+    it('applyRemoteNote inserts v2 note with graphite_blob and fts_body', async () => {
+      const notebook = await createNotebook(db, 'Work');
+      const remoteId = 'remote-v2-1';
+      const now = Date.now();
+      const bytes = new Uint8Array([11, 22, 33, 44]);
+
+      await applyRemoteNote(db, {
+        id: remoteId,
+        folder_id: null,
+        notebook_id: notebook.id,
+        title: 'From Remote v2',
+        body: '',
+        graphite_blob: bytes,
+        canvas_version: 2,
+        fts_body: 'searchable remote content',
+        created_at: now,
+        updated_at: now,
+      });
+
+      const fetched = await getNote(db, remoteId);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.canvasVersion).toBe(2);
+      expect(fetched!.ftsBody).toBe('searchable remote content');
+      expect(fetched!.graphiteBlob).not.toBeNull();
+      expect(Array.from(fetched!.graphiteBlob!)).toEqual([11, 22, 33, 44]);
+
+      const hits = await searchNotes(db, notebook.id, 'searchable');
+      expect(hits.length).toBe(1);
+      expect(hits[0].id).toBe(remoteId);
+    });
+  });
 });

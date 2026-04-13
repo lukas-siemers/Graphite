@@ -6,10 +6,17 @@
 // Metro and the TypeScript "react-native" resolver pick the correct file via
 // the .native.ts / .web.ts suffix automatically.
 
+import { deserializeFromGraphite, markdownFromChunks } from '@graphite/canvas';
+
 export interface ExportNoteInput {
   id: string;
   title: string;
   body: string;
+  // Optional v2 fields — when present and canvasVersion === 2, the body is
+  // derived from the spatial blocks inside graphiteBlob so block-level
+  // formatting (headings, fences) is preserved across export.
+  canvasVersion?: number;
+  graphiteBlob?: Uint8Array | null;
 }
 
 export interface ExportPayload {
@@ -59,4 +66,24 @@ export function buildExport(note: ExportNoteInput): ExportPayload {
     filename: `${slug}.md`,
     content,
   };
+}
+
+/**
+ * Async export builder for v2 (canvasVersion === 2) notes. Deserializes the
+ * `.graphite` blob and joins its text blocks back into markdown via
+ * `markdownFromChunks`, preserving block-level formatting (headings, fences,
+ * paragraphs). Falls back to the synchronous `buildExport` path for v1 notes
+ * or when no blob is present.
+ */
+export async function buildExportAsync(note: ExportNoteInput): Promise<ExportPayload> {
+  if (note.canvasVersion === 2 && note.graphiteBlob) {
+    const doc = await deserializeFromGraphite(note.graphiteBlob);
+    const body = markdownFromChunks(
+      doc.blocks
+        .filter((b) => b.type === 'text')
+        .map((b) => ({ id: b.id, content: b.content })),
+    );
+    return buildExport({ ...note, body });
+  }
+  return buildExport(note);
 }

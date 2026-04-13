@@ -63,6 +63,27 @@ async function applyMigration(db: SQLiteDatabase, sql: string): Promise<void> {
     return;
   }
 
+  if (
+    sql === 'ALTER TABLE notes ADD COLUMN graphite_blob BLOB;' &&
+    (await tableHasColumn(db, 'notes', 'graphite_blob'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE notes ADD COLUMN canvas_version INTEGER DEFAULT 1;' &&
+    (await tableHasColumn(db, 'notes', 'canvas_version'))
+  ) {
+    return;
+  }
+
+  if (
+    sql === 'ALTER TABLE notes ADD COLUMN fts_body TEXT;' &&
+    (await tableHasColumn(db, 'notes', 'fts_body'))
+  ) {
+    return;
+  }
+
   await db.execAsync(sql);
 }
 

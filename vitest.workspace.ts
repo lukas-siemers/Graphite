@@ -7,6 +7,7 @@ import { defineWorkspace } from 'vitest/config';
 // and crashed with `TypeError: input.replace is not a function` because the
 // string paths were forwarded to micromatch as globs in an unsupported shape.
 export default defineWorkspace([
+  'packages/canvas/vitest.config.ts',
   'packages/db/vitest.config.ts',
   'packages/editor/vitest.config.ts',
   'packages/sync/vitest.config.ts',

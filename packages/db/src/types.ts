@@ -28,6 +28,9 @@ export interface Note {
   body: string;
   drawingAssetId: string | null;
   canvasJson: string | null;
+  graphiteBlob: Uint8Array | null;
+  canvasVersion: number;
+  ftsBody: string | null;
   isDirty: number;
   sortOrder: number;
   createdAt: number;

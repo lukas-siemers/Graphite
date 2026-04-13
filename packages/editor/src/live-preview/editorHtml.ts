@@ -9,6 +9,7 @@
  *   { type: 'apply-format', command: string }
  *   { type: 'focus' }
  *   { type: 'set-readonly', readonly: boolean }
+ *   { type: 'enable-block-heights' }   // opt-in for SpatialCanvasRenderer
  *
  * iframe → parent messages:
  *   { type: 'ready' }
@@ -16,6 +17,7 @@
  *   { type: 'active-formats', formats: string[] }
  *   { type: 'height', height: number }
  *   { type: 'command-applied' }
+ *   { type: 'block-heights', blocks: Array<{ lineStart, lineEnd, height }> }
  */
 export function buildEditorHtml(): string {
   return `<!DOCTYPE html>
@@ -722,6 +724,148 @@ function reportHeight() {
 }
 
 // ---------------------------------------------------------------------------
+// Block-heights plugin — opt-in spatial block measurement.
+//
+// Splits the document into blank-line-delimited text blocks (headings always
+// start a new block, matching the chunker in @graphite/canvas) and measures
+// each block's rendered pixel height via DOM Range. Posts
+//   { type: 'block-heights', blocks: [{ lineStart, lineEnd, height }] }
+// to the parent whenever the boundaries or measured heights change.
+//
+// Dormant by default to avoid paying the layout cost for the legacy editor
+// screen. The parent opts in by posting { type: 'enable-block-heights' }.
+//
+// Implementation mirrors the fenceStylePlugin measurement pattern:
+//   update() -> scheduleMeasure() -> view.requestMeasure({ read, write })
+// The read phase uses DOM Range on each line's rendered element to sum line
+// heights. The write phase compares against a cached signature and posts
+// only on real change — cheap for pure selection updates.
+// ---------------------------------------------------------------------------
+
+let blockHeightsEnabled = false;
+// View reference captured once the editor is built. Used by the
+// 'enable-block-heights' message handler to trigger an immediate
+// measurement pass instead of waiting for the next doc/viewport change.
+let capturedView = null;
+function enableBlockHeights() {
+  blockHeightsEnabled = true;
+  // The plugin's scheduleMeasure guards on blockHeightsEnabled, so the
+  // next update will naturally flush. For immediate feedback at enable
+  // time we also schedule one pass right now.
+  if (capturedView && capturedView.plugin) {
+    const inst = capturedView.plugin(blockHeightsPlugin);
+    if (inst) inst.scheduleMeasure(capturedView);
+  }
+}
+
+function computeBlockBoundaries(doc) {
+  // Returns [{ lineStart, lineEnd }] using the same rules as
+  // chunksFromMarkdown in @graphite/canvas: blank lines split, headings
+  // force a boundary, fenced code blocks are never split.
+  const blocks = [];
+  const total = doc.lines;
+  const fenceRe = /^(\\s{0,3})(\`{3,}|~{3,})/;
+  const headingRe = /^\\s{0,3}#{1,6}\\s/;
+  let cur = null; // { lineStart, lineEnd }
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+  const flush = () => {
+    if (cur) { blocks.push(cur); cur = null; }
+  };
+  for (let n = 1; n <= total; n++) {
+    const text = doc.line(n).text;
+    if (inFence) {
+      if (!cur) cur = { lineStart: n, lineEnd: n };
+      cur.lineEnd = n;
+      const m = text.match(fenceRe);
+      if (m && m[2][0] === fenceChar && m[2].length >= fenceLen) {
+        inFence = false;
+        fenceChar = '';
+        fenceLen = 0;
+        flush();
+      }
+      continue;
+    }
+    const fenceOpen = text.match(fenceRe);
+    if (fenceOpen) {
+      flush();
+      inFence = true;
+      fenceChar = fenceOpen[2][0];
+      fenceLen = fenceOpen[2].length;
+      cur = { lineStart: n, lineEnd: n };
+      continue;
+    }
+    if (text.trim() === '') { flush(); continue; }
+    if (headingRe.test(text)) {
+      flush();
+      blocks.push({ lineStart: n, lineEnd: n });
+      continue;
+    }
+    if (!cur) cur = { lineStart: n, lineEnd: n };
+    else cur.lineEnd = n;
+  }
+  flush();
+  return blocks;
+}
+
+const blockHeightsPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.lastSignature = '';
+      this.lastEmitted = '';
+      this.scheduleMeasure(view);
+    }
+    update(update) {
+      if (update.docChanged || update.viewportChanged || update.geometryChanged) {
+        this.scheduleMeasure(update.view);
+      }
+    }
+    scheduleMeasure(view) {
+      if (!blockHeightsEnabled) return;
+      view.requestMeasure({
+        read: () => {
+          const doc = view.state.doc;
+          const boundaries = computeBlockBoundaries(doc);
+          // Measure each block's height by summing the getBoundingClientRect
+          // of its contained line elements. Falls back to defaultLineHeight
+          // (via view.defaultLineHeight) when a line is outside the rendered
+          // viewport — CM only mounts lines inside visibleRanges, so blocks
+          // below the fold may not have a DOM node yet.
+          const defaultLH = view.defaultLineHeight || 24;
+          const measured = boundaries.map((b) => {
+            let h = 0;
+            for (let ln = b.lineStart; ln <= b.lineEnd; ln++) {
+              const linePos = doc.line(ln).from;
+              let nodeRect = null;
+              try {
+                const coords = view.coordsAtPos(linePos);
+                if (coords) {
+                  // coordsAtPos gives top/bottom of the line box.
+                  nodeRect = coords.bottom - coords.top;
+                }
+              } catch (_) { nodeRect = null; }
+              h += (nodeRect && nodeRect > 0) ? nodeRect : defaultLH;
+            }
+            return { lineStart: b.lineStart, lineEnd: b.lineEnd, height: h };
+          });
+          const signature = measured
+            .map((m) => m.lineStart + ':' + m.lineEnd + ':' + Math.round(m.height))
+            .join('|');
+          return { measured, signature };
+        },
+        write: ({ measured, signature }) => {
+          if (!blockHeightsEnabled) return;
+          if (signature === this.lastEmitted) return;
+          this.lastEmitted = signature;
+          post({ type: 'block-heights', blocks: measured });
+        },
+      });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Fence style plugin — Obsidian-style "finished vs editable" code blocks.
 //
 // Emits line decorations (no widgets, no replacements) that toggle CSS
@@ -1103,7 +1247,9 @@ const readOnlyCompartment = new Compartment();
 const statusEl = document.getElementById('status');
 if (statusEl) statusEl.remove();
 
-const view = new EditorView({
+// Capture the view so enableBlockHeights() can trigger an immediate
+// measurement pass without waiting for the next CM update cycle.
+const view = capturedView = new EditorView({
   parent: document.getElementById('editor'),
   state: EditorState.create({
     doc: '',
@@ -1119,6 +1265,7 @@ const view = new EditorView({
       }),
       syntaxHighlighting(graphiteHighlight),
       fenceStylePlugin,
+      blockHeightsPlugin,
       placeholder('Start writing...'),
       readOnlyCompartment.of(EditorState.readOnly.of(false)),
       EditorView.updateListener.of((update) => {
@@ -1170,6 +1317,13 @@ window.addEventListener('message', (e) => {
           EditorState.readOnly.of(!!msg.readonly)
         ),
       });
+      break;
+    }
+    case 'enable-block-heights': {
+      // Opt-in — turns the dormant block-heights plugin on. Idempotent:
+      // re-enabling just requests another measurement pass so late
+      // subscribers get an immediate snapshot.
+      enableBlockHeights();
       break;
     }
   }

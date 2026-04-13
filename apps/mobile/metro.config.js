@@ -68,6 +68,7 @@ config.resolver.extraNodeModules = {
 //    package → pulls in an unresolvable WASM web worker on web.
 // ---------------------------------------------------------------------------
 const expoSqliteStub = path.join(stubDir, 'expo-sqlite-stub.js');
+const reactNativeSkiaStub = path.join(stubDir, 'react-native-skia.js');
 
 // Absolute paths for the app's canonical React copies.
 const reactPaths = {
@@ -94,6 +95,15 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       context.originModulePath.replace(/\\/g, '/').includes('/expo-sqlite/')
     ) {
       return { type: 'sourceFile', filePath: expoSqliteStub };
+    }
+    // @shopify/react-native-skia ships native CanvasKit that blows up the web
+    // bundle. InkOverlay.web.tsx uses Canvas2D and never imports Skia, but
+    // guard against transitive imports at resolution time.
+    if (
+      moduleName === '@shopify/react-native-skia' ||
+      moduleName.startsWith('@shopify/react-native-skia/')
+    ) {
+      return { type: 'sourceFile', filePath: reactNativeSkiaStub };
     }
   }
   // Fall through to default resolution for everything else

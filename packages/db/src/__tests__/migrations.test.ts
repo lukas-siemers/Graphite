@@ -66,7 +66,7 @@ describe('schema migrations', () => {
     expect(names).toHaveLength(9);
   });
 
-  it('notes table exists with correct columns: id, folder_id, notebook_id, title, body, drawing_asset_id, is_dirty, created_at, updated_at, synced_at, canvas_json, sort_order', () => {
+  it('notes table exists with correct columns after all migrations', () => {
     const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{ name: string }>;
     const names = columns.map((c) => c.name);
     expect(names).toContain('id');
@@ -81,7 +81,83 @@ describe('schema migrations', () => {
     expect(names).toContain('synced_at');
     expect(names).toContain('canvas_json');
     expect(names).toContain('sort_order');
-    expect(names).toHaveLength(12);
+    expect(names).toContain('graphite_blob');
+    expect(names).toContain('canvas_version');
+    expect(names).toContain('fts_body');
+    expect(names).toHaveLength(15);
+  });
+
+  it('migration 15 adds graphite_blob as nullable BLOB', () => {
+    const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+    const col = columns.find((c) => c.name === 'graphite_blob');
+    expect(col).toBeDefined();
+    expect(col!.type.toUpperCase()).toBe('BLOB');
+    expect(col!.notnull).toBe(0);
+    expect(col!.dflt_value).toBeNull();
+  });
+
+  it('migration 15 adds canvas_version INTEGER with default 1 for legacy rows', () => {
+    const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+    const col = columns.find((c) => c.name === 'canvas_version');
+    expect(col).toBeDefined();
+    expect(col!.type.toUpperCase()).toBe('INTEGER');
+    // SQLite stores the default as a literal string "1".
+    expect(col!.dflt_value).toBe('1');
+  });
+
+  it('migration 15 adds fts_body as nullable TEXT', () => {
+    const columns = db.prepare("PRAGMA table_info('notes')").all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+    const col = columns.find((c) => c.name === 'fts_body');
+    expect(col).toBeDefined();
+    expect(col!.type.toUpperCase()).toBe('TEXT');
+    expect(col!.notnull).toBe(0);
+  });
+
+  it('running migrations a second time is a no-op (idempotent)', async () => {
+    const legacyDb = createTestDb();
+    const expoDb = {
+      execAsync: async (sql: string) => {
+        legacyDb.exec(sql);
+      },
+      getAllAsync: async <T = unknown>(sql: string): Promise<T[]> => {
+        return legacyDb.prepare(sql).all() as T[];
+      },
+      getFirstAsync: async <T = unknown>(sql: string): Promise<T | null> => {
+        return (legacyDb.prepare(sql).get() as T) ?? null;
+      },
+    };
+
+    // createTestDb already applied all migrations once — reset user_version
+    // to 0 so the second run walks every migration again and must no-op on
+    // already-present columns.
+    legacyDb.pragma('user_version = 0');
+    await expect(runMigrations(expoDb as any)).resolves.toBeUndefined();
+
+    // And a third run for good measure — still a no-op.
+    legacyDb.pragma('user_version = 0');
+    await expect(runMigrations(expoDb as any)).resolves.toBeUndefined();
+
+    const columns = legacyDb.prepare("PRAGMA table_info('notes')").all() as Array<{ name: string }>;
+    const names = columns.map((c) => c.name);
+    // Still exactly the expected columns — no duplicates.
+    expect(names.filter((n) => n === 'graphite_blob')).toHaveLength(1);
+    expect(names.filter((n) => n === 'canvas_version')).toHaveLength(1);
+    expect(names.filter((n) => n === 'fts_body')).toHaveLength(1);
   });
 
   it('ADD_NOTE_SORT_ORDER migration adds sort_order column to notes', () => {

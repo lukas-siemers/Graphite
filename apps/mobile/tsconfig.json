@@ -10,8 +10,14 @@
       "@graphite/editor": [
         "../../packages/editor/src/index"
       ],
+      "@graphite/editor/src/*": [
+        "../../packages/editor/src/*"
+      ],
       "@graphite/db": [
         "../../packages/db/src/index"
+      ],
+      "@graphite/canvas": [
+        "../../packages/canvas/src/index"
       ]
     }
   },

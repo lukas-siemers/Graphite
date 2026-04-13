@@ -2,13 +2,13 @@
 // Writes the note to the app cache directory and opens the system share sheet.
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { buildExport, type ExportNoteInput } from './export-markdown-utils';
+import { buildExportAsync, type ExportNoteInput } from './export-markdown-utils';
 
-export { slugify, buildExport } from './export-markdown-utils';
+export { slugify, buildExport, buildExportAsync } from './export-markdown-utils';
 export type { ExportNoteInput, ExportPayload } from './export-markdown-utils';
 
 export async function exportNoteAsMarkdown(note: ExportNoteInput): Promise<void> {
-  const { filename, content } = buildExport(note);
+  const { filename, content } = await buildExportAsync(note);
   const cacheDir = FileSystem.cacheDirectory;
   if (!cacheDir) {
     throw new Error('exportNoteAsMarkdown: cacheDirectory is unavailable');

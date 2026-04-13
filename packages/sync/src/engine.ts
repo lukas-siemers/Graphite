@@ -1,6 +1,7 @@
 import { type SupabaseClient, type RealtimeChannel } from '@supabase/supabase-js';
 import { resolveByLastWrite } from './conflict';
 import { getSupabaseClient } from './client';
+import { uploadGraphiteBlob, downloadGraphiteBlob, deleteGraphiteBlob } from './storage';
 import type {
   SyncEngineConfig,
   SyncResult,
@@ -99,7 +100,16 @@ export class SyncEngine {
 
     for (const record of records) {
       try {
-        const row = { ...record.data, user_id: this.userId };
+        const { row, spatialBlob } = extractSpatialBlob(record);
+        row.user_id = this.userId;
+
+        if (spatialBlob) {
+          // Upload before the row upsert so readers that see canvas_version=2
+          // in Postgres can always resolve the blob. If upload fails we abort
+          // and surface as a sync error for this record.
+          await uploadGraphiteBlob(this.supabase, this.userId, record.id, spatialBlob);
+        }
+
         const { error } = await this.supabase
           .from(record.table)
           .upsert(row, { onConflict: 'id' });
@@ -148,8 +158,9 @@ export class SyncEngine {
 
         for (const row of data) {
           pulled++;
+          const enriched = await this.hydrateSpatialBlob(table, row);
           if (this._onRemoteChange) {
-            this._onRemoteChange(table, 'UPDATE', row, null);
+            this._onRemoteChange(table, 'UPDATE', enriched, null);
           }
         }
       } catch (err: unknown) {
@@ -219,6 +230,64 @@ export class SyncEngine {
         ? 'DELETE' as const
         : 'UPDATE' as const;
 
-    this._onRemoteChange(table, event, p.new ?? null, p.old ?? null);
+    // Blob hydration for v2 notes happens asynchronously — fire-and-forget
+    // here keeps the Realtime handler non-blocking. Delete events trigger a
+    // best-effort blob removal.
+    if (table === 'notes' && event === 'DELETE' && p.old?.id) {
+      void deleteGraphiteBlob(this.supabase, this.userId, String(p.old.id)).catch(() => {
+        /* best-effort; blob may already be gone */
+      });
+      this._onRemoteChange(table, event, p.new ?? null, p.old ?? null);
+      return;
+    }
+
+    void this.hydrateSpatialBlob(table, p.new).then((enriched) => {
+      this._onRemoteChange?.(table, event, enriched, p.old ?? null);
+    });
   }
+
+  /**
+   * If the row is a v2 note, download the matching `.graphite` blob from
+   * Storage and attach it as `graphite_blob` on the returned row. The
+   * consumer's `applyRemoteNote` handler uses this to persist the bytes
+   * locally.
+   */
+  private async hydrateSpatialBlob(
+    table: SyncTable,
+    row: Record<string, unknown> | null,
+  ): Promise<Record<string, unknown> | null> {
+    if (!row || table !== 'notes') return row;
+    if (row.canvas_version !== 2) return row;
+    const id = row.id ? String(row.id) : null;
+    if (!id) return row;
+    try {
+      const bytes = await downloadGraphiteBlob(this.supabase, this.userId, id);
+      if (bytes) return { ...row, graphite_blob: bytes };
+    } catch {
+      // Surface as a missing blob — the row still flows through so the
+      // consumer can retry later.
+    }
+    return row;
+  }
+}
+
+/**
+ * Split the DirtyRecord row into a pure Postgres upsert payload (no blob
+ * bytes) and the spatial blob to ship to Storage. Blob bytes are never
+ * written to the `notes` table to avoid duplicate storage cost.
+ */
+function extractSpatialBlob(record: DirtyRecord): {
+  row: Record<string, unknown>;
+  spatialBlob: Uint8Array | null;
+} {
+  const row = { ...record.data };
+  let spatialBlob: Uint8Array | null = null;
+  if (record.table === 'notes' && row.canvas_version === 2) {
+    const blob = row.graphite_blob;
+    if (blob instanceof Uint8Array) {
+      spatialBlob = blob;
+    }
+  }
+  delete row.graphite_blob;
+  return { row, spatialBlob };
 }

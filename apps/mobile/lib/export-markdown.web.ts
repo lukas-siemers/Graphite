@@ -1,12 +1,12 @@
 // Web / Electron-renderer implementation of markdown export.
 // Triggers a browser download via Blob + anchor click — no filesystem APIs.
-import { buildExport, type ExportNoteInput } from './export-markdown-utils';
+import { buildExportAsync, type ExportNoteInput } from './export-markdown-utils';
 
-export { slugify, buildExport } from './export-markdown-utils';
+export { slugify, buildExport, buildExportAsync } from './export-markdown-utils';
 export type { ExportNoteInput, ExportPayload } from './export-markdown-utils';
 
 export async function exportNoteAsMarkdown(note: ExportNoteInput): Promise<void> {
-  const { filename, content } = buildExport(note);
+  const { filename, content } = await buildExportAsync(note);
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

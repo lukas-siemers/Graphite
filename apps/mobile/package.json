@@ -9,9 +9,11 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@graphite/canvas": "*",
     "@graphite/db": "*",
     "@graphite/editor": "*",
     "@graphite/ui": "*",
+    "@shopify/react-native-skia": "2.2.12",
     "expo": "~54.0.0",
     "expo-clipboard": "~7.0.0",
     "expo-constants": "~18.0.13",
