@@ -80,34 +80,94 @@ export function applyFormat(
       };
     }
 
-    case 'h1': {
-      // Operate on the current line containing `start`. Toggle off if the
-      // line already begins with `# `.
+    case 'strikethrough': {
+      if (!hasSelection) {
+        const insert = '~~~~';
+        return {
+          text: before + insert + after,
+          selection: { start: start + 2, end: start + 2 },
+        };
+      }
+      const wrapped = `~~${selected}~~`;
+      return {
+        text: before + wrapped + after,
+        selection: { start: start + wrapped.length, end: start + wrapped.length },
+      };
+    }
+
+    case 'h1':
+    case 'h2':
+    case 'h3': {
+      const level = command === 'h1' ? 1 : command === 'h2' ? 2 : 3;
+      const prefix = '#'.repeat(level) + ' ';
       const lineStart = text.lastIndexOf('\n', start - 1) + 1;
       const nextNl = text.indexOf('\n', start);
       const lineEnd = nextNl === -1 ? text.length : nextNl;
       const line = text.slice(lineStart, lineEnd);
 
-      const isH1 = line.startsWith('# ');
-      if (isH1) {
-        const stripped = line.slice(2);
-        const newText = text.slice(0, lineStart) + stripped + text.slice(lineEnd);
-        // Shift caret back by 2 if it was past the prefix, otherwise clamp.
-        const shift = start >= lineStart + 2 ? -2 : -(start - lineStart);
+      // Detect any existing heading prefix on the line (#, ##, ###) so we can
+      // replace it instead of stacking. Also allows toggle-off when prefixes match.
+      const headingMatch = line.match(/^(#{1,6}) /);
+      const existingPrefix = headingMatch ? headingMatch[0] : '';
+      const bodyWithoutHeading = line.slice(existingPrefix.length);
+
+      // Toggle off when tapping the exact same heading level.
+      if (existingPrefix === prefix) {
+        const newText = text.slice(0, lineStart) + bodyWithoutHeading + text.slice(lineEnd);
+        const shift = -prefix.length;
         const newStart = Math.max(lineStart, start + shift);
-        return {
-          text: newText,
-          selection: { start: newStart, end: newStart },
-        };
+        return { text: newText, selection: { start: newStart, end: newStart } };
       }
 
-      const prefixed = '# ' + line;
+      // Replace existing heading with the new level, or prepend if none.
+      const prefixed = prefix + bodyWithoutHeading;
       const newText = text.slice(0, lineStart) + prefixed + text.slice(lineEnd);
-      const newStart = start + 2;
-      return {
-        text: newText,
-        selection: { start: newStart, end: newStart },
-      };
+      const delta = prefix.length - existingPrefix.length;
+      const newStart = start + delta;
+      return { text: newText, selection: { start: newStart, end: newStart } };
+    }
+
+    case 'bullet-list':
+    case 'numbered-list':
+    case 'blockquote': {
+      // Operate on every line touched by the selection (or the caret's line).
+      const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+      const nextNlAfterEnd = text.indexOf('\n', end);
+      const lineEnd = nextNlAfterEnd === -1 ? text.length : nextNlAfterEnd;
+      const block = text.slice(lineStart, lineEnd);
+      const lines = block.split('\n');
+
+      const bulletRe = /^- /;
+      const numberedRe = /^\d+\. /;
+      const quoteRe = /^> /;
+      const matcher =
+        command === 'bullet-list'
+          ? bulletRe
+          : command === 'numbered-list'
+          ? numberedRe
+          : quoteRe;
+
+      // If every non-empty line already has the prefix, toggle off.
+      const nonEmptyLines = lines.filter((l) => l.length > 0);
+      const allPrefixed =
+        nonEmptyLines.length > 0 && nonEmptyLines.every((l) => matcher.test(l));
+
+      const transformed = allPrefixed
+        ? lines.map((l) => l.replace(matcher, ''))
+        : lines.map((l, i) => {
+            if (l.length === 0) return l;
+            // Strip any other list/quote prefix first so toggling between styles replaces cleanly.
+            const stripped = l.replace(bulletRe, '').replace(numberedRe, '').replace(quoteRe, '');
+            if (command === 'numbered-list') return `${i + 1}. ${stripped}`;
+            if (command === 'bullet-list') return `- ${stripped}`;
+            return `> ${stripped}`;
+          });
+
+      const newBlock = transformed.join('\n');
+      const newText = text.slice(0, lineStart) + newBlock + text.slice(lineEnd);
+      const delta = newBlock.length - block.length;
+      const newEnd = end + delta;
+      return { text: newText, selection: { start: newEnd, end: newEnd } };
     }
 
     case 'code-inline':

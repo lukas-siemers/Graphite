@@ -38,3 +38,6 @@ coverage/
 
 # Turborepo
 .turbo/
+
+# Claude Code agent worktrees — not source
+.claude/worktrees/
