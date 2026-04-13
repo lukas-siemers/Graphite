@@ -32,9 +32,7 @@ config.resolver.unstable_enablePackageExports = false;
 const stubDir = path.resolve(projectRoot, 'stubs');
 
 config.resolver.extraNodeModules = {
-  'react-native-draggable-flatlist': path.join(stubDir, 'react-native-draggable-flatlist-stub.js'),
   'react-native-webview':         path.join(stubDir, 'react-native-webview-stub.js'),
-  'react-native-worklets-core':   path.join(stubDir, 'react-native-worklets-stub.js'),
   'expo-file-system':             path.join(stubDir, 'expo-file-system-stub.js'),
   'expo-file-system/legacy':      path.join(stubDir, 'expo-file-system-stub.js'),
   'expo-sharing':                 path.join(stubDir, 'expo-sharing-stub.js'),
@@ -42,7 +40,6 @@ config.resolver.extraNodeModules = {
   'expo-sqlite':                  path.join(stubDir, 'expo-sqlite-stub.js'),
   'tldraw':                       path.join(stubDir, 'tldraw-stub.js'),
   'tldraw/tldraw.css':            path.join(stubDir, 'empty.js'),
-  'expo-clipboard':               path.join(stubDir, 'expo-clipboard-stub.js'),
   'nanoid':                       path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/non-secure':            path.join(stubDir, 'nanoid-stub.js'),
   'nanoid/async':                 path.join(stubDir, 'nanoid-stub.js'),
