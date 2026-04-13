@@ -165,26 +165,43 @@ export function CanvasRenderer({
       return;
     }
 
-    const currentText = localValueRef.current;
-    const currentSel = selectionRef.current;
-    const result = applyFormat(currentText, currentSel, pendingCommand);
-    if (result.text === currentText && result.selection.start === currentSel.start) {
+    // Wrap everything in try/catch: any throw inside applyFormat or the
+    // subsequent setState calls would propagate up to RN's JS thread run
+    // loop and crash the app via RCTFatal (SIGABRT). A format that fails
+    // silently is much better UX than a force-close.
+    try {
+      const currentText = localValueRef.current;
+      const currentSel = selectionRef.current;
+      const result = applyFormat(currentText, currentSel, pendingCommand);
+      if (result.text === currentText && result.selection.start === currentSel.start) {
+        return;
+      }
+
+      // Defensively clamp the selection to the new text bounds — iOS
+      // TextInput can native-crash on out-of-range selections.
+      const clamped = {
+        start: Math.max(0, Math.min(result.text.length, result.selection.start)),
+        end: Math.max(0, Math.min(result.text.length, result.selection.end)),
+      };
+
+      setLocalValue(result.text);
+      setControlledSelection(clamped);
+      isDirtyRef.current = true;
+
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        isDirtyRef.current = false;
+        onTextChange?.(result.text);
+      }, DEBOUNCE_MS);
+
+      // Release controlled selection so subsequent typing is unconstrained
+      const releaseHandle = setTimeout(() => setControlledSelection(undefined), 0);
+      return () => clearTimeout(releaseHandle);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[CanvasRenderer] format apply failed', err);
       return;
     }
-
-    setLocalValue(result.text);
-    setControlledSelection(result.selection);
-    isDirtyRef.current = true;
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      isDirtyRef.current = false;
-      onTextChange?.(result.text);
-    }, DEBOUNCE_MS);
-
-    // Release controlled selection so subsequent typing is unconstrained
-    const releaseHandle = setTimeout(() => setControlledSelection(undefined), 0);
-    return () => clearTimeout(releaseHandle);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCommand]);
 
