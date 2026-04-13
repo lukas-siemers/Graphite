@@ -26,22 +26,24 @@
 // editor never initialized, no placeholder, no input. CM6_BUNDLE is a
 // minified IIFE (~800KB) that attaches `window.CM6` before the editor
 // setup code runs.
-import { CM6_BUNDLE } from './cm6-bundle.generated';
+//
+// Build 82: this file still produces the inline-bundle HTML used by the
+// web iframe (srcdoc can't resolve relative <script src>). The native
+// WebView now uses editor-shell.html.ts which loads the bundle from a
+// sibling file — see that file's header for the rationale.
+import { CM6_BUNDLE } from './editor-runtime-string.generated';
 
-export function buildEditorHtml(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+export const EDITOR_CSS = `
+  /* Build 82: Google Fonts @import removed. The remote stylesheet fetch
+     added a runtime network dependency that could stall editor bootstrap
+     in TestFlight / standalone WKWebView. System fonts below cover both
+     body and monospace on iOS/macOS natively. */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
     background: transparent;
     color: #DCDDDE;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
     font-size: 16px;
     line-height: 24px;
     min-height: 100vh;
@@ -101,7 +103,7 @@ export function buildEditorHtml(): string {
      wrapping — they overflow horizontally up to the max-width cap. */
   .cm-fence-line {
     background: #252525;
-    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: 13.5px;
     line-height: 20px;
     padding-left: 16px !important;
@@ -189,7 +191,7 @@ export function buildEditorHtml(): string {
   .cm-fence-copy-btn {
     position: absolute;
     pointer-events: auto;
-    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.4px;
@@ -230,13 +232,14 @@ export function buildEditorHtml(): string {
     pointer-events: none;
   }
   #status.error { color: #FF6B6B; white-space: pre-wrap; }
-</style>
-</head>
-<body>
-<div id="status">Loading editor…</div>
-<div id="editor"></div>
+`;
 
-<script>
+/**
+ * Pre-CM6 scaffold. Sets up error surfacing and posts the first boot phase
+ * marker. Runs BEFORE the CM6 runtime script so that if the runtime itself
+ * fails to load the host still sees phase 1.
+ */
+export const EDITOR_PRE_RUNTIME_SCRIPT = `
 // Global error surfacing — any script failure shows inline + posts to parent
 function reportError(err) {
   const el = document.getElementById('status');
@@ -248,12 +251,30 @@ function reportError(err) {
 }
 window.addEventListener('error', (e) => reportError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
-</script>
 
-<!-- Build 81: inline the locally-bundled CodeMirror IIFE. Attaches window.CM6. -->
-<script>${CM6_BUNDLE}</script>
+// Build 82: bootstrap phase markers. Each major step posts a 'phase' message
+// so the host can pinpoint where boot stalls in production. The host RN
+// timeout banner reports the last phase reached when the ready handshake
+// never arrives.
+function postPhase(phase, label) {
+  try { window.parent.postMessage({ type: 'phase', phase: phase, label: label }, '*'); } catch (_) {}
+}
+postPhase(1, 'html-parsed');
+`;
 
-<script>
+/**
+ * App bootstrap script. Runs AFTER the CM6 runtime has attached
+ * `window.CM6`. This is the entire editor setup: destructure CM6, define
+ * the highlight style, fence plugin, block-heights plugin, build the
+ * EditorView, install the message bridge.
+ */
+export const EDITOR_BOOTSTRAP_SCRIPT = `
+// Build 82: phase 2 — the CM6 bundle <script> has executed.
+postPhase(2, 'cm6-bundle-executed');
+if (!window.CM6) {
+  try { window.parent.postMessage({ type: 'error', message: 'CM6 bundle ran but window.CM6 is undefined' }, '*'); } catch (_) {}
+}
+
 // Destructure everything from the window.CM6 namespace that the bundle above
 // installs. The names match what we previously imported from esm.sh so the
 // rest of the editor setup code below is unchanged. If CM6 is missing here
@@ -272,6 +293,8 @@ const {
   python, javascript, cpp, rust, java, htmlLang, cssLang, jsonLang, sql,
   csharp, kotlin, scala, objectiveC, shell, goMode, ruby, lua, yamlMode, tomlMode, swift,
 } = window.CM6;
+// Build 82: phase 3 — namespace destructure succeeded.
+postPhase(3, 'cm6-destructured');
 
 // Build a LanguageDescription list. The load function is async but we
 // resolve synchronously from closures — CodeMirror awaits the promise
@@ -1226,6 +1249,10 @@ const readOnlyCompartment = new Compartment();
 const statusEl = document.getElementById('status');
 if (statusEl) statusEl.remove();
 
+// Build 82: phase 4 — about to construct the EditorView. If boot stalls
+// here the crash is inside CM6 setup (extensions, plugins, initial state).
+postPhase(4, 'constructing-editor-view');
+
 // Capture the view so enableBlockHeights() can trigger an immediate
 // measurement pass without waiting for the next CM update cycle.
 const view = capturedView = new EditorView({
@@ -1260,7 +1287,7 @@ const view = capturedView = new EditorView({
       }),
       EditorView.theme({
         '&': { background: 'transparent' },
-        '.cm-scroller': { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif' },
+        '.cm-scroller': { fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif' },
       }),
     ],
   }),
@@ -1312,15 +1339,47 @@ window.addEventListener('message', (e) => {
 const ro = new ResizeObserver(() => reportHeight());
 ro.observe(document.body);
 
+// Build 82: phase 5 — EditorView was constructed without throwing.
+postPhase(5, 'editor-view-constructed');
+
 // Auto-focus the editor so the user can start typing immediately
 view.focus();
 
 // Initial height report so the parent iframe sizes correctly
 reportHeight();
 
-// Signal ready
+// Signal ready (phase 6, implicitly)
 post({ type: 'ready' });
-</script>
+`;
+
+/**
+ * Web-side HTML builder. Inlines the CM6 runtime bundle directly into the
+ * HTML as one giant <script> tag because the web iframe is loaded via
+ * srcdoc (no origin, no sibling-file resolution).
+ *
+ * Native builds must NOT use this — see editor-shell.html.ts, which loads
+ * the runtime from a sibling file on disk. The inline <script> approach
+ * silently stalled under production WKWebView when shipped through the
+ * react-native-webview bridge as source={{ html }} (Builds 76–81).
+ */
+export function buildEditorHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>${EDITOR_CSS}</style>
+</head>
+<body>
+<div id="status">Loading editor…</div>
+<div id="editor"></div>
+
+<script>${EDITOR_PRE_RUNTIME_SCRIPT}</script>
+
+<!-- Build 81: inline the locally-bundled CodeMirror IIFE. Attaches window.CM6. -->
+<script>${CM6_BUNDLE}</script>
+
+<script>${EDITOR_BOOTSTRAP_SCRIPT}</script>
 </body>
 </html>`;
 }
