@@ -34,3 +34,24 @@ jobs:
 
       - name: Run Vitest
         run: yarn test
+
+      # Build 92 guardrail: the native editor asset at
+      # apps/mobile/assets/editor/editor.html MUST match what
+      # bundle-cm6.mjs produces from current source. If a PR changes
+      # native-editor-bridge.ts, native-editor-bootstrap.ts, editorHtml.ts,
+      # or the CM6 bundle without regenerating editor.html, the shipped
+      # asset goes stale and TestFlight ships the previous editor.
+      # Regenerate and diff — any uncommitted change fails CI.
+      - name: Regenerate native editor asset
+        run: yarn --cwd packages/editor bundle-cm6
+
+      - name: Fail if editor.html is stale
+        run: |
+          if ! git diff --exit-code apps/mobile/assets/editor/editor.html; then
+            echo "::error::apps/mobile/assets/editor/editor.html is stale. Run 'yarn --cwd packages/editor bundle-cm6' locally and commit the regenerated file."
+            exit 1
+          fi
+          if ! git diff --exit-code packages/editor/src/live-preview/cm6-bundle.generated.js packages/editor/src/live-preview/editor-runtime-string.generated.ts; then
+            echo "::error::Generated CM6 bundle files are stale. Run 'yarn --cwd packages/editor bundle-cm6' locally and commit the regenerated files."
+            exit 1
+          fi

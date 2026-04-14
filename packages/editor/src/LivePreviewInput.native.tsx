@@ -46,7 +46,7 @@
  *   { type: 'phase', phase: number, label: string }
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Text, TextInput, Platform } from 'react-native';
+import { View, StyleSheet, Text, Platform } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import { tokens } from '@graphite/ui';
@@ -340,41 +340,19 @@ export function LivePreviewInput({
   // owns all touches.
   const inkMode = inputMode === 'ink';
 
-  // Build 89 fallback path. Renders a plain native TextInput when the rich
-  // editor failed to boot OR the asset failed to resolve. Same onChange
-  // contract as the WebView path so the save pipeline upstream is unchanged.
-  if (useFallback) {
-    return (
-      <View
-        style={[styles.container, { minHeight: 500 }]}
-        pointerEvents={inkMode ? 'none' : 'auto'}
-      >
-        <Text style={styles.fallbackBanner}>
-          Rich editor failed — using basic text editor. Typing works.
-        </Text>
-        {(webViewError || assetError) && (
-          <Text style={styles.fallbackDiag}>
-            {assetError ?? webViewError}
-          </Text>
-        )}
-        <TextInput
-          value={fallbackValue}
-          onChangeText={(text) => {
-            setFallbackValue(text);
-            onChangeRef.current(text);
-          }}
-          onFocus={() => onFocusRef.current?.()}
-          autoFocus={autoFocus}
-          editable={!inkMode}
-          multiline
-          textAlignVertical="top"
-          placeholder="Start writing..."
-          placeholderTextColor={tokens.textHint}
-          style={styles.fallbackInput}
-        />
-      </View>
-    );
-  }
+  // Build 92: TextInput fallback REMOVED for diagnostic builds. The previous
+  // implementation (Build 89) swapped in a plain native TextInput after the
+  // 2.5s watchdog so users could always type — but the fallback masked the
+  // actual rich-editor failure from our debugging view: the real editor
+  // inside the WebView, which may have partial state (e.g. <div id="status">
+  // stuck on "Loading editor…") that indicates where bootstrap died. Per
+  // Codex's recommendation: do not mask the result while diagnosing.
+  //
+  // If useFallback flips true we now render a dead-state overlay ON TOP of
+  // the WebView so you can see the underlying editor surface AND the banner
+  // telling you exactly which phase failed. Restore the TextInput fallback
+  // after the rich editor boots reliably again.
+  // (useFallback stays in the render tree below — no early return.)
 
   return (
     <View
@@ -440,6 +418,24 @@ export function LivePreviewInput({
       {webViewError !== null && Platform.OS !== 'web' && (
         <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
       )}
+      {/* Build 92: visible dead-state overlay. When useFallback flips true
+          (watchdog timeout or asset error) we no longer swap in a TextInput —
+          instead we paint a semi-transparent banner over the WebView so you
+          can see the actual CM6 surface underneath (e.g. "Loading editor…"
+          stuck on-screen means CM6 loaded but hung mid-init) AND the phase
+          marker that identifies where boot died. */}
+      {useFallback && (
+        <View style={styles.deadStateOverlay} pointerEvents="none">
+          <Text style={styles.deadStateHeadline}>
+            Rich editor did not boot (diagnostic mode)
+          </Text>
+          {(webViewError || assetError) && (
+            <Text style={styles.deadStateDetail}>
+              {assetError ?? webViewError}
+            </Text>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -466,37 +462,25 @@ const styles = StyleSheet.create({
     padding: 6,
     fontSize: 11,
   },
-  fallbackBanner: {
-    backgroundColor: tokens.accentTint,
+  deadStateOverlay: {
+    position: 'absolute',
+    top: 40,
+    left: 8,
+    right: 8,
+    padding: 12,
+    backgroundColor: 'rgba(44, 24, 0, 0.92)',
+    borderWidth: 1,
+    borderColor: tokens.accentPressed,
+  },
+  deadStateHeadline: {
     color: tokens.accentLight,
-    padding: 8,
-    fontSize: 12,
-    fontFamily: Platform.select({
-      ios: 'Menlo',
-      android: 'monospace',
-      default: 'monospace',
-    }),
+    fontSize: 13,
+    fontWeight: '600',
   },
-  fallbackDiag: {
-    backgroundColor: tokens.bgCode,
-    color: tokens.textMuted,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 10,
-    fontFamily: Platform.select({
-      ios: 'Menlo',
-      android: 'monospace',
-      default: 'monospace',
-    }),
-  },
-  fallbackInput: {
-    flex: 1,
-    backgroundColor: tokens.bgBase,
+  deadStateDetail: {
     color: tokens.textBody,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    fontSize: 16,
-    lineHeight: 24,
+    fontSize: 11,
+    marginTop: 4,
     fontFamily: Platform.select({
       ios: 'Menlo',
       android: 'monospace',
