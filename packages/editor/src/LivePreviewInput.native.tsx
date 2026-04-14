@@ -362,19 +362,11 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
   // owns all touches.
   const inkMode = inputMode === 'ink';
 
-  // Build 92: TextInput fallback REMOVED for diagnostic builds. The previous
-  // implementation (Build 89) swapped in a plain native TextInput after the
-  // 2.5s watchdog so users could always type — but the fallback masked the
-  // actual rich-editor failure from our debugging view: the real editor
-  // inside the WebView, which may have partial state (e.g. <div id="status">
-  // stuck on "Loading editor…") that indicates where bootstrap died. Per
-  // Codex's recommendation: do not mask the result while diagnosing.
-  //
-  // If useFallback flips true we now render a dead-state overlay ON TOP of
-  // the WebView so you can see the underlying editor surface AND the banner
-  // telling you exactly which phase failed. Restore the TextInput fallback
-  // after the rich editor boots reliably again.
-  // (useFallback stays in the render tree below — no early return.)
+  // Build 98: rich editor is the only path. The Build 89–92 TextInput fallback
+  // was deliberately removed — fixing the root cause (the scoping bug in
+  // `native-editor-bootstrap.ts` that kept `postPhase(2, …)` from resolving)
+  // makes the rich editor boot reliably. The dead-state overlay still exists
+  // for diagnostic visibility but there is no alternate text surface.
 
   return (
     <View
@@ -469,12 +461,6 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
       {webViewError !== null && Platform.OS !== 'web' && (
         <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
       )}
-      {/* Build 92: visible dead-state overlay. When useFallback flips true
-          (watchdog timeout or asset error) we no longer swap in a TextInput —
-          instead we paint a semi-transparent banner over the WebView so you
-          can see the actual CM6 surface underneath (e.g. "Loading editor…"
-          stuck on-screen means CM6 loaded but hung mid-init) AND the phase
-          marker that identifies where boot died. */}
       {useFallback && (
         <View style={styles.deadStateOverlay} pointerEvents="none">
           <Text style={styles.deadStateHeadline}>
