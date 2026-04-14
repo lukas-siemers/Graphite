@@ -22,16 +22,21 @@
  * relative-URL resolution), so it keeps inlining the bundle through
  * buildEditorHtml() in editorHtml.ts.
  */
-import {
-  EDITOR_CSS,
-  EDITOR_PRE_RUNTIME_SCRIPT,
-  EDITOR_BOOTSTRAP_SCRIPT,
-} from './editorHtml';
+import { EDITOR_CSS } from './editorHtml';
 
 /**
- * Build the shell HTML. The <script src="editor-runtime.js"> tag resolves
- * relative to the HTML's own location — the host must therefore make sure
- * `editor-runtime.js` sits in the same directory as the HTML file on disk.
+ * Build 85: every script is loaded as an external file. Build 82-84 inlined
+ * EDITOR_PRE_RUNTIME_SCRIPT and EDITOR_BOOTSTRAP_SCRIPT in <script>...</script>
+ * tags; TestFlight's watchdog proved those inline scripts never executed
+ * (phase 0 from BRIDGE_SHIM arrived, phase 1 at the top of the inline
+ * pre-runtime never did). Moving all three scripts to external src tags
+ * avoids whatever WKWebView restriction was blocking the inline path.
+ *
+ * Host must write all three JS files to the same directory as the HTML's
+ * baseUrl so the src references resolve:
+ *   - editor-pre-runtime.js  (error surfacing, postToHost helper, phase 1)
+ *   - editor-runtime.js      (CM6 bundle — installs window.CM6)
+ *   - editor-bootstrap.js    (reads window.CM6 and builds the editor view)
  */
 export function buildEditorHtmlShell(): string {
   return `<!DOCTYPE html>
@@ -44,13 +49,9 @@ export function buildEditorHtmlShell(): string {
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
-
-<script>${EDITOR_PRE_RUNTIME_SCRIPT}</script>
-
-<!-- Build 82: load the CM6 runtime from a sibling file. Not inlined. -->
+<script src="editor-pre-runtime.js"></script>
 <script src="editor-runtime.js"></script>
-
-<script>${EDITOR_BOOTSTRAP_SCRIPT}</script>
+<script src="editor-bootstrap.js"></script>
 </body>
 </html>`;
 }

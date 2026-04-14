@@ -48,6 +48,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 type WebViewNativeErrorEvent = { nativeEvent: unknown };
 import { CM6_BUNDLE } from './live-preview/editor-runtime-string.generated';
 import { buildEditorHtmlShell } from './live-preview/editor-shell';
+import { EDITOR_PRE_RUNTIME_SCRIPT, EDITOR_BOOTSTRAP_SCRIPT } from './live-preview/editorHtml';
 import type { FormatCommand } from './types';
 
 interface LivePreviewInputProps {
@@ -107,9 +108,12 @@ const BRIDGE_SHIM = `
   // Build 82: phase 0 — bridge shim installed. First signal the host gets
   // that any JS at all is running inside the WebView. If this marker never
   // arrives the failure is pre-JS (WebView didn't load the HTML at all).
+  // Build 85: also report window.location.href so we can tell whether the
+  // shim ran against the actual HTML shell or an empty about:blank.
   try {
     window.ReactNativeWebView.postMessage(JSON.stringify({
-      type: 'phase', phase: 0, label: 'bridge-installed',
+      type: 'phase', phase: 0,
+      label: 'bridge-installed @ ' + String(window.location && window.location.href),
     }));
   } catch (_) {}
 
@@ -122,15 +126,25 @@ true;
 // cacheDirectory so iOS can evict it under pressure. Both files live in
 // the same folder because the shell HTML references the runtime as a
 // sibling (<script src="editor-runtime.js">).
-const EDITOR_DIR_NAME = 'graphite-editor';
+// Build 85: bumped to v85 so stale files from Build 82-84 (old editor.html
+// with inline scripts) are isolated. A fresh cache dir guarantees no leftover
+// state from the prior broken delivery path.
+const EDITOR_DIR_NAME = 'graphite-editor-v85';
 
 type EditorAssets = {
-  htmlUri: string;
+  // baseUrl passed to WebView source.html. <script src="editor-runtime.js">
+  // resolves relative to this when the HTML loads via WKWebView
+  // loadHTMLString(_:baseURL:).
+  baseUrl: string;
 };
 
-// Resolve ONCE per JS VM. Writing to disk is expensive and the bundle
-// content is immutable across renders — we keep a module-level promise so
-// concurrent mounts share a single write.
+// Build 85: only the runtime needs to be on disk. The HTML shell is passed
+// inline via source.html + baseUrl, which uses WKWebView.loadHTMLString
+// instead of loadFileURL — more permissive for sibling file resource
+// resolution. Build 82-84 wrote the HTML to disk and pointed source at a
+// file:// URI; WKWebView silently refused to load the body (stage 0 fired
+// from BRIDGE_SHIM against an empty initial document, no inline scripts
+// ever ran).
 let assetsPromise: Promise<EditorAssets> | null = null;
 async function ensureEditorAssets(): Promise<EditorAssets> {
   if (assetsPromise) return assetsPromise;
@@ -142,19 +156,16 @@ async function ensureEditorAssets(): Promise<EditorAssets> {
     }
     const editorDir = baseDir + EDITOR_DIR_NAME + '/';
     const runtimePath = editorDir + 'editor-runtime.js';
-    const htmlPath = editorDir + 'editor.html';
+    const preRuntimePath = editorDir + 'editor-pre-runtime.js';
+    const bootstrapPath = editorDir + 'editor-bootstrap.js';
 
-    // Make sure the directory exists. `intermediates: true` avoids
-    // throwing if it already exists — idempotent.
     await FileSystem.makeDirectoryAsync(editorDir, { intermediates: true });
 
-    // Write the runtime only if it's missing or the file on disk looks
-    // smaller than the current bundle string length. Rewriting every mount
-    // would add a ~40-60ms delay per editor open; the simple length check
-    // catches app-version upgrades where the bundle content changed. The
-    // comparison isn't byte-exact because the on-disk file is UTF-8 while
-    // CM6_BUNDLE.length counts JS code units, but the bundle is ASCII-only
-    // so the two match in practice.
+    // Always write pre-runtime + bootstrap — they're tiny and may change
+    // between app versions. The big runtime bundle gets a size-based guard.
+    await FileSystem.writeAsStringAsync(preRuntimePath, EDITOR_PRE_RUNTIME_SCRIPT);
+    await FileSystem.writeAsStringAsync(bootstrapPath, EDITOR_BOOTSTRAP_SCRIPT);
+
     const runtimeInfo = await FileSystem.getInfoAsync(runtimePath);
     const expectedSize = CM6_BUNDLE.length;
     const needsWrite =
@@ -164,15 +175,8 @@ async function ensureEditorAssets(): Promise<EditorAssets> {
       await FileSystem.writeAsStringAsync(runtimePath, CM6_BUNDLE);
     }
 
-    // Always rewrite the HTML shell — it's tiny (~30KB) and may legitimately
-    // change between app versions without the runtime itself changing (e.g.
-    // CSS tweak, bootstrap tweak).
-    const shellHtml = buildEditorHtmlShell();
-    await FileSystem.writeAsStringAsync(htmlPath, shellHtml);
-
-    return { htmlUri: htmlPath };
+    return { baseUrl: editorDir };
   })().catch((err) => {
-    // Clear the cached promise so the next mount can retry.
     assetsPromise = null;
     throw err;
   });
@@ -199,10 +203,10 @@ export function LivePreviewInput({
   // Build 78+. Hiding errors behind __DEV__ meant production users saw a
   // silent dead editor when the WebView bundle failed.
   const [webViewError, setWebViewError] = useState<string | null>(null);
-  // Build 82: source URI resolved asynchronously from the cache-dir write.
-  // Rendered as null until ready — the WebView isn't mounted until then, so
-  // we don't need a spinner.
-  const [sourceUri, setSourceUri] = useState<string | null>(null);
+  // Build 85: baseUrl for source.html. The inline HTML shell passed via
+  // source.html uses this as the base URL for relative resource resolution.
+  // <script src="editor-runtime.js"> resolves against it.
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
   // Build 82: last bootstrap phase + label observed. The 5s ready watchdog
   // reports both fields in the red banner if the ready handshake never
   // arrives, so TestFlight logs pinpoint the exact stall point.
@@ -241,9 +245,9 @@ export function LivePreviewInput({
   useEffect(() => {
     let cancelled = false;
     ensureEditorAssets()
-      .then(({ htmlUri }) => {
+      .then((assets) => {
         if (cancelled) return;
-        setSourceUri(htmlUri);
+        setBaseUrl(assets.baseUrl);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -260,7 +264,7 @@ export function LivePreviewInput({
   // resolved. If the WebView never posts 'ready' within 5s, surface the
   // last bootstrap phase we observed so we know exactly where boot stalled.
   useEffect(() => {
-    if (!sourceUri) return;
+    if (!baseUrl) return;
     readyTimerRef.current = setTimeout(() => {
       if (!readyRef.current) {
         const phase = lastPhaseRef.current ?? -1;
@@ -276,13 +280,17 @@ export function LivePreviewInput({
         readyTimerRef.current = null;
       }
     };
-  }, [sourceUri]);
+  }, [baseUrl]);
 
-  // baseUrl for the WebView source. The HTML file URI starts with file://
-  // on iOS, and <script src="editor-runtime.js"> resolves relative to it.
+  // Build 85: inline HTML + baseUrl. WKWebView loadHTMLString(_:baseURL:)
+  // accepts file:// baseURLs with permissive sibling-resource access — so
+  // <script src="editor-runtime.js"> inside the shell resolves to the
+  // runtime we wrote to the cache dir. Unlike loadFileURL, this doesn't
+  // need allowingReadAccessTo to be set precisely.
+  const shellHtml = useMemo(() => buildEditorHtmlShell(), []);
   const source = useMemo(
-    () => (sourceUri ? ({ uri: sourceUri } as const) : null),
-    [sourceUri],
+    () => (baseUrl ? ({ html: shellHtml, baseUrl } as const) : null),
+    [baseUrl, shellHtml],
   );
 
   function postToFrame(msg: object) {
@@ -469,6 +477,12 @@ export function LivePreviewInput({
             } catch {
               setWebViewError('native onHttpError (unserializable)');
             }
+          }}
+          onLoadStart={(e: WebViewNativeErrorEvent) => {
+            lastPhaseLabelRef.current = 'webview-onLoadStart';
+          }}
+          onLoadEnd={(e: WebViewNativeErrorEvent) => {
+            lastPhaseLabelRef.current = 'webview-onLoadEnd';
           }}
           scrollEnabled={false}
           hideKeyboardAccessoryView
