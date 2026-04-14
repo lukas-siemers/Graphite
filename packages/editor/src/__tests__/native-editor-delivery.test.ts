@@ -55,15 +55,25 @@ describe('native editor delivery — Build 89 guardrails', () => {
     expect(native).not.toMatch(/<script[\s>]/);
   });
 
-  it('native shell reuses the shared editor CSS/DOM contract', () => {
+  it('native shell exposes minimal body + editor/status divs (Build 102)', () => {
+    // Build 102: shell carries ONLY bare-minimum body CSS. Build 99
+    // attempted to inject the full EDITOR_CSS (.cm-editor / .cm-scroller /
+    // .cm-content overrides) into the shell — that collapsed CM6's layout
+    // under WKWebView to zero visible size (Build 101 counters showed
+    // t:N / i:0 — taps landed but CM6 saw no input, not even the initial
+    // focus event). Any CM6-specific styling must flow through the
+    // EditorView.theme(...) extension inside EDITOR_BOOTSTRAP_SCRIPT, NOT
+    // through shell CSS. Guard against re-introducing those selectors.
     expect(native).toMatch(/buildEditorShellHtml/);
     const shell = buildEditorShellHtml();
-    expect(shell).toContain('#editor');
-    expect(shell).toContain('.cm-editor');
-    expect(shell).toContain('.cm-content');
-    expect(shell).toContain('.cm-placeholder');
-    expect(shell).toContain('#status');
+    // Positive: the two divs CM6 and the boot scaffold need.
+    expect(shell).toContain('id="editor"');
+    expect(shell).toContain('id="status"');
     expect(shell).not.toMatch(/<script[\s>]/);
+    // Negative: these CM6 selectors must NOT appear in the shell.
+    expect(shell).not.toContain('.cm-editor');
+    expect(shell).not.toContain('.cm-content');
+    expect(shell).not.toContain('.cm-scroller');
   });
 
   it('LivePreviewInput.native.tsx does not write editor runtime files to disk', () => {

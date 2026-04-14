@@ -1399,12 +1399,26 @@ post({ type: 'ready' });
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
  */
 export function buildEditorShellHtml(): string {
+  // Build 102: shell CSS reverted to the Build 97 minimal body-only style.
+  // Build 99 attempted to re-inject the full EDITOR_CSS into the shell so
+  // native + web shared the CSS contract. Under WKWebView that collapsed
+  // CM6's layout — .cm-content rendered at zero visible size, taps never
+  // landed on a focusable element (Build 101 counters confirmed t:N grew
+  // but i:0 meant CM6 received zero update activity, including the initial
+  // focus event). CM6's defaults produce a correct flex layout on their
+  // own; any site-specific styling (selection color, fenced block look,
+  // placeholder color) should flow through the CM6 `EditorView.theme(...)`
+  // extension in EDITOR_BOOTSTRAP_SCRIPT instead of via shell CSS.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>${EDITOR_CSS}</style>
+<style>
+html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple-system,sans-serif;}
+.error{color:#F28500;padding:12px;}
+#status{padding:8px 12px;font-size:11px;color:#8A8F98;}
+</style>
 </head>
 <body>
 <div id="status">Loading editor…</div>
