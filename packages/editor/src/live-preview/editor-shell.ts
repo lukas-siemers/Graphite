@@ -22,21 +22,26 @@
  * relative-URL resolution), so it keeps inlining the bundle through
  * buildEditorHtml() in editorHtml.ts.
  */
-import { EDITOR_CSS } from './editorHtml';
+import {
+  EDITOR_CSS,
+  EDITOR_PRE_RUNTIME_SCRIPT,
+  EDITOR_BOOTSTRAP_SCRIPT,
+} from './editorHtml';
+import { CM6_BUNDLE } from './editor-runtime-string.generated';
 
 /**
- * Build 85: every script is loaded as an external file. Build 82-84 inlined
- * EDITOR_PRE_RUNTIME_SCRIPT and EDITOR_BOOTSTRAP_SCRIPT in <script>...</script>
- * tags; TestFlight's watchdog proved those inline scripts never executed
- * (phase 0 from BRIDGE_SHIM arrived, phase 1 at the top of the inline
- * pre-runtime never did). Moving all three scripts to external src tags
- * avoids whatever WKWebView restriction was blocking the inline path.
+ * Build 88: back to the Build 71-era inline-everything pattern that was
+ * the last confirmed-working editor on TestFlight production. Build 82-87
+ * moved to on-disk file:// delivery to work around what we thought was a
+ * large-inline-script issue — but the Build 87 diagnostic proved the file
+ * URL was never actually navigated to by WKWebView even with
+ * allowingReadAccessToURL set.
  *
- * Host must write all three JS files to the same directory as the HTML's
- * baseUrl so the src references resolve:
- *   - editor-pre-runtime.js  (error surfacing, postToHost helper, phase 1)
- *   - editor-runtime.js      (CM6 bundle — installs window.CM6)
- *   - editor-bootstrap.js    (reads window.CM6 and builds the editor view)
+ * Going back to inline HTML + Build 84's postToHost bridge fix is the
+ * combination we never actually tested. Build 81 had the inline pattern
+ * but the window.parent override was broken; every CM6 postMessage was
+ * lost in the void so the editor looked dead. Build 84 fixed the bridge.
+ * This file glues the two together.
  */
 export function buildEditorHtmlShell(): string {
   return `<!DOCTYPE html>
@@ -49,9 +54,9 @@ export function buildEditorHtmlShell(): string {
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
-<script src="editor-pre-runtime.js"></script>
-<script src="editor-runtime.js"></script>
-<script src="editor-bootstrap.js"></script>
+<script>${EDITOR_PRE_RUNTIME_SCRIPT}</script>
+<script>${CM6_BUNDLE}</script>
+<script>${EDITOR_BOOTSTRAP_SCRIPT}</script>
 </body>
 </html>`;
 }
