@@ -477,6 +477,29 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
           source={source}
           javaScriptEnabled
           domStorageEnabled
+          /* Build 96 diagnostic. injectedJavaScriptBeforeContentLoaded uses a
+             different injection mechanism than HTML <script> tags — it runs
+             via WKUserScript at documentStart for every navigation. If THIS
+             posts a phase 0.05 marker but our HTML's inline scripts don't
+             post phase 0.1, then WKWebView is loading the page but blocking
+             inline script execution. Both signals together pinpoint whether
+             the bridge itself is reachable at all. */
+          injectedJavaScriptBeforeContentLoaded={`
+            (function(){
+              try {
+                if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'phase',
+                    phase: 0.05,
+                    label: 'injected-before-content',
+                    href: String(location && location.href),
+                    userAgent: String(navigator && navigator.userAgent || '?')
+                  }));
+                }
+              } catch (_) {}
+            })();
+            true;
+          `}
           onMessage={handleMessage}
           onError={(e: WebViewNativeErrorEvent) => {
             try {
