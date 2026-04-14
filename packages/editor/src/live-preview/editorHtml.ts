@@ -1380,6 +1380,21 @@ post({ type: 'ready' });
  * silently stalled under production WKWebView when shipped through the
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
  */
+export function buildEditorShellHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>${EDITOR_CSS}</style>
+</head>
+<body>
+<div id="status">Loading editorâ€¦</div>
+<div id="editor"></div>
+</body>
+</html>`;
+}
+
 export function buildEditorHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1401,4 +1416,3 @@ export function buildEditorHtml(): string {
 </body>
 </html>`;
 }
-

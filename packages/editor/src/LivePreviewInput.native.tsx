@@ -48,7 +48,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Text, Platform } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import { Asset } from 'expo-asset';
 import { tokens } from '@graphite/ui';
 
 // react-native-webview does not re-export its error event types from the
@@ -84,6 +83,7 @@ interface LivePreviewInputProps {
 // referenced at runtime by the WebView source. The native editor code
 // is now imported as TS strings and concatenated below.
 import { CM6_BUNDLE } from './live-preview/editor-runtime-string.generated';
+import { buildEditorShellHtml } from './live-preview/editorHtml';
 import { NATIVE_EDITOR_PRE_RUNTIME_SCRIPT } from './live-preview/native-editor-bridge';
 import { buildNativeBootstrapScript } from './live-preview/native-editor-bootstrap';
 
@@ -96,6 +96,8 @@ const NATIVE_EDITOR_INJECT_JS =
   CM6_BUNDLE + '\n;\n' +
   buildNativeBootstrapScript() + '\n;\n' +
   'true;\n';
+
+const NATIVE_EDITOR_SHELL_HTML = buildEditorShellHtml();
 
 export function LivePreviewInput({
   value,
@@ -229,7 +231,7 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
 <div id="editor"></div>
 </body>
 </html>`;
-    return { html } as const;
+    return { html: NATIVE_EDITOR_SHELL_HTML } as const;
   }, []);
 
   function postToFrame(msg: object) {

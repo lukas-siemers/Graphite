@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { buildEditorShellHtml } from '../live-preview/editorHtml';
 
 /**
  * Read a source file and strip comments before asserting. These guardrails
@@ -52,6 +53,17 @@ describe('native editor delivery — Build 89 guardrails', () => {
     // we look for the substring '<script' anywhere in the file's source.
     // Whitespace-tolerant via regex.
     expect(native).not.toMatch(/<script[\s>]/);
+  });
+
+  it('native shell reuses the shared editor CSS/DOM contract', () => {
+    expect(native).toMatch(/buildEditorShellHtml/);
+    const shell = buildEditorShellHtml();
+    expect(shell).toContain('#editor');
+    expect(shell).toContain('.cm-editor');
+    expect(shell).toContain('.cm-content');
+    expect(shell).toContain('.cm-placeholder');
+    expect(shell).toContain('#status');
+    expect(shell).not.toMatch(/<script[\s>]/);
   });
 
   it('LivePreviewInput.native.tsx does not write editor runtime files to disk', () => {
