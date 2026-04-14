@@ -47,7 +47,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 // is touched, so this stays forward-compatible with any library bump.
 type WebViewNativeErrorEvent = { nativeEvent: unknown };
 import { CM6_BUNDLE } from './live-preview/editor-runtime-string.generated';
-import { buildEditorHtmlShell } from './live-preview/editor-shell.html';
+import { buildEditorHtmlShell } from './live-preview/editor-shell';
 import type { FormatCommand } from './types';
 
 interface LivePreviewInputProps {

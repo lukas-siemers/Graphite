@@ -29,7 +29,7 @@
 //
 // Build 82: this file still produces the inline-bundle HTML used by the
 // web iframe (srcdoc can't resolve relative <script src>). The native
-// WebView now uses editor-shell.html.ts which loads the bundle from a
+// WebView now uses editor-shell.ts which loads the bundle from a
 // sibling file — see that file's header for the rationale.
 import { CM6_BUNDLE } from './editor-runtime-string.generated';
 
@@ -1357,7 +1357,7 @@ post({ type: 'ready' });
  * HTML as one giant <script> tag because the web iframe is loaded via
  * srcdoc (no origin, no sibling-file resolution).
  *
- * Native builds must NOT use this — see editor-shell.html.ts, which loads
+ * Native builds must NOT use this — see editor-shell.ts, which loads
  * the runtime from a sibling file on disk. The inline <script> approach
  * silently stalled under production WKWebView when shipped through the
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
