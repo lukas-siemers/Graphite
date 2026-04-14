@@ -15,6 +15,7 @@
     "@graphite/ui": "*",
     "@shopify/react-native-skia": "2.2.12",
     "expo": "~54.0.0",
+    "expo-asset": "~12.0.12",
     "expo-clipboard": "~7.0.0",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.20",

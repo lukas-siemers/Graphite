@@ -1,33 +1,42 @@
 /**
- * Native implementation of LivePreviewInput.
+ * Native implementation of LivePreviewInput — Build 89.
  *
- * Hosts the same CodeMirror 6 Live Preview editor as the web build, but inside
- * a react-native-webview instead of an <iframe>. Shares the editor CSS,
- * pre-runtime scaffold, and app bootstrap script with the web build via
- * editorHtml.ts; the only thing that differs is how the CM6 runtime library
- * is delivered to the WebView.
+ * Loads a CodeMirror 6 Live Preview editor inside react-native-webview using
+ * a STATIC HTML asset that ships inside the iOS app binary. The asset path
+ * is `apps/mobile/assets/editor/editor.html`, generated at dev time by
+ * `packages/editor/scripts/bundle-cm6.mjs`. expo-asset resolves it to a
+ * local file:// URI at runtime, the WKWebView loads it directly, and there
+ * is NO runtime serialization of the editor HTML through the RN bridge.
  *
- * Build 82 load strategy:
- *   1. At mount, write the CM6 runtime bundle (imported as a string constant
- *      from editor-runtime-string.generated.ts) to the cache directory as
- *      `editor-runtime.js`.
- *   2. Write the shell HTML (buildEditorHtmlShell) next to it as
- *      `editor.html`. The shell references the runtime via
- *      `<script src="editor-runtime.js">` — a sibling file lookup.
- *   3. Point the WebView at `file://...editor.html`.
+ * Build 89 architectural reset (vs. Builds 73–88):
+ *   - REMOVED  source={{ html }}  — the Build 88 fallback that re-shipped
+ *               the entire 820KB+ editor through the RN bridge on every
+ *               mount and silently stalled in TestFlight WKWebView.
+ *   - REMOVED  source={{ uri: cacheFile }} — the Builds 82–87 path that
+ *               wrote the editor runtime to FileSystem.cacheDirectory at
+ *               first mount. Cache writes added a startup race and an
+ *               iOS-version-dependent allowingReadAccessToURL workaround.
+ *   - REMOVED  ensureEditorAssets() — runtime cache write helper.
+ *   - REMOVED  BRIDGE_SHIM Object.defineProperty(window, 'parent', …) —
+ *               on WKWebView this monkey-patch silently no-ops, leaving
+ *               every CM6 postMessage in the void. Native now uses
+ *               window.ReactNativeWebView.postMessage directly via the
+ *               bridge in native-editor-bridge.ts.
+ *   - REMOVED  allowingReadAccessToURL — only meaningful when the WebView
+ *               navigates to a file:// URL on a non-asset path, which is
+ *               no longer the delivery model.
+ *   - ADDED    a 2.5s `ready` watchdog that swaps in a plain
+ *               <TextInput multiline> fallback so typing ALWAYS works,
+ *               even if the WebView fails to boot.
  *
- * Why this beats Build 81: Build 81 passed the 820KB runtime through the RN
- * bridge inside `source={{ html }}`. That inline payload stalled silently
- * under production WKWebView (TestFlight). Writing once to disk and loading
- * from file:// keeps the bridge payload to a tiny URI.
- *
- * Host → WebView messages (injected via injectJavaScript → window.postMessage):
+ * Host → editor messages (still injected via injectJavaScript):
  *   { type: 'set-value', value: string }
  *   { type: 'apply-format', command: string }
  *   { type: 'focus' }
  *   { type: 'set-readonly', readonly: boolean }
+ *   { type: 'enable-block-heights' }
  *
- * WebView → Host messages (via window.ReactNativeWebView.postMessage):
+ * Editor → host messages (via window.ReactNativeWebView.postMessage):
  *   { type: 'ready' }
  *   { type: 'change', value: string }
  *   { type: 'active-formats', formats: string[] }
@@ -37,16 +46,14 @@
  *   { type: 'phase', phase: number, label: string }
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text, TextInput, Platform } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
-import * as FileSystem from 'expo-file-system/legacy';
+import { Asset } from 'expo-asset';
+import { tokens } from '@graphite/ui';
 
 // react-native-webview does not re-export its error event types from the
-// package root, and the package exports map blocks the /lib/WebViewTypes
-// subpath. Define the minimal shape we consume here — only { nativeEvent }
-// is touched, so this stays forward-compatible with any library bump.
+// package root. Define the minimal shape we consume here.
 type WebViewNativeErrorEvent = { nativeEvent: unknown };
-import { buildEditorHtmlShell } from './live-preview/editor-shell';
 import type { FormatCommand } from './types';
 
 interface LivePreviewInputProps {
@@ -64,66 +71,17 @@ interface LivePreviewInputProps {
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
 }
 
-/**
- * Injected script that rewires the iframe's `postMessage` bridge so the
- * CodeMirror host code (which uses `window.parent.postMessage` and a
- * `message` listener on the inner window) talks to the React Native side
- * via `window.ReactNativeWebView.postMessage` instead.
- */
-const BRIDGE_SHIM = `
-(function() {
-  if (window.__graphiteBridgeInstalled) return;
-  window.__graphiteBridgeInstalled = true;
-
-  // Outbound: redirect window.parent.postMessage -> ReactNativeWebView
-  try {
-    var rn = window.ReactNativeWebView;
-    var fakeParent = {
-      postMessage: function(msg) {
-        try {
-          rn.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
-        } catch (e) {
-          rn.postMessage(JSON.stringify({ type: 'error', message: String(e) }));
-        }
-      }
-    };
-    try { Object.defineProperty(window, 'parent', { value: fakeParent, configurable: true }); } catch (e) {}
-    try { Object.defineProperty(window, 'top',    { value: fakeParent, configurable: true }); } catch (e) {}
-  } catch (e) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'bridge-install:' + String(e) }));
-  }
-
-  // Surface runtime errors to the host
-  window.addEventListener('error', function(e) {
-    try {
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'error',
-        message: (e && e.message) ? e.message : 'unknown',
-      }));
-    } catch (_) {}
-  });
-
-  // Build 82: phase 0 — bridge shim installed. First signal the host gets
-  // that any JS at all is running inside the WebView. If this marker never
-  // arrives the failure is pre-JS (WebView didn't load the HTML at all).
-  // Build 85: also report window.location.href so we can tell whether the
-  // shim ran against the actual HTML shell or an empty about:blank.
-  try {
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-      type: 'phase', phase: 0,
-      label: 'bridge-installed @ ' + String(window.location && window.location.href),
-    }));
-  } catch (_) {}
-
-  true;
-})();
-true;
-`;
-
-// Build 88: no runtime disk writes. The editor HTML is built once (with
-// CM6 bundle + pre-runtime + bootstrap all inlined) and passed directly via
-// source.html. Matches the Build 71-era pattern that was the last confirmed-
-// working editor delivery on TestFlight production.
+// Static asset reference — Metro resolves this at bundle time because
+// `.html` is registered as an asset extension in apps/mobile/metro.config.js.
+// At runtime, Asset.fromModule() returns a handle whose `.uri` (after
+// downloadAsync, which is a no-op for bundled assets) is a file:// URI
+// pointing into the app binary.
+//
+// The require() path is relative to THIS file: packages/editor/src ->
+// ../../apps/mobile/assets/editor/editor.html
+//
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const EDITOR_ASSET = require('../../../apps/mobile/assets/editor/editor.html');
 
 export function LivePreviewInput({
   value,
@@ -141,27 +99,27 @@ export function LivePreviewInput({
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
   const [contentHeight, setContentHeight] = useState<number>(500);
-  // Surface WebView errors in a red overlay — temporary diagnostic for
-  // Build 78+. Hiding errors behind __DEV__ meant production users saw a
-  // silent dead editor when the WebView bundle failed.
   const [webViewError, setWebViewError] = useState<string | null>(null);
-  // Build 88: HTML is built once and held for the life of the component.
-  // No disk writes, no file:// delivery. source.html is the original
-  // Build 71-era pattern — inline HTML passes through the WebView source
-  // prop and WKWebView loads it via loadHTMLString.
-  // Build 82: last bootstrap phase + label observed. The 5s ready watchdog
-  // reports both fields in the red banner if the ready handshake never
-  // arrives, so TestFlight logs pinpoint the exact stall point.
+
+  // Diagnostics carried over from Build 82 — earned their place during the
+  // 73–88 incident debugging cycle. Surfaced in the fallback banner so a
+  // TestFlight failure pinpoints the stall point.
   const lastPhaseRef = useRef<number | null>(null);
   const lastPhaseLabelRef = useRef<string>('none');
-  // Build 86: load events tracked separately so they don't overwrite phase
-  // markers in the watchdog banner (Codex-flagged).
   const lastLoadEventRef = useRef<string>('none');
   const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Refs to latest prop values — same pattern as the web component, needed so
-  // the `ready` handler seeds the editor with the CURRENT value rather than
-  // the value captured at mount time.
+  // Build 89: bundled-asset URI. Resolved once on mount.
+  const [assetUri, setAssetUri] = useState<string | null>(null);
+  const [assetError, setAssetError] = useState<string | null>(null);
+
+  // Build 89: TextInput fallback. Activated by the 2.5s ready watchdog when
+  // the rich editor never sends `ready`. Renders a plain native multiline
+  // TextInput so typing ALWAYS works regardless of WebView state.
+  const [useFallback, setUseFallback] = useState(false);
+  const [fallbackValue, setFallbackValue] = useState(value);
+
+  // Refs to latest prop values — same pattern as the web component.
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const onFocusRef = useRef(onFocus);
@@ -181,14 +139,51 @@ export function LivePreviewInput({
   useEffect(() => { enableBlockHeightsRef.current = enableBlockHeights; }, [enableBlockHeights]);
   useEffect(() => { onBlockHeightsRef.current = onBlockHeights; }, [onBlockHeights]);
 
-  // Last value pushed into the WebView — used to dedupe echoes from `change`
+  // Keep the fallback TextInput in sync with the parent's value prop while
+  // the watchdog has NOT fired. After it fires, treat the user's keystrokes
+  // in the TextInput as the source of truth and stop overwriting them.
+  useEffect(() => {
+    if (!useFallback) setFallbackValue(value);
+  }, [value, useFallback]);
+
+  // Last value pushed into the WebView — used to dedupe echoes from `change`.
   const lastSentValueRef = useRef('');
 
-  // Build 88: no-op — the shell HTML is ready synchronously. Kept the
-  // effect signature for symmetry but nothing async to wait on.
+  // Resolve the bundled editor.html asset to a local file:// URI. expo-asset
+  // returns immediately for assets shipped inside the binary (no network
+  // download needed). Failure here is surfaced via assetError + drives the
+  // TextInput fallback path immediately.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const asset = Asset.fromModule(EDITOR_ASSET);
+        if (!asset.localUri) {
+          // Locally-hosted asset — already on disk for bundled binaries,
+          // but call downloadAsync to populate localUri uniformly.
+          await asset.downloadAsync();
+        }
+        if (cancelled) return;
+        const uri = asset.localUri ?? asset.uri;
+        if (!uri) {
+          throw new Error('Asset.localUri unavailable after downloadAsync');
+        }
+        setAssetUri(uri);
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setAssetError('Failed to resolve editor.html: ' + message);
+        // Skip waiting for the watchdog — failing to resolve the asset means
+        // the WebView will never load. Activate fallback now.
+        setUseFallback(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  // 5s ready watchdog. If the WebView never posts 'ready', surface the last
-  // bootstrap phase observed so TestFlight banners pinpoint the stall.
+  // 2.5s ready watchdog. Build 89 reduces from 5s -> 2.5s so users hit the
+  // fallback faster when the rich editor stalls. Once useFallback flips on
+  // it stays on for the life of the component (no auto-recovery).
   useEffect(() => {
     readyTimerRef.current = setTimeout(() => {
       if (!readyRef.current) {
@@ -198,8 +193,9 @@ export function LivePreviewInput({
         setWebViewError(
           `Editor bootstrap timeout — phase ${phase} (${label}); WebView load ${loadEvent}`,
         );
+        setUseFallback(true);
       }
-    }, 5000);
+    }, 2500);
     return () => {
       if (readyTimerRef.current) {
         clearTimeout(readyTimerRef.current);
@@ -208,9 +204,11 @@ export function LivePreviewInput({
     };
   }, []);
 
-  // Build 88: inline HTML source — Build 71-era proven-working pattern.
-  const shellHtml = useMemo(() => buildEditorHtmlShell(), []);
-  const source = useMemo(() => ({ html: shellHtml } as const), [shellHtml]);
+  // WebView source — pure asset URI, no inline html, no runtime cache writes.
+  const source = useMemo(
+    () => (assetUri ? ({ uri: assetUri } as const) : null),
+    [assetUri],
+  );
 
   function postToFrame(msg: object) {
     const js = `
@@ -218,7 +216,9 @@ export function LivePreviewInput({
         try {
           window.dispatchEvent(new MessageEvent('message', { data: ${JSON.stringify(msg)} }));
         } catch (e) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'post:' + String(e) }));
+          if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'post:' + String(e) }));
+          }
         }
       })();
       true;
@@ -238,8 +238,6 @@ export function LivePreviewInput({
     switch (msg.type) {
       case 'ready': {
         readyRef.current = true;
-        // Build 82: bundle is alive — cancel the bootstrap timeout and clear
-        // any stale error banner from a previous failed load.
         if (readyTimerRef.current) {
           clearTimeout(readyTimerRef.current);
           readyTimerRef.current = null;
@@ -257,8 +255,6 @@ export function LivePreviewInput({
       }
 
       case 'phase': {
-        // Build 82: bootstrap progress marker. Record the most recent phase
-        // so the ready-timeout can report where boot stalled.
         if (typeof msg.phase === 'number') {
           lastPhaseRef.current = msg.phase;
         }
@@ -298,14 +294,12 @@ export function LivePreviewInput({
         break;
 
       case 'error':
-        // Surface WebView errors as a visible overlay (not gated on __DEV__)
-        // so release users see the failure instead of a dead editor.
         setWebViewError(typeof msg.message === 'string' ? msg.message : 'Unknown WebView error');
         break;
     }
   }
 
-  // Sync value → WebView when prop changes from above
+  // Sync value → WebView when the prop changes from above.
   useEffect(() => {
     if (!readyRef.current) return;
     if (value !== lastSentValueRef.current) {
@@ -314,7 +308,7 @@ export function LivePreviewInput({
     }
   }, [value]);
 
-  // Sync inputMode → readonly
+  // Sync inputMode → readonly.
   useEffect(() => {
     if (!readyRef.current) return;
     postToFrame({ type: 'set-readonly', readonly: inputMode === 'ink' });
@@ -331,7 +325,7 @@ export function LivePreviewInput({
     postToFrame({ type: 'focus' });
   }, [focusKey, inputMode]);
 
-  // Apply format commands from the toolbar
+  // Apply format commands from the toolbar.
   useEffect(() => {
     if (!pendingCommand) return;
     if (!readyRef.current) {
@@ -339,13 +333,48 @@ export function LivePreviewInput({
       return;
     }
     postToFrame({ type: 'apply-format', command: pendingCommand });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCommand]);
 
   // Apple Pencil / ink mode: when inputMode === 'ink', the Skia layer above
-  // must own all touches. We disable pointer events on the WebView wrapper so
-  // pan/draw gestures pass through to the InkLayer sibling rendered on top.
+  // owns all touches.
   const inkMode = inputMode === 'ink';
+
+  // Build 89 fallback path. Renders a plain native TextInput when the rich
+  // editor failed to boot OR the asset failed to resolve. Same onChange
+  // contract as the WebView path so the save pipeline upstream is unchanged.
+  if (useFallback) {
+    return (
+      <View
+        style={[styles.container, { minHeight: 500 }]}
+        pointerEvents={inkMode ? 'none' : 'auto'}
+      >
+        <Text style={styles.fallbackBanner}>
+          Rich editor failed — using basic text editor. Typing works.
+        </Text>
+        {(webViewError || assetError) && (
+          <Text style={styles.fallbackDiag}>
+            {assetError ?? webViewError}
+          </Text>
+        )}
+        <TextInput
+          value={fallbackValue}
+          onChangeText={(text) => {
+            setFallbackValue(text);
+            onChangeRef.current(text);
+          }}
+          onFocus={() => onFocusRef.current?.()}
+          autoFocus={autoFocus}
+          editable={!inkMode}
+          multiline
+          textAlignVertical="top"
+          placeholder="Start writing..."
+          placeholderTextColor={tokens.textHint}
+          style={styles.fallbackInput}
+        />
+      </View>
+    );
+  }
 
   return (
     <View
@@ -364,17 +393,14 @@ export function LivePreviewInput({
         }
       }}
     >
-      <WebView
+      {source ? (
+        <WebView
           ref={webViewRef}
           originWhitelist={['*']}
           source={source}
           javaScriptEnabled
           domStorageEnabled
-          injectedJavaScriptBeforeContentLoaded={BRIDGE_SHIM}
           onMessage={handleMessage}
-          // Surface native WebView load failures through the same red-banner
-          // path as in-JS errors. Before Build 81, a failed bundle load would
-          // leave the user with a silent dead editor. Errors are now visible.
           onError={(e: WebViewNativeErrorEvent) => {
             try {
               setWebViewError('native onError: ' + JSON.stringify(e.nativeEvent));
@@ -389,12 +415,8 @@ export function LivePreviewInput({
               setWebViewError('native onHttpError (unserializable)');
             }
           }}
-          onLoadStart={(e: WebViewNativeErrorEvent) => {
-            lastLoadEventRef.current = 'onLoadStart';
-          }}
-          onLoadEnd={(e: WebViewNativeErrorEvent) => {
-            lastLoadEventRef.current = 'onLoadEnd';
-          }}
+          onLoadStart={() => { lastLoadEventRef.current = 'onLoadStart'; }}
+          onLoadEnd={() => { lastLoadEventRef.current = 'onLoadEnd'; }}
           scrollEnabled={false}
           hideKeyboardAccessoryView
           keyboardDisplayRequiresUserAction={false}
@@ -409,7 +431,13 @@ export function LivePreviewInput({
           opaque={false}
           backgroundColor="transparent"
         />
-      {webViewError !== null && (
+      ) : (
+        // Asset still resolving — render nothing for a beat. The watchdog
+        // (or assetError handler) will swap in the fallback if this state
+        // persists.
+        <View style={styles.webViewContainer} />
+      )}
+      {webViewError !== null && Platform.OS !== 'web' && (
         <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
       )}
     </View>
@@ -437,5 +465,42 @@ const styles = StyleSheet.create({
     color: '#fff',
     padding: 6,
     fontSize: 11,
+  },
+  fallbackBanner: {
+    backgroundColor: tokens.accentTint,
+    color: tokens.accentLight,
+    padding: 8,
+    fontSize: 12,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
+  },
+  fallbackDiag: {
+    backgroundColor: tokens.bgCode,
+    color: tokens.textMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 10,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
+  },
+  fallbackInput: {
+    flex: 1,
+    backgroundColor: tokens.bgBase,
+    color: tokens.textBody,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
   },
 });

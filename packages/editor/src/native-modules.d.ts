@@ -20,3 +20,12 @@ declare module '@shopify/react-native-skia' {
   export const Skia: any;
   export type SkPath = any;
 }
+
+declare module 'expo-asset' {
+  export class Asset {
+    static fromModule(mod: number): Asset;
+    uri: string | null;
+    localUri: string | null;
+    downloadAsync(): Promise<Asset>;
+  }
+}

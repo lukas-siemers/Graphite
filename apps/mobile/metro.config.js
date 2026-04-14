@@ -9,6 +9,16 @@ const config = getDefaultConfig(projectRoot);
 // Watch all workspace packages so Metro picks up changes in packages/*
 config.watchFolders = [monorepoRoot];
 
+// Build 89: register .html as a Metro asset extension so the bundled native
+// editor page (apps/mobile/assets/editor/editor.html) ships inside the iOS
+// .ipa and is reachable via Asset.fromModule(require('.../editor.html'))
+// from LivePreviewInput.native.tsx. Without this, .html falls through the
+// resolver and Metro reports "Unable to resolve module".
+config.resolver.assetExts = [
+  ...config.resolver.assetExts,
+  'html',
+];
+
 // Resolve packages from both the app's node_modules and the monorepo root
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
