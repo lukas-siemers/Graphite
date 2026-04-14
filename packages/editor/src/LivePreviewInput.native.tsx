@@ -71,17 +71,23 @@ interface LivePreviewInputProps {
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
 }
 
-// Static asset reference — Metro resolves this at bundle time because
-// `.html` is registered as an asset extension in apps/mobile/metro.config.js.
-// At runtime, Asset.fromModule() returns a handle whose `.uri` (after
-// downloadAsync, which is a no-op for bundled assets) is a file:// URI
-// pointing into the app binary.
+// Build 93: ship a bundled JS asset, NOT a bundled HTML asset.
+// Builds 89-92 tried loading editor.html directly via Asset.fromModule +
+// source.uri. Both the full rich editor AND a 1.5 KB probe page failed the
+// same way on TestFlight WKWebView (onLoadEnd fired, phase -1 / none).
+// The common failure path was the bundled-HTML asset-hosting code itself.
 //
-// The require() path is relative to THIS file: packages/editor/src ->
-// ../../apps/mobile/assets/editor/editor.html
+// Build 93 replaces it with:
+//   - a tiny inline HTML shell passed via source.html (under 500 bytes)
+//   - one bundled JS asset loaded by the shell via <script src="file://...">
+//     using an absolute URI resolved from Asset.fromModule at mount time
+//
+// Metro treats .bundle as an asset (registered in metro.config.js). The
+// file contents are JavaScript — the .bundle extension is a non-code
+// sentinel so .js isn't whitelisted globally.
 //
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const EDITOR_ASSET = require('../../../apps/mobile/assets/editor/editor.html');
+const EDITOR_ASSET = require('../../../apps/mobile/assets/editor/native-editor.bundle');
 
 export function LivePreviewInput({
   value,
@@ -204,11 +210,30 @@ export function LivePreviewInput({
     };
   }, []);
 
-  // WebView source — pure asset URI, no inline html, no runtime cache writes.
-  const source = useMemo(
-    () => (assetUri ? ({ uri: assetUri } as const) : null),
-    [assetUri],
-  );
+  // Build 93: tiny inline HTML shell that <script src>s the bundled
+  // native-editor.bundle JS asset by absolute file:// URI. The shell is
+  // ~500 bytes so the RN bridge serialization isn't a bottleneck, and the
+  // heavy editor code loads from disk inside WKWebView directly.
+  const source = useMemo(() => {
+    if (!assetUri) return null;
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple-system,sans-serif;}
+.error{color:#F28500;padding:12px;}
+</style>
+</head>
+<body>
+<div id="status">Loading editor…</div>
+<div id="editor"></div>
+<script src="${assetUri}"></script>
+</body>
+</html>`;
+    return { html } as const;
+  }, [assetUri]);
 
   function postToFrame(msg: object) {
     const js = `

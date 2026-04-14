@@ -9,14 +9,18 @@ const config = getDefaultConfig(projectRoot);
 // Watch all workspace packages so Metro picks up changes in packages/*
 config.watchFolders = [monorepoRoot];
 
-// Build 89: register .html as a Metro asset extension so the bundled native
-// editor page (apps/mobile/assets/editor/editor.html) ships inside the iOS
-// .ipa and is reachable via Asset.fromModule(require('.../editor.html'))
-// from LivePreviewInput.native.tsx. Without this, .html falls through the
-// resolver and Metro reports "Unable to resolve module".
+// Build 93: register .bundle as a Metro asset extension so the bundled
+// native editor JS asset (apps/mobile/assets/editor/native-editor.bundle)
+// ships inside the iOS .ipa and is reachable via
+// Asset.fromModule(require('.../native-editor.bundle')). Builds 89-92
+// tried shipping editor.html as an asset but the HTML-asset path via
+// Asset.fromModule + source.uri never booted in TestFlight WKWebView,
+// even with a 1.5 KB probe page. We now pass a ~500-byte HTML shell
+// through source.html and reference the .bundle via <script src="file://...">
+// using an absolute URI resolved at runtime.
 config.resolver.assetExts = [
   ...config.resolver.assetExts,
-  'html',
+  'bundle',
 ];
 
 // Resolve packages from both the app's node_modules and the monorepo root
