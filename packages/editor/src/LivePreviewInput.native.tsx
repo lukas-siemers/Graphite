@@ -71,23 +71,31 @@ interface LivePreviewInputProps {
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
 }
 
-// Build 93: ship a bundled JS asset, NOT a bundled HTML asset.
-// Builds 89-92 tried loading editor.html directly via Asset.fromModule +
-// source.uri. Both the full rich editor AND a 1.5 KB probe page failed the
-// same way on TestFlight WKWebView (onLoadEnd fired, phase -1 / none).
-// The common failure path was the bundled-HTML asset-hosting code itself.
+// Build 97: Codex's call after Build 96 proved phase 0.05 (WKUserScript-
+// injected) fires but phase 0.1 (HTML inline <script>) doesn't. WKWebView
+// is loading the page but blocking <script> tag execution — both inline
+// and src — while accepting injection via the prop-based path. So we
+// stop using HTML <script> tags entirely. The shell HTML is body-only,
+// and the editor (pre-runtime + CM6 bundle + bootstrap) is delivered via
+// the `injectedJavaScript` prop, which uses the same WKUserScript path
+// as `injectedJavaScriptBeforeContentLoaded` (proven to work in 96).
 //
-// Build 93 replaces it with:
-//   - a tiny inline HTML shell passed via source.html (under 500 bytes)
-//   - one bundled JS asset loaded by the shell via <script src="file://...">
-//     using an absolute URI resolved from Asset.fromModule at mount time
-//
-// Metro treats .bundle as an asset (registered in metro.config.js). The
-// file contents are JavaScript — the .bundle extension is a non-code
-// sentinel so .js isn't whitelisted globally.
-//
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const EDITOR_ASSET = require('../../../apps/mobile/assets/editor/native-editor.bundle');
+// The bundled .bundle asset stays committed for parity but is no longer
+// referenced at runtime by the WebView source. The native editor code
+// is now imported as TS strings and concatenated below.
+import { CM6_BUNDLE } from './live-preview/editor-runtime-string.generated';
+import { NATIVE_EDITOR_PRE_RUNTIME_SCRIPT } from './live-preview/native-editor-bridge';
+import { buildNativeBootstrapScript } from './live-preview/native-editor-bootstrap';
+
+// Concatenated once at module load — same content as native-editor.bundle.
+// Total ~870 KB. Passed via the injectedJavaScript prop on every WebView
+// navigation; runs after the page DOM is ready.
+const NATIVE_EDITOR_INJECT_JS =
+  '(function(){try{if(window.ReactNativeWebView&&window.ReactNativeWebView.postMessage){window.ReactNativeWebView.postMessage(JSON.stringify({type:\'phase\',phase:0.06,label:\'injected-after-content\'}));}}catch(_){}})();\n' +
+  NATIVE_EDITOR_PRE_RUNTIME_SCRIPT + '\n;\n' +
+  CM6_BUNDLE + '\n;\n' +
+  buildNativeBootstrapScript() + '\n;\n' +
+  'true;\n';
 
 export function LivePreviewInput({
   value,
@@ -115,9 +123,11 @@ export function LivePreviewInput({
   const lastLoadEventRef = useRef<string>('none');
   const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Build 89: bundled-asset URI. Resolved once on mount.
-  const [assetUri, setAssetUri] = useState<string | null>(null);
-  const [assetError, setAssetError] = useState<string | null>(null);
+  // Build 97: assetUri retained as a state shape only so the watchdog
+  // banner format stays compatible with prior diagnostics. It's no longer
+  // populated at runtime — the editor code is delivered via injectedJavaScript.
+  const [assetUri] = useState<string | null>('inject:NATIVE_EDITOR_INJECT_JS');
+  const [assetError] = useState<string | null>(null);
 
   // Build 89: TextInput fallback. Activated by the 2.5s ready watchdog when
   // the rich editor never sends `ready`. Renders a plain native multiline
@@ -155,36 +165,13 @@ export function LivePreviewInput({
   // Last value pushed into the WebView — used to dedupe echoes from `change`.
   const lastSentValueRef = useRef('');
 
-  // Resolve the bundled editor.html asset to a local file:// URI. expo-asset
-  // returns immediately for assets shipped inside the binary (no network
-  // download needed). Failure here is surfaced via assetError + drives the
-  // TextInput fallback path immediately.
+  // Build 97: no asset resolution at runtime. Editor code is now imported
+  // as TS strings and concatenated into NATIVE_EDITOR_INJECT_JS at module
+  // scope (above), then delivered via the `injectedJavaScript` prop. The
+  // useEffect below is a no-op kept only to preserve cleanup symmetry.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const asset = Asset.fromModule(EDITOR_ASSET);
-        if (!asset.localUri) {
-          // Locally-hosted asset — already on disk for bundled binaries,
-          // but call downloadAsync to populate localUri uniformly.
-          await asset.downloadAsync();
-        }
-        if (cancelled) return;
-        const uri = asset.localUri ?? asset.uri;
-        if (!uri) {
-          throw new Error('Asset.localUri unavailable after downloadAsync');
-        }
-        setAssetUri(uri);
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setAssetError('Failed to resolve editor.html: ' + message);
-        // Skip waiting for the watchdog — failing to resolve the asset means
-        // the WebView will never load. Activate fallback now.
-        setUseFallback(true);
-      }
-    })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; void cancelled; };
   }, []);
 
   // Refs mirror assetUri + baseUrl so the watchdog banner can read them at
@@ -216,36 +203,16 @@ export function LivePreviewInput({
     };
   }, []);
 
-  // Build 95: revert relative script src + baseUrl combo (Build 94). The
-  // banner proved expo-asset's runtime URI lives under
-  //   .../Graphite.app/assets/editor/native-editor.bundle
-  // while the resolved baseUrl was
-  //   .../Graphite.app/assets/assets/editor/      (note double "assets/")
-  // — so the relative <script src="native-editor.bundle"> resolved to a
-  // file that doesn't exist. Use the ABSOLUTE assetUri for the bundle
-  // src; keep baseUrl set so the document has a file:// origin (better
-  // than about:blank for diagnostics + same-origin checks).
-  const baseUrl = useMemo(() => {
-    if (!assetUri) return null;
-    const idx = assetUri.lastIndexOf('/');
-    return assetUri.slice(0, idx + 1);
-  }, [assetUri]);
-
   // Mirror into refs so the watchdog banner can surface the current URIs
   // regardless of render timing.
   useEffect(() => { assetUriRef.current = assetUri; }, [assetUri]);
-  useEffect(() => { baseUrlRef.current = baseUrl; }, [baseUrl]);
+  useEffect(() => { baseUrlRef.current = 'inject:none'; }, []);
 
   const source = useMemo(() => {
-    if (!assetUri || !baseUrl) return null;
-    // Three diagnostic boundaries the shell now isolates:
-    //   phase 0.1  shell-inline-start   — shell <script> executed
-    //   phase 0.15 pre-bundle-tag       — emitted right before the bundle
-    //                                     tag is appended; carries the full
-    //                                     scriptSrc so we can see what URL
-    //                                     the browser is asked to fetch
-    //   phase 0.2  bundle-script-loaded — bundle <script> onload fired
-    //   error 'bundle script failed…'   — bundle <script> onerror fired
+    // Build 97: shell HTML has NO <script> tags at all. WKWebView blocked
+    // every <script> we tried (inline AND src-loaded) with phase -1. The
+    // editor code is delivered entirely via the injectedJavaScript prop —
+    // same WKUserScript path that posted phase 0.05 successfully in 96.
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -260,54 +227,10 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
-<script>
-(function(){
-  var post = function(msg) {
-    try {
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(msg));
-      }
-    } catch (_) {}
-  };
-
-  // Phase 0.1 — shell inline script executed at all.
-  post({
-    type: 'phase',
-    phase: 0.1,
-    label: 'shell-inline-start',
-    href: String(location && location.href),
-    baseURI: String(document && document.baseURI),
-    assetUri: ${JSON.stringify(assetUri)}
-  });
-
-  if (!(window.ReactNativeWebView && window.ReactNativeWebView.postMessage)) {
-    var el = document.getElementById('status');
-    if (el) el.textContent = 'ReactNativeWebView missing — href=' + String(location && location.href);
-  }
-
-  // Phase 0.15 — about to inject the bundle script. Surfaces the EXACT
-  // src URL the browser is asked to fetch, so a banner screenshot says
-  // whether the URL itself is wrong vs the fetch is being blocked.
-  post({
-    type: 'phase',
-    phase: 0.15,
-    label: 'pre-bundle-tag',
-    href: String(location && location.href),
-    baseURI: String(document && document.baseURI),
-    assetUri: ${JSON.stringify(assetUri)},
-    scriptSrc: ${JSON.stringify(assetUri)}
-  });
-})();
-</script>
-<script
-  src="${assetUri}"
-  onload="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'phase',phase:0.2,label:'bundle-script-loaded'}));}catch(_){}"
-  onerror="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',message:'bundle script failed to load: ${assetUri}'}));}catch(_){}"
-></script>
 </body>
 </html>`;
-    return { html, baseUrl } as const;
-  }, [assetUri, baseUrl]);
+    return { html } as const;
+  }, []);
 
   function postToFrame(msg: object) {
     const js = `
@@ -500,6 +423,12 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
             })();
             true;
           `}
+          /* Build 97: native editor (pre-runtime + CM6 bundle + bootstrap)
+             delivered via injectedJavaScript prop. WKWebView blocked HTML
+             <script> tags through Build 96 but accepted WKUserScript
+             injection. injectedJavaScript runs once per navigation, after
+             the page is loaded. */
+          injectedJavaScript={NATIVE_EDITOR_INJECT_JS}
           onMessage={handleMessage}
           onError={(e: WebViewNativeErrorEvent) => {
             try {

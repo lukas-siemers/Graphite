@@ -43,21 +43,15 @@ describe('native editor delivery — Build 89 guardrails', () => {
   const bridge = read('live-preview/native-editor-bridge.ts');
   const bootstrap = read('live-preview/native-editor-bootstrap.ts');
 
-  it('LivePreviewInput.native.tsx does not inline the full CM6 bundle into source.html', () => {
-    // Build 94 legitimately uses source.html for a tiny ~500-byte shell
-    // that <script src>s the bundled JS asset via relative path. Banning
-    // "source.html" outright (the old Build 89 guardrail) would break this
-    // correct pattern. The real contract we want to enforce is: the heavy
-    // editor code (CM6 bundle + bootstrap) must NOT be re-inlined into the
-    // HTML passed through the RN bridge. Guardrail it semantically:
-    //
-    //   - CM6_BUNDLE identifier must not be referenced from this file
-    //     (it was in Builds 81–88 to splice the 820 KB bundle into the
-    //     inline HTML; Build 93+ ships the bundle as a separate asset).
-    //   - No obviously-large inline HTML template literal — cap the file
-    //     length as a cheap sanity check against accidental re-inlining.
-    expect(native).not.toMatch(/CM6_BUNDLE/);
-    expect(native.length).toBeLessThan(50_000);
+  it('source.html shell contains no <script> tags (Build 97 contract)', () => {
+    // Build 97 proved WKWebView blocks every <script> tag in our shell HTML
+    // (inline AND src-loaded). The native editor is now delivered entirely
+    // via the injectedJavaScript prop (WKUserScript path). Guardrail: the
+    // shell HTML literal in this file must not contain a <script tag.
+    // The literal lives inside a template-string assignment to `html` —
+    // we look for the substring '<script' anywhere in the file's source.
+    // Whitespace-tolerant via regex.
+    expect(native).not.toMatch(/<script[\s>]/);
   });
 
   it('LivePreviewInput.native.tsx does not write editor runtime files to disk', () => {
@@ -102,14 +96,16 @@ describe('native editor delivery — Build 89 guardrails', () => {
     }
   });
 
-  it('native editor is delivered as a .bundle JS asset, NOT an .html asset', () => {
-    // Build 93: editor.html delivery was replaced by native-editor.bundle.
-    // Builds 89-92 shipped editor.html via Asset.fromModule + source.uri;
-    // that path never booted reliably in TestFlight WKWebView. Positive
-    // assertion guards against reverting to the failing HTML-asset path.
-    expect(native).toMatch(/Asset\.fromModule/);
-    expect(native).toMatch(/require\([^)]*assets\/editor\/native-editor\.bundle[^)]*\)/);
-    // Negative: must NOT reference the old editor.html / editor-probe.html.
+  it('native editor is delivered via injectedJavaScript (Build 97)', () => {
+    // Build 97 stopped using bundled assets at runtime entirely. The full
+    // editor (pre-runtime + CM6 bundle + bootstrap) is now imported as TS
+    // strings and concatenated into NATIVE_EDITOR_INJECT_JS, then passed
+    // via the injectedJavaScript prop. WKWebView accepts this WKUserScript
+    // path (proven by Build 96's phase 0.05 marker) but blocked every
+    // <script> tag we tried.
+    expect(native).toMatch(/NATIVE_EDITOR_INJECT_JS/);
+    expect(native).toMatch(/injectedJavaScript=\{NATIVE_EDITOR_INJECT_JS\}/);
+    // Negative: no <script> tag delivery path or stale HTML-asset reference.
     expect(native).not.toMatch(/assets\/editor\/editor\.html/);
     expect(native).not.toMatch(/assets\/editor\/editor-probe\.html/);
   });
