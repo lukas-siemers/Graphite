@@ -125,6 +125,11 @@ export function LivePreviewInput({
   const lastLoadEventRef = useRef<string>('none');
   const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Build 100: mirror the phase refs into state so the always-on phase
+  // indicator rerenders as boot progresses. Visible on device in both
+  // success and failure paths — screenshot tells us exactly where boot got.
+  const [phaseDisplay, setPhaseDisplay] = useState<string>('phase - (waiting)');
+
   // Build 97: assetUri retained as a state shape only so the watchdog
   // banner format stays compatible with prior diagnostics. It's no longer
   // populated at runtime — the editor code is delivered via injectedJavaScript.
@@ -215,22 +220,9 @@ export function LivePreviewInput({
     // every <script> we tried (inline AND src-loaded) with phase -1. The
     // editor code is delivered entirely via the injectedJavaScript prop —
     // same WKUserScript path that posted phase 0.05 successfully in 96.
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple-system,sans-serif;}
-.error{color:#F28500;padding:12px;}
-#status{padding:8px 12px;font-size:11px;color:#8A8F98;}
-</style>
-</head>
-<body>
-<div id="status">Loading editor…</div>
-<div id="editor"></div>
-</body>
-</html>`;
+    // Build 99: shell is produced by buildEditorShellHtml() which carries
+    // the full shared EDITOR_CSS — CM6 layout, status indicator, and
+    // placeholder styling all come from the same source as the web iframe.
     return { html: NATIVE_EDITOR_SHELL_HTML } as const;
   }, []);
 
@@ -267,6 +259,7 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
           readyTimerRef.current = null;
         }
         setWebViewError(null);
+        setPhaseDisplay('phase 6 · ready');
         const initValue = valueRef.current ?? '';
         lastSentValueRef.current = initValue;
         postToFrame({ type: 'set-value', value: initValue });
@@ -285,6 +278,13 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
         if (typeof msg.label === 'string') {
           lastPhaseLabelRef.current = msg.label;
         }
+        // Build 100: drive the always-on phase indicator. Updates every time
+        // a phase posts from the WebView so the label on screen reflects the
+        // deepest stage boot reached. If boot reaches 'ready' (phase 6 in
+        // the ready case above) we overwrite to 'phase 6 · ready'.
+        const phaseNum = typeof msg.phase === 'number' ? msg.phase : '?';
+        const phaseLabel = typeof msg.label === 'string' ? msg.label : '?';
+        setPhaseDisplay(`phase ${phaseNum} · ${phaseLabel}`);
         if (__DEV__) {
           // eslint-disable-next-line no-console
           console.log('[LivePreview] phase', msg.phase, msg.label);
@@ -463,6 +463,13 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
       {webViewError !== null && Platform.OS !== 'web' && (
         <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
       )}
+      {/* Build 100: always-on phase indicator. Shows the deepest boot phase
+          the WebView has reported. Visible during both successful boot and
+          failure — a TestFlight screenshot tells us exactly where boot got.
+          'phase 6 · ready' = rich editor is alive. Anything lower = stuck. */}
+      <View style={styles.phaseIndicator} pointerEvents="none">
+        <Text style={styles.phaseIndicatorText}>{phaseDisplay}</Text>
+      </View>
       {useFallback && (
         <View style={styles.deadStateOverlay} pointerEvents="none">
           <Text style={styles.deadStateHeadline}>
@@ -500,6 +507,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     padding: 6,
     fontSize: 11,
+  },
+  phaseIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(20, 20, 20, 0.75)',
+    borderWidth: 1,
+    borderColor: tokens.border,
+  },
+  phaseIndicatorText: {
+    color: tokens.textMuted,
+    fontSize: 10,
+    letterSpacing: 0.3,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
   },
   deadStateOverlay: {
     position: 'absolute',

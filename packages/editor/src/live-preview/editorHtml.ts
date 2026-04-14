@@ -1263,9 +1263,12 @@ const fenceStylePlugin = ViewPlugin.fromClass(
 // on the fly via set-readonly messages.
 const readOnlyCompartment = new Compartment();
 
-// Hide the loading banner now that the module has executed
-const statusEl = document.getElementById('status');
-if (statusEl) statusEl.remove();
+// Build 100: status div removal was moved to AFTER successful boot (see
+// below, just before post({ type: 'ready' })). Previously the "Loading
+// editor..." indicator was removed before new EditorView(...) ran, so any
+// silent hang/throw in WKWebView's CM6 construction produced a completely
+// blank screen with no visual breadcrumb. Now the status stays visible
+// until we know boot fully succeeded.
 
 // Build 82: phase 4 — about to construct the EditorView. If boot stalls
 // here the crash is inside CM6 setup (extensions, plugins, initial state).
@@ -1366,6 +1369,13 @@ view.focus();
 // Initial height report so the parent iframe sizes correctly
 reportHeight();
 
+// Build 100: now that EditorView is constructed, focused, and has reported
+// an initial height, remove the "Loading editor…" status indicator. If boot
+// stalled before this point the user sees the status message instead of a
+// blank screen, which is a critical on-device diagnostic breadcrumb.
+const statusEl = document.getElementById('status');
+if (statusEl) statusEl.remove();
+
 // Signal ready (phase 6, implicitly)
 post({ type: 'ready' });
 `;
@@ -1389,7 +1399,7 @@ export function buildEditorShellHtml(): string {
 <style>${EDITOR_CSS}</style>
 </head>
 <body>
-<div id="status">Loading editorâ€¦</div>
+<div id="status">Loading editor…</div>
 <div id="editor"></div>
 </body>
 </html>`;
