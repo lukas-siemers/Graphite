@@ -240,6 +240,21 @@ export const EDITOR_CSS = `
  * fails to load the host still sees phase 1.
  */
 export const EDITOR_PRE_RUNTIME_SCRIPT = `
+// Build 84: universal host-post helper. On native (WKWebView) window.parent
+// is a read-only getter returning the same window, and BRIDGE_SHIM's
+// Object.defineProperty override silently fails — so window.parent.postMessage
+// goes into the void. Prefer ReactNativeWebView.postMessage when available
+// (native) and fall back to window.parent.postMessage for the web iframe.
+function postToHost(msg) {
+  try {
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+      window.ReactNativeWebView.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      return;
+    }
+  } catch (_) {}
+  try { window.parent.postMessage(msg, '*'); } catch (_) {}
+}
+
 // Global error surfacing — any script failure shows inline + posts to parent
 function reportError(err) {
   const el = document.getElementById('status');
@@ -247,7 +262,7 @@ function reportError(err) {
     el.className = 'error';
     el.textContent = 'Editor failed to load: ' + (err && err.message ? err.message : String(err));
   }
-  try { window.parent.postMessage({ type: 'error', message: String(err && err.stack || err) }, '*'); } catch (_) {}
+  postToHost({ type: 'error', message: String(err && err.stack || err) });
 }
 window.addEventListener('error', (e) => reportError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
@@ -257,7 +272,7 @@ window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 // timeout banner reports the last phase reached when the ready handshake
 // never arrives.
 function postPhase(phase, label) {
-  try { window.parent.postMessage({ type: 'phase', phase: phase, label: label }, '*'); } catch (_) {}
+  postToHost({ type: 'phase', phase: phase, label: label });
 }
 postPhase(1, 'html-parsed');
 `;
@@ -272,7 +287,7 @@ export const EDITOR_BOOTSTRAP_SCRIPT = `
 // Build 82: phase 2 — the CM6 bundle <script> has executed.
 postPhase(2, 'cm6-bundle-executed');
 if (!window.CM6) {
-  try { window.parent.postMessage({ type: 'error', message: 'CM6 bundle ran but window.CM6 is undefined' }, '*'); } catch (_) {}
+  postToHost({ type: 'error', message: 'CM6 bundle ran but window.CM6 is undefined' });
 }
 
 // Destructure everything from the window.CM6 namespace that the bundle above
@@ -366,7 +381,10 @@ const graphiteHighlight = HighlightStyle.define([
 // ---------------------------------------------------------------------------
 
 function post(msg) {
-  window.parent.postMessage(msg, '*');
+  // Build 84: route through the universal host-post helper defined in
+  // EDITOR_PRE_RUNTIME_SCRIPT. On native WKWebView window.parent redirects
+  // don't work, so direct ReactNativeWebView.postMessage is required.
+  postToHost(msg);
 }
 
 // Shared clipboard writer. Used by the copy-code-block command and by the
