@@ -135,6 +135,7 @@ const EDITOR_DIR_NAME = 'graphite-editor-v86';
 
 type EditorAssets = {
   htmlUri: string;
+  dirUri: string;
 };
 
 // Build 86: all four files on disk; WebView loads via source={{uri}} which
@@ -178,7 +179,7 @@ async function ensureEditorAssets(): Promise<EditorAssets> {
       await FileSystem.writeAsStringAsync(runtimePath, CM6_BUNDLE);
     }
 
-    return { htmlUri: htmlPath };
+    return { htmlUri: htmlPath, dirUri: editorDir };
   })().catch((err) => {
     assetsPromise = null;
     throw err;
@@ -210,6 +211,7 @@ export function LivePreviewInput({
   // assets (html + 3 scripts) live in the same directory so relative
   // <script src> tags resolve as siblings via WKWebView.loadFileURL.
   const [sourceUri, setSourceUri] = useState<string | null>(null);
+  const [readAccessDir, setReadAccessDir] = useState<string | null>(null);
   // Build 82: last bootstrap phase + label observed. The 5s ready watchdog
   // reports both fields in the red banner if the ready handshake never
   // arrives, so TestFlight logs pinpoint the exact stall point.
@@ -254,6 +256,7 @@ export function LivePreviewInput({
       .then((assets) => {
         if (cancelled) return;
         setSourceUri(assets.htmlUri);
+        setReadAccessDir(assets.dirUri);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -455,6 +458,13 @@ export function LivePreviewInput({
           ref={webViewRef}
           originWhitelist={['*']}
           source={source}
+          // Build 87: without this prop, react-native-webview's iOS code
+          // calls `loadRequest` instead of `loadFileURL`, and WKWebView
+          // silently drops file:// loads outside the app bundle. Build 86
+          // diagnostics confirmed: banner showed "@ about:blank" meaning
+          // the WebView never actually navigated to our file:// URI.
+          // Pointing at the parent dir grants read access to all siblings.
+          {...(readAccessDir ? { allowingReadAccessToURL: readAccessDir } : {})}
           // Build 82: file:// loading of sibling assets. Both flags needed on
           // iOS — allowFileAccessFromFileURLs lets the HTML's <script src>
           // resolve; allowUniversalAccess loosens the XHR origin check for
