@@ -187,17 +187,23 @@ export function LivePreviewInput({
     return () => { cancelled = true; };
   }, []);
 
-  // 2.5s ready watchdog. Build 89 reduces from 5s -> 2.5s so users hit the
-  // fallback faster when the rich editor stalls. Once useFallback flips on
-  // it stays on for the life of the component (no auto-recovery).
+  // Refs mirror assetUri + baseUrl so the watchdog banner can read them at
+  // timeout fire time without pulling the useEffect's dep list forward.
+  const assetUriRef = useRef<string | null>(null);
+  const baseUrlRef = useRef<string | null>(null);
+
+  // 2.5s ready watchdog. Once useFallback flips on it stays on for the life
+  // of the component (no auto-recovery).
   useEffect(() => {
     readyTimerRef.current = setTimeout(() => {
       if (!readyRef.current) {
         const phase = lastPhaseRef.current ?? -1;
         const label = lastPhaseLabelRef.current;
         const loadEvent = lastLoadEventRef.current;
+        const uri = assetUriRef.current ?? 'null';
+        const base = baseUrlRef.current ?? 'null';
         setWebViewError(
-          `Editor bootstrap timeout — phase ${phase} (${label}); WebView load ${loadEvent}`,
+          `Editor bootstrap timeout — phase ${phase} (${label}); WebView load ${loadEvent}; assetUri=${uri}; baseUrl=${base}`,
         );
         setUseFallback(true);
       }
@@ -210,12 +216,33 @@ export function LivePreviewInput({
     };
   }, []);
 
-  // Build 93: tiny inline HTML shell that <script src>s the bundled
-  // native-editor.bundle JS asset by absolute file:// URI. The shell is
-  // ~500 bytes so the RN bridge serialization isn't a bottleneck, and the
-  // heavy editor code loads from disk inside WKWebView directly.
+  // Build 94: derive baseUrl from the asset's directory so the inline HTML
+  // shell can reference the bundle via a RELATIVE path. Build 93 used an
+  // absolute file:// src with no baseUrl — WKWebView's loadHTMLString then
+  // loaded the shell at about:blank origin, and the absolute subresource
+  // fetch was cross-origin from that origin, likely silently blocked.
+  // Relative src + matching baseUrl keeps the shell and bundle on the same
+  // origin so WKWebView treats the bundle as same-origin and executes it.
+  const [baseUrl, fileName] = useMemo(() => {
+    if (!assetUri) return [null, null] as const;
+    const idx = assetUri.lastIndexOf('/');
+    return [assetUri.slice(0, idx + 1), assetUri.slice(idx + 1)] as const;
+  }, [assetUri]);
+
+  // Mirror into refs so the watchdog banner can surface the current URIs
+  // regardless of render timing.
+  useEffect(() => { assetUriRef.current = assetUri; }, [assetUri]);
+  useEffect(() => { baseUrlRef.current = baseUrl; }, [baseUrl]);
+
   const source = useMemo(() => {
-    if (!assetUri) return null;
+    if (!assetUri || !baseUrl || !fileName) return null;
+    // Shell-level diagnostics: post phase 0.1 BEFORE the bundle loads, and
+    // the bundle <script> carries onload (phase 0.2) / onerror (visible
+    // error). This isolates three failure boundaries the watchdog couldn't
+    // distinguish before:
+    //   - shell never executes (WebView didn't parse any JS)
+    //   - shell executes but bundle <script> fails to fetch or parse
+    //   - bundle loads but bootstrap crashes before phase 1
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -224,16 +251,44 @@ export function LivePreviewInput({
 <style>
 html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple-system,sans-serif;}
 .error{color:#F28500;padding:12px;}
+#status{padding:8px 12px;font-size:11px;color:#8A8F98;}
 </style>
 </head>
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
-<script src="${assetUri}"></script>
+<script>
+(function(){
+  var payload = {
+    type: 'phase',
+    phase: 0.1,
+    label: 'shell-inline-start',
+    href: String(location && location.href),
+    baseURI: String(document && document.baseURI),
+    assetFileName: ${JSON.stringify(fileName)}
+  };
+  try {
+    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+      window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+    } else {
+      var el = document.getElementById('status');
+      if (el) el.textContent = 'ReactNativeWebView missing — href=' + payload.href;
+    }
+  } catch (e) {
+    var el2 = document.getElementById('status');
+    if (el2) el2.textContent = 'shell-inline-start threw: ' + String(e);
+  }
+})();
+</script>
+<script
+  src="${fileName}"
+  onload="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'phase',phase:0.2,label:'bundle-script-loaded'}));}catch(_){}"
+  onerror="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',message:'bundle script failed to load: ${fileName}'}));}catch(_){}"
+></script>
 </body>
 </html>`;
-    return { html } as const;
-  }, [assetUri]);
+    return { html, baseUrl } as const;
+  }, [assetUri, baseUrl, fileName]);
 
   function postToFrame(msg: object) {
     const js = `
