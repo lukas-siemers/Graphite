@@ -1274,10 +1274,21 @@ const readOnlyCompartment = new Compartment();
 // here the crash is inside CM6 setup (extensions, plugins, initial state).
 postPhase(4, 'constructing-editor-view');
 
+// Build 103: pre-construction probe. CM6's EditorView constructor silently
+// accepts null as parent and creates a headless editor (DOM attached to
+// a detached fragment, never inserted into the document tree). That exact
+// failure matches Build 102's telemetry: t:N grew on editor-area taps, i
+// never incremented on those taps, but i DID grow on toolbar commands
+// (apply-format transactions still fire updateListener on a headless view).
+// Post phase 4.1 with whether the #editor div was found, so we can confirm
+// on-device whether the headless-parent path is the actual cause.
+var editorParent = document.getElementById('editor');
+postPhase(4.1, editorParent ? 'parent-found' : 'parent-NULL');
+
 // Capture the view so enableBlockHeights() can trigger an immediate
 // measurement pass without waiting for the next CM update cycle.
 const view = capturedView = new EditorView({
-  parent: document.getElementById('editor'),
+  parent: editorParent,
   state: EditorState.create({
     doc: '',
     extensions: [
@@ -1321,6 +1332,28 @@ const view = capturedView = new EditorView({
     ],
   }),
 });
+
+// Build 103: defensive DOM attachment. Even if CM6 created the view with
+// a null parent (headless), we re-resolve #editor now (DOM may have
+// parsed more since bootstrap started) and force-append view.dom so the
+// editor becomes visible and taps on the editor area land on .cm-content.
+// Post phase 5.05 with the attachment state so the on-device phase pill
+// confirms which path ran.
+try {
+  var postAttachEditorEl = document.getElementById('editor');
+  if (postAttachEditorEl && view && view.dom) {
+    if (!postAttachEditorEl.contains(view.dom)) {
+      postAttachEditorEl.appendChild(view.dom);
+      postPhase(5.05, 'view-force-attached');
+    } else {
+      postPhase(5.05, 'view-already-attached');
+    }
+  } else {
+    postPhase(5.05, 'editor-div-still-missing');
+  }
+} catch (e) {
+  post({ type: 'error', message: 'attach:' + String(e && e.message || e) });
+}
 
 // ---------------------------------------------------------------------------
 // Message bridge
