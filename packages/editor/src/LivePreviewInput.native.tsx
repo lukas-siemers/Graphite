@@ -216,17 +216,19 @@ export function LivePreviewInput({
     };
   }, []);
 
-  // Build 94: derive baseUrl from the asset's directory so the inline HTML
-  // shell can reference the bundle via a RELATIVE path. Build 93 used an
-  // absolute file:// src with no baseUrl — WKWebView's loadHTMLString then
-  // loaded the shell at about:blank origin, and the absolute subresource
-  // fetch was cross-origin from that origin, likely silently blocked.
-  // Relative src + matching baseUrl keeps the shell and bundle on the same
-  // origin so WKWebView treats the bundle as same-origin and executes it.
-  const [baseUrl, fileName] = useMemo(() => {
-    if (!assetUri) return [null, null] as const;
+  // Build 95: revert relative script src + baseUrl combo (Build 94). The
+  // banner proved expo-asset's runtime URI lives under
+  //   .../Graphite.app/assets/editor/native-editor.bundle
+  // while the resolved baseUrl was
+  //   .../Graphite.app/assets/assets/editor/      (note double "assets/")
+  // — so the relative <script src="native-editor.bundle"> resolved to a
+  // file that doesn't exist. Use the ABSOLUTE assetUri for the bundle
+  // src; keep baseUrl set so the document has a file:// origin (better
+  // than about:blank for diagnostics + same-origin checks).
+  const baseUrl = useMemo(() => {
+    if (!assetUri) return null;
     const idx = assetUri.lastIndexOf('/');
-    return [assetUri.slice(0, idx + 1), assetUri.slice(idx + 1)] as const;
+    return assetUri.slice(0, idx + 1);
   }, [assetUri]);
 
   // Mirror into refs so the watchdog banner can surface the current URIs
@@ -235,14 +237,15 @@ export function LivePreviewInput({
   useEffect(() => { baseUrlRef.current = baseUrl; }, [baseUrl]);
 
   const source = useMemo(() => {
-    if (!assetUri || !baseUrl || !fileName) return null;
-    // Shell-level diagnostics: post phase 0.1 BEFORE the bundle loads, and
-    // the bundle <script> carries onload (phase 0.2) / onerror (visible
-    // error). This isolates three failure boundaries the watchdog couldn't
-    // distinguish before:
-    //   - shell never executes (WebView didn't parse any JS)
-    //   - shell executes but bundle <script> fails to fetch or parse
-    //   - bundle loads but bootstrap crashes before phase 1
+    if (!assetUri || !baseUrl) return null;
+    // Three diagnostic boundaries the shell now isolates:
+    //   phase 0.1  shell-inline-start   — shell <script> executed
+    //   phase 0.15 pre-bundle-tag       — emitted right before the bundle
+    //                                     tag is appended; carries the full
+    //                                     scriptSrc so we can see what URL
+    //                                     the browser is asked to fetch
+    //   phase 0.2  bundle-script-loaded — bundle <script> onload fired
+    //   error 'bundle script failed…'   — bundle <script> onerror fired
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -259,36 +262,52 @@ html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple
 <div id="editor"></div>
 <script>
 (function(){
-  var payload = {
+  var post = function(msg) {
+    try {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      }
+    } catch (_) {}
+  };
+
+  // Phase 0.1 — shell inline script executed at all.
+  post({
     type: 'phase',
     phase: 0.1,
     label: 'shell-inline-start',
     href: String(location && location.href),
     baseURI: String(document && document.baseURI),
-    assetFileName: ${JSON.stringify(fileName)}
-  };
-  try {
-    if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-    } else {
-      var el = document.getElementById('status');
-      if (el) el.textContent = 'ReactNativeWebView missing — href=' + payload.href;
-    }
-  } catch (e) {
-    var el2 = document.getElementById('status');
-    if (el2) el2.textContent = 'shell-inline-start threw: ' + String(e);
+    assetUri: ${JSON.stringify(assetUri)}
+  });
+
+  if (!(window.ReactNativeWebView && window.ReactNativeWebView.postMessage)) {
+    var el = document.getElementById('status');
+    if (el) el.textContent = 'ReactNativeWebView missing — href=' + String(location && location.href);
   }
+
+  // Phase 0.15 — about to inject the bundle script. Surfaces the EXACT
+  // src URL the browser is asked to fetch, so a banner screenshot says
+  // whether the URL itself is wrong vs the fetch is being blocked.
+  post({
+    type: 'phase',
+    phase: 0.15,
+    label: 'pre-bundle-tag',
+    href: String(location && location.href),
+    baseURI: String(document && document.baseURI),
+    assetUri: ${JSON.stringify(assetUri)},
+    scriptSrc: ${JSON.stringify(assetUri)}
+  });
 })();
 </script>
 <script
-  src="${fileName}"
+  src="${assetUri}"
   onload="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'phase',phase:0.2,label:'bundle-script-loaded'}));}catch(_){}"
-  onerror="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',message:'bundle script failed to load: ${fileName}'}));}catch(_){}"
+  onerror="try{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'error',message:'bundle script failed to load: ${assetUri}'}));}catch(_){}"
 ></script>
 </body>
 </html>`;
     return { html, baseUrl } as const;
-  }, [assetUri, baseUrl, fileName]);
+  }, [assetUri, baseUrl]);
 
   function postToFrame(msg: object) {
     const js = `
