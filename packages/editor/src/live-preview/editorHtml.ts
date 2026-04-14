@@ -1274,16 +1274,35 @@ const readOnlyCompartment = new Compartment();
 // here the crash is inside CM6 setup (extensions, plugins, initial state).
 postPhase(4, 'constructing-editor-view');
 
-// Build 103: pre-construction probe. CM6's EditorView constructor silently
-// accepts null as parent and creates a headless editor (DOM attached to
-// a detached fragment, never inserted into the document tree). That exact
-// failure matches Build 102's telemetry: t:N grew on editor-area taps, i
-// never incremented on those taps, but i DID grow on toolbar commands
-// (apply-format transactions still fire updateListener on a headless view).
-// Post phase 4.1 with whether the #editor div was found, so we can confirm
-// on-device whether the headless-parent path is the actual cause.
+// Build 104: guaranteed-valid parent resolution. On iPad WKWebView,
+// react-native-webview fires injectedJavaScript at atDocumentEnd, but
+// on iPad that can actually race with full HTML tree parsing — so
+// document.getElementById('editor') can return null even though the
+// shell HTML contains <div id="editor">. When null, CM6 silently
+// creates a HEADLESS view (confirmed in @codemirror/view 6.26.0
+// index.js line 7840: appendChild is skipped, no error, no warning;
+// the view object is fully functional but view.dom lives in memory
+// only, never in the page tree). This is Build 102's observed
+// symptom exactly: phase 6 ready fires, toolbar commands work, but
+// the editor is invisible and taps don't reach .cm-content.
+//
+// Fix: if #editor is missing at construction time, create it
+// ourselves and append to document.body. Guarantees a valid, attached
+// parent for CM6 regardless of HTML parse timing. Post phase 4.1 with
+// the actual resolution path so the on-device pill confirms it.
 var editorParent = document.getElementById('editor');
-postPhase(4.1, editorParent ? 'parent-found' : 'parent-NULL');
+var parentStatus = 'parent-found';
+if (!editorParent) {
+  editorParent = document.createElement('div');
+  editorParent.id = 'editor';
+  if (document.body) {
+    document.body.appendChild(editorParent);
+    parentStatus = 'parent-created';
+  } else {
+    parentStatus = 'parent-no-body';
+  }
+}
+postPhase(4.1, parentStatus);
 
 // Capture the view so enableBlockHeights() can trigger an immediate
 // measurement pass without waiting for the next CM update cycle.
@@ -1333,20 +1352,26 @@ const view = capturedView = new EditorView({
   }),
 });
 
-// Build 103: defensive DOM attachment. Even if CM6 created the view with
-// a null parent (headless), we re-resolve #editor now (DOM may have
-// parsed more since bootstrap started) and force-append view.dom so the
-// editor becomes visible and taps on the editor area land on .cm-content.
-// Post phase 5.05 with the attachment state so the on-device phase pill
-// confirms which path ran.
+// Build 104: defensive DOM attachment + forced measurement. Even though
+// Build 104's parent-resolution step above already guarantees a valid
+// parent, the CM6 constructor may still produce a detached view under
+// race conditions — so we defensively re-check view.dom's attachment
+// and append if needed. Then call view.requestMeasure() to force CM6's
+// layout/paint cycle; on detached-then-attached views CM6 needs the
+// explicit measure request to render the first frame.
 try {
-  var postAttachEditorEl = document.getElementById('editor');
+  var postAttachEditorEl = document.getElementById('editor') || editorParent;
   if (postAttachEditorEl && view && view.dom) {
     if (!postAttachEditorEl.contains(view.dom)) {
       postAttachEditorEl.appendChild(view.dom);
       postPhase(5.05, 'view-force-attached');
     } else {
       postPhase(5.05, 'view-already-attached');
+    }
+    // Force a measurement + paint pass now that view.dom is guaranteed
+    // to be in the document tree.
+    if (typeof view.requestMeasure === 'function') {
+      view.requestMeasure();
     }
   } else {
     postPhase(5.05, 'editor-div-still-missing');

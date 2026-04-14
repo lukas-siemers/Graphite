@@ -130,14 +130,16 @@ export function LivePreviewInput({
   // success and failure paths — screenshot tells us exactly where boot got.
   const [phaseDisplay, setPhaseDisplay] = useState<string>('phase - (waiting)');
   // Build 101: diagnostic counters for the post-ready "can't type" bug.
-  // tapCount = onTouchStart fires on the RN side (do RN taps land?).
-  // inputCount = CM6 update-listener fires inside the WebView (does CM6
-  // see any input events?). Displayed next to phaseDisplay as
-  // "... · t:N i:M" so one screenshot tells us whether the failure is
-  // taps not reaching the WebView, or taps reaching but CM6 not getting
-  // keystrokes.
   const [tapCount, setTapCount] = useState(0);
   const [inputCount, setInputCount] = useState(0);
+  // Build 104: persist the one-shot diagnostic phase labels (4.1 parent
+  // resolution, 5.05 attachment) so the phase pill doesn't lose them
+  // when phase 6 ready overwrites the main display. Shown alongside as
+  // "... · par:X · att:Y" so a single screenshot captures the entire
+  // boot trace: parent-found/created, view-attached/force-attached,
+  // main phase, tap counter, input counter.
+  const [parentStatusDisplay, setParentStatusDisplay] = useState<string>('?');
+  const [attachStatusDisplay, setAttachStatusDisplay] = useState<string>('?');
 
   // Build 97: assetUri retained as a state shape only so the watchdog
   // banner format stays compatible with prior diagnostics. It's no longer
@@ -287,13 +289,18 @@ export function LivePreviewInput({
         if (typeof msg.label === 'string') {
           lastPhaseLabelRef.current = msg.label;
         }
-        // Build 100: drive the always-on phase indicator. Updates every time
-        // a phase posts from the WebView so the label on screen reflects the
-        // deepest stage boot reached. If boot reaches 'ready' (phase 6 in
-        // the ready case above) we overwrite to 'phase 6 · ready'.
-        const phaseNum = typeof msg.phase === 'number' ? msg.phase : '?';
+        const phaseNum = typeof msg.phase === 'number' ? msg.phase : null;
         const phaseLabel = typeof msg.label === 'string' ? msg.label : '?';
-        setPhaseDisplay(`phase ${phaseNum} · ${phaseLabel}`);
+        // Build 104: route diagnostic sub-phases into dedicated state so
+        // phase 6 (ready) doesn't erase them. Main pill keeps showing the
+        // headline phase progression; par: and att: stay persistent.
+        if (phaseNum === 4.1) {
+          setParentStatusDisplay(phaseLabel);
+        } else if (phaseNum === 5.05) {
+          setAttachStatusDisplay(phaseLabel);
+        } else {
+          setPhaseDisplay(`phase ${phaseNum ?? '?'} · ${phaseLabel}`);
+        }
         if (__DEV__) {
           // eslint-disable-next-line no-console
           console.log('[LivePreview] phase', msg.phase, msg.label);
@@ -492,11 +499,20 @@ export function LivePreviewInput({
           showsHorizontalScrollIndicator={false}
           style={styles.webView}
           containerStyle={styles.webViewContainer}
-          // Critical for transparency so the canvas bgBase shows through
-          // any margins CodeMirror doesn't paint.
+          // Build 104: WKWebView on iPad has a known CALayer compositing
+          // bug where the layer can skip paint entirely when opaque=false
+          // combined with a clear backgroundColor (alpha=0). react-native-
+          // webview/apple/RNCWebViewImpl.m line 720 sets _webView.opaque =
+          // false but has no macOS-style paint-flush workaround on iOS.
+          // Symptom: JS runs to completion, phases post, but user sees no
+          // WebView content. Fix: make the WebView fully opaque with a
+          // solid dark background matching the shell HTML's body color.
+          // Shell already paints #1E1E1E, so there's no visual difference
+          // once rendered — we just stop the compositor from deciding the
+          // layer is invisible.
           androidLayerType="hardware"
-          opaque={false}
-          backgroundColor="transparent"
+          opaque
+          backgroundColor={tokens.bgBase}
         />
       ) : (
         // Asset still resolving — render nothing for a beat. The watchdog
@@ -516,7 +532,7 @@ export function LivePreviewInput({
             phase 6 · ready · t:3 i:5 → everything working (not the bug) */}
       <View style={styles.phaseIndicator} pointerEvents="none">
         <Text style={styles.phaseIndicatorText}>
-          {`${phaseDisplay} · t:${tapCount} i:${inputCount}`}
+          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount}`}
         </Text>
       </View>
       {useFallback && (
@@ -542,10 +558,10 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: tokens.bgBase,
   },
   webViewContainer: {
-    backgroundColor: 'transparent',
+    backgroundColor: tokens.bgBase,
   },
   errorBanner: {
     position: 'absolute',
