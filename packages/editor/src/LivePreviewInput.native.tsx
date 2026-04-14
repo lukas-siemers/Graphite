@@ -129,43 +129,46 @@ true;
 // Build 85: bumped to v85 so stale files from Build 82-84 (old editor.html
 // with inline scripts) are isolated. A fresh cache dir guarantees no leftover
 // state from the prior broken delivery path.
-const EDITOR_DIR_NAME = 'graphite-editor-v85';
+// Bumped to v86 so the Build 85 dir (no HTML file on disk) is isolated from
+// Build 86's directory (HTML file back on disk).
+const EDITOR_DIR_NAME = 'graphite-editor-v86';
 
 type EditorAssets = {
-  // baseUrl passed to WebView source.html. <script src="editor-runtime.js">
-  // resolves relative to this when the HTML loads via WKWebView
-  // loadHTMLString(_:baseURL:).
-  baseUrl: string;
+  htmlUri: string;
 };
 
-// Build 85: only the runtime needs to be on disk. The HTML shell is passed
-// inline via source.html + baseUrl, which uses WKWebView.loadHTMLString
-// instead of loadFileURL — more permissive for sibling file resource
-// resolution. Build 82-84 wrote the HTML to disk and pointed source at a
-// file:// URI; WKWebView silently refused to load the body (stage 0 fired
-// from BRIDGE_SHIM against an empty initial document, no inline scripts
-// ever ran).
+// Build 86: all four files on disk; WebView loads via source={{uri}} which
+// on iOS maps to WKWebView.loadFileURL(_:allowingReadAccessTo:) — this
+// permits same-directory sibling loads for the three external <script src>
+// tags. Build 85's source.html+baseUrl approach used loadHTMLString which
+// has tighter cross-origin rules that blocked sibling file:// subresource
+// loads on iOS. onLoadEnd fired in 85 (the HTML loaded inline) but no
+// script executed because the external scripts couldn't be fetched.
 let assetsPromise: Promise<EditorAssets> | null = null;
 async function ensureEditorAssets(): Promise<EditorAssets> {
   if (assetsPromise) return assetsPromise;
   assetsPromise = (async () => {
     const baseDir = FileSystem.cacheDirectory;
     if (!baseDir) {
-      // Should never happen on iOS/Android, but the type is nullable.
       throw new Error('FileSystem.cacheDirectory unavailable');
     }
     const editorDir = baseDir + EDITOR_DIR_NAME + '/';
+    const htmlPath = editorDir + 'editor.html';
     const runtimePath = editorDir + 'editor-runtime.js';
     const preRuntimePath = editorDir + 'editor-pre-runtime.js';
     const bootstrapPath = editorDir + 'editor-bootstrap.js';
 
     await FileSystem.makeDirectoryAsync(editorDir, { intermediates: true });
 
-    // Always write pre-runtime + bootstrap — they're tiny and may change
-    // between app versions. The big runtime bundle gets a size-based guard.
+    // Always write the HTML shell + pre-runtime + bootstrap — they're small
+    // and may legitimately change between app versions.
+    const shellHtml = buildEditorHtmlShell();
+    await FileSystem.writeAsStringAsync(htmlPath, shellHtml);
     await FileSystem.writeAsStringAsync(preRuntimePath, EDITOR_PRE_RUNTIME_SCRIPT);
     await FileSystem.writeAsStringAsync(bootstrapPath, EDITOR_BOOTSTRAP_SCRIPT);
 
+    // Big runtime gets a size-based guard since rewriting every mount is
+    // a noticeable delay.
     const runtimeInfo = await FileSystem.getInfoAsync(runtimePath);
     const expectedSize = CM6_BUNDLE.length;
     const needsWrite =
@@ -175,7 +178,7 @@ async function ensureEditorAssets(): Promise<EditorAssets> {
       await FileSystem.writeAsStringAsync(runtimePath, CM6_BUNDLE);
     }
 
-    return { baseUrl: editorDir };
+    return { htmlUri: htmlPath };
   })().catch((err) => {
     assetsPromise = null;
     throw err;
@@ -203,15 +206,18 @@ export function LivePreviewInput({
   // Build 78+. Hiding errors behind __DEV__ meant production users saw a
   // silent dead editor when the WebView bundle failed.
   const [webViewError, setWebViewError] = useState<string | null>(null);
-  // Build 85: baseUrl for source.html. The inline HTML shell passed via
-  // source.html uses this as the base URL for relative resource resolution.
-  // <script src="editor-runtime.js"> resolves against it.
-  const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  // Build 86: file:// URI to the on-disk HTML shell. All four editor
+  // assets (html + 3 scripts) live in the same directory so relative
+  // <script src> tags resolve as siblings via WKWebView.loadFileURL.
+  const [sourceUri, setSourceUri] = useState<string | null>(null);
   // Build 82: last bootstrap phase + label observed. The 5s ready watchdog
   // reports both fields in the red banner if the ready handshake never
   // arrives, so TestFlight logs pinpoint the exact stall point.
   const lastPhaseRef = useRef<number | null>(null);
   const lastPhaseLabelRef = useRef<string>('none');
+  // Build 86: load events tracked separately so they don't overwrite phase
+  // markers in the watchdog banner (Codex-flagged).
+  const lastLoadEventRef = useRef<string>('none');
   const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs to latest prop values — same pattern as the web component, needed so
@@ -247,7 +253,7 @@ export function LivePreviewInput({
     ensureEditorAssets()
       .then((assets) => {
         if (cancelled) return;
-        setBaseUrl(assets.baseUrl);
+        setSourceUri(assets.htmlUri);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -264,13 +270,14 @@ export function LivePreviewInput({
   // resolved. If the WebView never posts 'ready' within 5s, surface the
   // last bootstrap phase we observed so we know exactly where boot stalled.
   useEffect(() => {
-    if (!baseUrl) return;
+    if (!sourceUri) return;
     readyTimerRef.current = setTimeout(() => {
       if (!readyRef.current) {
         const phase = lastPhaseRef.current ?? -1;
         const label = lastPhaseLabelRef.current;
+        const loadEvent = lastLoadEventRef.current;
         setWebViewError(
-          `Editor bootstrap timeout — last stage: ${phase} (${label})`,
+          `Editor bootstrap timeout — phase ${phase} (${label}); WebView load ${loadEvent}`,
         );
       }
     }, 5000);
@@ -280,17 +287,15 @@ export function LivePreviewInput({
         readyTimerRef.current = null;
       }
     };
-  }, [baseUrl]);
+  }, [sourceUri]);
 
-  // Build 85: inline HTML + baseUrl. WKWebView loadHTMLString(_:baseURL:)
-  // accepts file:// baseURLs with permissive sibling-resource access — so
-  // <script src="editor-runtime.js"> inside the shell resolves to the
-  // runtime we wrote to the cache dir. Unlike loadFileURL, this doesn't
-  // need allowingReadAccessTo to be set precisely.
-  const shellHtml = useMemo(() => buildEditorHtmlShell(), []);
+  // Build 86: file:// URI source. WKWebView.loadFileURL grants same-dir
+  // read access so `<script src="editor-pre-runtime.js">` etc. load from
+  // disk. Build 85 used loadHTMLString+baseUrl which didn't grant that
+  // permission; HTML loaded (onLoadEnd fired) but no scripts executed.
   const source = useMemo(
-    () => (baseUrl ? ({ html: shellHtml, baseUrl } as const) : null),
-    [baseUrl, shellHtml],
+    () => (sourceUri ? ({ uri: sourceUri } as const) : null),
+    [sourceUri],
   );
 
   function postToFrame(msg: object) {
@@ -479,10 +484,10 @@ export function LivePreviewInput({
             }
           }}
           onLoadStart={(e: WebViewNativeErrorEvent) => {
-            lastPhaseLabelRef.current = 'webview-onLoadStart';
+            lastLoadEventRef.current = 'onLoadStart';
           }}
           onLoadEnd={(e: WebViewNativeErrorEvent) => {
-            lastPhaseLabelRef.current = 'webview-onLoadEnd';
+            lastLoadEventRef.current = 'onLoadEnd';
           }}
           scrollEnabled={false}
           hideKeyboardAccessoryView
