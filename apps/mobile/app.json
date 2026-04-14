@@ -3,7 +3,7 @@
     "name": "Graphite",
     "slug": "graphite",
     "scheme": "graphite",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#131313",
@@ -25,7 +25,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "100",
+      "buildNumber": "101",
       "requiresFullScreen": true,
       "jsEngine": "hermes",
       "infoPlist": {

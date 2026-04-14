@@ -129,6 +129,15 @@ export function LivePreviewInput({
   // indicator rerenders as boot progresses. Visible on device in both
   // success and failure paths — screenshot tells us exactly where boot got.
   const [phaseDisplay, setPhaseDisplay] = useState<string>('phase - (waiting)');
+  // Build 101: diagnostic counters for the post-ready "can't type" bug.
+  // tapCount = onTouchStart fires on the RN side (do RN taps land?).
+  // inputCount = CM6 update-listener fires inside the WebView (does CM6
+  // see any input events?). Displayed next to phaseDisplay as
+  // "... · t:N i:M" so one screenshot tells us whether the failure is
+  // taps not reaching the WebView, or taps reaching but CM6 not getting
+  // keystrokes.
+  const [tapCount, setTapCount] = useState(0);
+  const [inputCount, setInputCount] = useState(0);
 
   // Build 97: assetUri retained as a state shape only so the watchdog
   // banner format stays compatible with prior diagnostics. It's no longer
@@ -313,6 +322,13 @@ export function LivePreviewInput({
         }
         break;
 
+      case 'input-activity':
+        // Build 101: posted by the CM6 bootstrap's updateListener any time
+        // the editor document changes or selection moves. Lets us see on-
+        // device whether CM6 is receiving any keystrokes after ready.
+        setInputCount((n) => n + 1);
+        break;
+
       case 'command-applied':
         onCommandAppliedRef.current?.();
         break;
@@ -376,14 +392,42 @@ export function LivePreviewInput({
       pointerEvents={inkMode ? 'none' : 'auto'}
       onTouchStart={() => {
         if (inkMode) return;
+        setTapCount((n) => n + 1);
         onFocusRef.current?.();
-        // WKWebView OS policy (WebKit #195884) requires focus() to originate
-        // from an evaluateJavaScript call on the RN side before the keyboard
-        // is allowed to show. `keyboardDisplayRequiresUserAction={false}` only
-        // covers RN-initiated focus. Re-posting a 'focus' message through
-        // injectJavaScript satisfies that contract.
+        // Build 101: direct .cm-content.focus() injection. Previously we
+        // dispatched a MessageEvent through postToFrame and relied on the
+        // bootstrap's message listener to call view.focus(). The indirection
+        // drops out of the evaluateJavaScript synchronous context, which
+        // (combined with WKWebView's keyboard policy) can silently prevent
+        // the iOS keyboard from showing even when keyboardDisplayRequiresUserAction
+        // is false. Calling .cm-content.focus() directly in the injection
+        // keeps focus inside the RN-originated evaluateJavaScript window.
+        // Also set a collapsed selection at offset 0 so CM6 syncs its
+        // internal selection state with the native caret on first focus.
         if (readyRef.current) {
-          postToFrame({ type: 'focus' });
+          webViewRef.current?.injectJavaScript(`
+            (function(){
+              try {
+                var el = document.querySelector('.cm-content');
+                if (el) {
+                  el.focus();
+                  var sel = window.getSelection && window.getSelection();
+                  if (sel && el.firstChild) {
+                    var range = document.createRange();
+                    range.setStart(el, 0);
+                    range.collapse(true);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                  }
+                }
+              } catch (e) {
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'focus-inject:' + String(e) }));
+                }
+              }
+            })();
+            true;
+          `);
         }
       }}
     >
@@ -463,12 +507,17 @@ export function LivePreviewInput({
       {webViewError !== null && Platform.OS !== 'web' && (
         <Text style={styles.errorBanner}>WebView error: {webViewError}</Text>
       )}
-      {/* Build 100: always-on phase indicator. Shows the deepest boot phase
-          the WebView has reported. Visible during both successful boot and
-          failure — a TestFlight screenshot tells us exactly where boot got.
-          'phase 6 · ready' = rich editor is alive. Anything lower = stuck. */}
+      {/* Build 100: always-on phase indicator, extended in Build 101 with
+          tap/input counters. Shows the deepest boot phase plus live counts
+          of RN-side onTouchStart events (t:N) and CM6 input-activity
+          events (i:M). Screenshot interpretation:
+            phase 6 · ready · t:0 i:0 → editor booted but no taps landing
+            phase 6 · ready · t:3 i:0 → taps land but CM6 not getting input
+            phase 6 · ready · t:3 i:5 → everything working (not the bug) */}
       <View style={styles.phaseIndicator} pointerEvents="none">
-        <Text style={styles.phaseIndicatorText}>{phaseDisplay}</Text>
+        <Text style={styles.phaseIndicatorText}>
+          {`${phaseDisplay} · t:${tapCount} i:${inputCount}`}
+        </Text>
       </View>
       {useFallback && (
         <View style={styles.deadStateOverlay} pointerEvents="none">

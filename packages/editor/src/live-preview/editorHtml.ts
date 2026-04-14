@@ -1305,6 +1305,14 @@ const view = capturedView = new EditorView({
           const formats = detectActiveFormats(update.state);
           post({ type: 'active-formats', formats });
         }
+        // Build 101 diagnostic: any time CM6 sees doc change, selection move,
+        // or focus transition, ping the host so the on-device indicator can
+        // surface a live input counter. If this stays at 0 after user taps,
+        // CM6 is not receiving any input events — the failure is in
+        // event plumbing between WKWebView and CM6's contentEditable.
+        if (update.docChanged || update.selectionSet || update.focusChanged) {
+          post({ type: 'input-activity' });
+        }
       }),
       EditorView.theme({
         '&': { background: 'transparent' },
