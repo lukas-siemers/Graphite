@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 // Build 116: GestureHandlerRootView must wrap the entire app tree for
 // react-native-gesture-handler's native gesture recognizers to work on
 // iOS. Without it, GestureDetector silently no-ops (touches fall through
@@ -80,6 +81,21 @@ export default function RootLayout() {
   const [stage, setStage] = useState('root-mounted');
   const [error, setError] = useState<string | null>(null);
   const [AuthGate, setAuthGate] = useState<AuthGateComponent | null>(null);
+
+  // Build 121: register the 4 selectable app fonts. iOS also picks these up
+  // via the expo-font plugin in app.json (Info.plist UIAppFonts); the hook
+  // keeps Android + Expo Go + web working off the same asset paths. `require`
+  // is inline so metro can resolve the asset IDs at bundle time.
+  useFonts({
+    'Newsreader-Regular': require('../assets/fonts/Newsreader-Regular.ttf'),
+    'Newsreader-Bold': require('../assets/fonts/Newsreader-Bold.ttf'),
+    'MPLUSRounded1c-Regular': require('../assets/fonts/MPLUSRounded1c-Regular.ttf'),
+    'MPLUSRounded1c-Bold': require('../assets/fonts/MPLUSRounded1c-Bold.ttf'),
+    'IBMPlexSansCondensed-Regular': require('../assets/fonts/IBMPlexSansCondensed-Regular.ttf'),
+    'IBMPlexSansCondensed-Bold': require('../assets/fonts/IBMPlexSansCondensed-Bold.ttf'),
+    'Raleway-Regular': require('../assets/fonts/Raleway-Regular.otf'),
+    'Raleway-Bold': require('../assets/fonts/Raleway-Bold.otf'),
+  });
 
   useEffect(() => {
     let active = true;

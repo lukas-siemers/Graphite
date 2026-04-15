@@ -9,6 +9,7 @@ import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
 import FolderTree from './FolderTree';
 import TagList from './TagList';
+import { SettingsModal } from '../settings/SettingsModal';
 
 // On web, Alert.alert is unreliable — use window.confirm directly instead.
 function webConfirmDelete(
@@ -44,6 +45,7 @@ export default function Sidebar() {
   const activeFolderId = useFolderStore((s) => s.activeFolderId);
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const didAutoExpandRef = useRef(false);
   useEffect(() => {
     if (didAutoExpandRef.current || notebooks.length === 0) return;
@@ -497,16 +499,27 @@ export default function Sidebar() {
         </View>
         <Pressable
           hitSlop={10}
-          onPress={async () => {
-            try {
-              const { getSupabaseClient } = await import('@graphite/sync');
-              await getSupabaseClient().auth.signOut();
-            } catch (_) {}
-          }}
+          onPress={() => setSettingsOpen(true)}
+          accessibilityLabel="Open settings"
+          style={({ pressed }) => ({
+            width: 30,
+            height: 30,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: pressed ? tokens.bgHover : 'transparent',
+          })}
         >
-          <Text style={{ fontSize: 11, color: tokens.textHint, fontWeight: '600' }}>LOGOUT</Text>
+          <MaterialCommunityIcons
+            name="cog-outline"
+            size={18}
+            color={tokens.textMuted}
+          />
         </Pressable>
       </View>
+      <SettingsModal
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </View>
   );
 }

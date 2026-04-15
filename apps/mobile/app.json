@@ -25,7 +25,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.graphite.app",
-      "buildNumber": "120",
+      "buildNumber": "121",
       "requiresFullScreen": true,
       "jsEngine": "hermes",
       "infoPlist": {
@@ -38,7 +38,22 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      "./plugins/force-sync-turbomodule"
+      "./plugins/force-sync-turbomodule",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Newsreader-Regular.ttf",
+            "./assets/fonts/Newsreader-Bold.ttf",
+            "./assets/fonts/IBMPlexSansCondensed-Regular.ttf",
+            "./assets/fonts/IBMPlexSansCondensed-Bold.ttf",
+            "./assets/fonts/MPLUSRounded1c-Regular.ttf",
+            "./assets/fonts/MPLUSRounded1c-Bold.ttf",
+            "./assets/fonts/Raleway-Regular.otf",
+            "./assets/fonts/Raleway-Bold.otf"
+          ]
+        }
+      ]
     ],
     "newArchEnabled": true,
     "web": {

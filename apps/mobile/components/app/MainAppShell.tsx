@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, View, Text, Pressable, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, TextInput, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -26,6 +26,7 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
+import { useFontStore } from '../../stores/use-font-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
 import { getCurrentSession } from '../../components/auth/AuthGate';
 import Sidebar from '../../components/sidebar/Sidebar';
@@ -294,6 +295,10 @@ export default function MainAppShell() {
         setOnboardingDone(true);
         setStartupStage('db-data-load');
         await loadAppData(db);
+        // Build 121: load the saved app-wide font choice from SQLite settings
+        // before the main shell renders, so the first paint uses the user's
+        // selected font instead of System fallback.
+        await useFontStore.getState().hydrate();
         setStartupStage('db-ready');
         setDbReady(true);
       })
@@ -308,6 +313,28 @@ export default function MainAppShell() {
       mounted = false;
     };
   }, []);
+
+  // Build 121: app-wide font application. Every <Text> / <TextInput> in the
+  // RN tree inherits the selected fontFamily via Text.defaultProps (the only
+  // mechanism RN offers for "cascade" since fontFamily does NOT inherit from
+  // parent Views). Per-instance fontFamily still wins, which is what we want
+  // for the CM6-side editor bundle (that has its own font system).
+  const regularFamily = useFontStore((s) => s.regularFamily);
+  useEffect(() => {
+    type WithDefaults = { defaultProps?: { style?: Record<string, unknown> } };
+    const T = Text as unknown as WithDefaults;
+    const TI = TextInput as unknown as WithDefaults;
+    T.defaultProps = T.defaultProps || {};
+    T.defaultProps.style = {
+      ...(T.defaultProps.style || {}),
+      fontFamily: regularFamily,
+    };
+    TI.defaultProps = TI.defaultProps || {};
+    TI.defaultProps.style = {
+      ...(TI.defaultProps.style || {}),
+      fontFamily: regularFamily,
+    };
+  }, [regularFamily]);
 
   async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
     let notebooks = await getNotebooks(db);
