@@ -143,6 +143,14 @@ export async function deleteNotebook(
   const deletedNoteIds = noteRows.map((r: { id: string }) => r.id);
 
   await db.withTransactionAsync(async () => {
+    // Build 109: tombstone the notebook delete so the sync engine can
+    // propagate to Supabase. ON DELETE CASCADE on Postgres side removes
+    // folders + notes that belong to this notebook, so we only tombstone
+    // the notebook itself.
+    await db.runAsync(
+      'INSERT OR REPLACE INTO pending_deletes (id, table_name, deleted_at) VALUES (?, ?, ?)',
+      [id, 'notebooks', Date.now()],
+    );
     await db.runAsync('DELETE FROM notes WHERE notebook_id = ?', [id]);
     await db.runAsync('DELETE FROM folders WHERE notebook_id = ?', [id]);
     await db.runAsync('DELETE FROM notebooks WHERE id = ?', [id]);

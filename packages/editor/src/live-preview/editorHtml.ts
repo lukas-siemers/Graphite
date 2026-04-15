@@ -1344,18 +1344,19 @@ const view = capturedView = new EditorView({
           post({ type: 'input-activity' });
         }
       }),
-      // Build 105: comprehensive editor theme. CM6's default stylesheet
-      // paints .cm-editor and .cm-content with a near-white background;
-      // Build 102's minimal shell stripped the old global !important
-      // overrides and left that default visible — hence the white page
-      // the user reported. Theme() injects higher-specificity scoped
-      // CSS so the editor surface is transparent to the shell body
-      // (#1E1E1E) without reintroducing the Build 99 layout collapse
-      // (no min-height:100vh, no overflow:visible on .cm-scroller).
+      // Build 109: dark editor theme with { dark: true } flag. Passing
+      // dark:true as the second argument tells CM6 to merge this theme
+      // with its DARK baseTheme defaults rather than the LIGHT ones,
+      // which was the root cause of the white background surviving every
+      // override attempt in Builds 105-108. CM6's baseTheme ships paired
+      // light/dark variants; the { dark: true } flag flips the base
+      // variant, so our overrides compose with dark defaults instead of
+      // fighting light ones. Solid #131313 backgrounds (not transparent)
+      // also dodge iPad WKWebView's opaque/transparent compositor skip.
       EditorView.theme({
         '&': {
-          background: 'transparent',
-          color: '#DCDDDE',
+          backgroundColor: '#131313',
+          color: '#FFFFFF',
           fontSize: '16px',
           lineHeight: '24px',
           outline: 'none',
@@ -1367,11 +1368,12 @@ const view = capturedView = new EditorView({
           border: 'none',
         },
         '.cm-scroller': {
-          background: 'transparent',
+          backgroundColor: '#131313',
           fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif',
         },
         '.cm-content': {
-          background: 'transparent',
+          backgroundColor: '#131313',
+          color: '#FFFFFF',
           caretColor: '#FF6A00',
           padding: '24px 0 48px 0',
           whiteSpace: 'pre-wrap',
@@ -1382,23 +1384,26 @@ const view = capturedView = new EditorView({
           borderLeftWidth: '3px',
         },
         '.cm-gutters': {
-          background: 'transparent',
+          backgroundColor: '#131313',
           border: 'none',
         },
         '.cm-line': {
           padding: '0',
         },
         '.cm-selectionBackground': {
-          background: 'rgba(242,133,0,0.25)',
+          backgroundColor: 'rgba(242,133,0,0.25)',
         },
         '&.cm-focused .cm-selectionBackground': {
-          background: 'rgba(242,133,0,0.3)',
+          backgroundColor: 'rgba(242,133,0,0.3)',
         },
         '.cm-placeholder': {
           color: '#8A8F98',
           fontStyle: 'italic',
         },
-      }),
+        '.cm-activeLine': {
+          backgroundColor: '#131313',
+        },
+      }, { dark: true }),
     ],
   }),
 });
@@ -1431,34 +1436,17 @@ try {
   post({ type: 'error', message: 'attach:' + String(e && e.message || e) });
 }
 
-// Build 108: post-CM6 style injection. The root cause of Builds 105-107's
-// failed color fixes was CSS source order: CM6 uses style-mod to inject
-// its theme stylesheets dynamically AFTER the shell HTML parses, so
-// when our shell <style> rules and CM6's baseTheme rules both use
-// !important and have equal specificity, CM6's later-injected rules
-// win the tie. This block appends a <style> element to document.head
-// AFTER new EditorView(...) has run — putting our rules last in source
-// order and flipping the tie in our favor.
-try {
-  var bgStyleEl = document.createElement('style');
-  bgStyleEl.setAttribute('data-graphite', 'post-cm6-overrides');
-  bgStyleEl.textContent = [
-    '.cm-editor,.cm-editor *{background-color:transparent !important;background:transparent !important;}',
-    '.cm-editor{color:#FFFFFF !important;}',
-    '.cm-content{color:#FFFFFF !important;caret-color:#FF6A00 !important;}',
-    '.cm-cursor,.cm-cursor-primary{border-left-color:#FF6A00 !important;border-left-width:3px !important;}',
-    '.cm-selectionBackground{background:rgba(242,133,0,0.25) !important;}',
-    '.cm-focused .cm-selectionBackground{background:rgba(242,133,0,0.3) !important;}',
-    '.cm-placeholder{color:#8A8F98 !important;font-style:italic !important;}',
-    '.cm-gutters{background:transparent !important;border:none !important;}',
-    '.cm-activeLine,.cm-activeLineGutter{background:transparent !important;}',
-    '.cm-line{padding:0 !important;}',
-  ].join('\n');
-  document.head.appendChild(bgStyleEl);
-  postPhase(5.1, 'post-cm6-style-injected');
-} catch (e) {
-  post({ type: 'error', message: 'style-inject:' + String(e && e.message || e) });
-}
+// Build 109: Build 108's post-CM6 style injection was REVERTED. That block
+// appended a <style> element to document.head with a cm-editor * universal
+// selector + background-color: transparent !important on every CM6
+// descendant. It was meant to win source-order ties against CM6's
+// late-injected baseTheme rules — but in practice it regressed the editor:
+// user could no longer type after Build 108 shipped. The universal
+// cm-editor * selector was too aggressive and appears to have broken
+// something internal to CM6's contentEditable input pipeline. Dark theming
+// is handled instead via EditorView.theme({...}, { dark: true }) above,
+// which tells CM6 to apply its dark-theme baseline rather than the light
+// default, and via the shell HTML's color-scheme:dark declaration.
 
 // ---------------------------------------------------------------------------
 // Message bridge

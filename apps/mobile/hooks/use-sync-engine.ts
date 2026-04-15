@@ -24,6 +24,10 @@ import {
   deleteFolder,
   getFolders,
 } from '@graphite/db';
+import {
+  getPendingDeletes,
+  clearPendingDelete,
+} from '@graphite/db';
 
 export interface UseSyncEngineResult {
   syncState: SyncState;
@@ -129,22 +133,49 @@ export function useSyncEngine(
         })),
       ];
 
-      if (records.length === 0) return;
+      // Build 109: tombstones for local deletes live in pending_deletes.
+      // We still want to propagate those even when there are no dirty
+      // upsert records, so fetch them BEFORE the early-return guard.
+      const tombstones = await getPendingDeletes(db);
+
+      if (records.length === 0 && tombstones.length === 0) return;
 
       setSyncState('syncing');
-      const result: SyncResult = await engine.push(records);
 
-      // Mark successfully pushed records as clean.
-      const errorIds = new Set(result.errors.map((e) => e.record));
+      let result: SyncResult = {
+        pushed: 0,
+        pulled: 0,
+        conflicts: 0,
+        errors: [],
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      };
 
-      for (const nb of dirtyNotebooks) {
-        if (!errorIds.has(nb.id)) await markNotebookClean(db, nb.id);
+      if (records.length > 0) {
+        result = await engine.push(records);
+        const errorIds = new Set(result.errors.map((e) => e.record));
+
+        for (const nb of dirtyNotebooks) {
+          if (!errorIds.has(nb.id)) await markNotebookClean(db, nb.id);
+        }
+        for (const f of dirtyFolders) {
+          if (!errorIds.has(f.id)) await markFolderClean(db, f.id);
+        }
+        for (const n of dirtyNotes) {
+          if (!errorIds.has(n.id)) await markNoteClean(db, n.id);
+        }
       }
-      for (const f of dirtyFolders) {
-        if (!errorIds.has(f.id)) await markFolderClean(db, f.id);
-      }
-      for (const n of dirtyNotes) {
-        if (!errorIds.has(n.id)) await markNoteClean(db, n.id);
+
+      // Replay tombstones. On successful Supabase DELETE the tombstone is
+      // cleared; on failure it stays so the next push cycle retries.
+      for (const tomb of tombstones) {
+        const { error: delErr } = await engine.deleteRecord(
+          tomb.tableName,
+          tomb.id,
+        );
+        if (!delErr) {
+          await clearPendingDelete(db, tomb.id, tomb.tableName);
+        }
       }
 
       setSyncState(result.errors.length > 0 ? 'error' : 'idle');

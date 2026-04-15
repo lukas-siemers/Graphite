@@ -133,6 +133,34 @@ export class SyncEngine {
   }
 
   /**
+   * Build 109: propagate a local hard-delete to Supabase. Called by the
+   * sync engine's push cycle for each tombstone row in `pending_deletes`.
+   * RLS on the remote tables ensures only the user's own rows can be
+   * removed; Postgres ON DELETE CASCADE handles nested rows (folders and
+   * notes under a notebook, notes under a folder) in a single statement.
+   *
+   * Returns the Supabase error (if any) so the caller can keep the local
+   * tombstone on failure and retry next cycle.
+   */
+  async deleteRecord(
+    table: 'notes' | 'folders' | 'notebooks',
+    id: string,
+  ): Promise<{ error: Error | null }> {
+    try {
+      const { error } = await this.supabase
+        .from(table)
+        .delete()
+        .eq('id', id)
+        .eq('user_id', this.userId);
+      if (error) return { error: new Error(error.message) };
+      return { error: null };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { error: new Error(message) };
+    }
+  }
+
+  /**
    * Pull remote records updated since `sinceMs` (Unix ms timestamp).
    * For each table, fetches rows where updated_at > sinceMs, runs
    * conflict resolution, and returns the remote-winning rows via the

@@ -336,6 +336,14 @@ export async function deleteNote(
       [before.rowid, before.title, before.body],
     );
   }
+  // Build 109: emit a tombstone BEFORE the hard delete so the sync engine
+  // can propagate the delete to Supabase. Without this, the local row
+  // vanishes and there's no record left for the push cycle to act on —
+  // Supabase ends up with zombie rows forever.
+  await db.runAsync(
+    'INSERT OR REPLACE INTO pending_deletes (id, table_name, deleted_at) VALUES (?, ?, ?)',
+    [id, 'notes', Date.now()],
+  );
   await db.runAsync('DELETE FROM notes WHERE id = ?', [id]);
 }
 

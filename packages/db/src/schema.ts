@@ -105,6 +105,24 @@ export const ADD_NOTE_GRAPHITE_BLOB = `ALTER TABLE notes ADD COLUMN graphite_blo
 export const ADD_NOTE_CANVAS_VERSION = `ALTER TABLE notes ADD COLUMN canvas_version INTEGER DEFAULT 1;`;
 export const ADD_NOTE_FTS_BODY = `ALTER TABLE notes ADD COLUMN fts_body TEXT;`;
 
+// Migration 18 — delete propagation tombstones
+// When a note/folder/notebook is deleted locally we hard-delete the row
+// immediately for snappy UX (no need to filter is_deleted across every
+// read query), but we also record a tombstone in pending_deletes so the
+// sync engine can propagate the delete to Supabase on its next cycle.
+// On successful Supabase DELETE the tombstone is cleared. While the
+// tombstone is present the delete is guaranteed to be replayed (offline
+// delete + reconnect works transparently). table_name is 'notes' |
+// 'folders' | 'notebooks'. Composite PK (id, table_name) so the same id
+// across tables stays unambiguous.
+export const CREATE_PENDING_DELETES = `
+CREATE TABLE IF NOT EXISTS pending_deletes (
+  id TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  deleted_at INTEGER NOT NULL,
+  PRIMARY KEY (id, table_name)
+);`;
+
 export const ALL_MIGRATIONS = [
   CREATE_NOTEBOOKS,
   CREATE_FOLDERS,
@@ -123,4 +141,5 @@ export const ALL_MIGRATIONS = [
   ADD_NOTE_GRAPHITE_BLOB,
   ADD_NOTE_CANVAS_VERSION,
   ADD_NOTE_FTS_BODY,
+  CREATE_PENDING_DELETES,
 ] as const;

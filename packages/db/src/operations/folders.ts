@@ -170,6 +170,17 @@ export async function deleteFolder(
   const deletedNoteIds = noteRows.map((r: { id: string }) => r.id);
 
   await db.withTransactionAsync(async () => {
+    // Build 109: emit a tombstone for the TOP-LEVEL folder delete only.
+    // Supabase has ON DELETE CASCADE on folders.parent_id and
+    // notes.folder_id references — deleting the root folder remotely
+    // takes care of the whole subtree in one call, so we don't need
+    // to emit tombstones for every descendant (that would produce
+    // N round-trips for what Postgres does in one statement).
+    const now = Date.now();
+    await db.runAsync(
+      'INSERT OR REPLACE INTO pending_deletes (id, table_name, deleted_at) VALUES (?, ?, ?)',
+      [id, 'folders', now],
+    );
     if (deletedNoteIds.length > 0) {
       const noteHolders = deletedNoteIds.map(() => '?').join(',');
       await db.runAsync(
