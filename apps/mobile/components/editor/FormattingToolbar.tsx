@@ -1,4 +1,5 @@
-import { View, Pressable, Text, ScrollView } from 'react-native';
+import { useMemo, useState } from 'react';
+import { View, Pressable, Text, ScrollView, Modal } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
@@ -75,16 +76,80 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
 
 // Build 117: conditionally render size + color pickers only when inkMode
 // is active. Keeps the toolbar minimal when user is just writing text.
+// Build 118: adds the eraser tool toggle + replaces the swatch row with a
+// popup color-picker button.
 function InkControlsIfActive() {
   const inkMode = useEditorStore((s) => s.inkMode);
   if (!inkMode) return null;
   return (
     <>
       <Separator />
+      <InkToolButtons />
+      <Separator />
       <InkSizeButtons />
       <Separator />
-      <InkColorSwatches />
+      <InkColorPickerButton />
     </>
+  );
+}
+
+// Build 118: pen / eraser tool toggle. Two mutually-exclusive buttons that
+// switch the active drawing tool. Pen is default; eraser deletes whole
+// strokes under the pointer (stroke-level erase).
+function InkToolButtons() {
+  const inkTool = useEditorStore((s) => s.inkTool);
+  const setInkTool = useEditorStore((s) => s.setInkTool);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <Pressable
+        onPress={() => setInkTool('pen')}
+        accessibilityLabel="Pen"
+        accessibilityState={{ selected: inkTool === 'pen' }}
+        style={({ pressed }) => ({
+          width: 30,
+          height: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor:
+            inkTool === 'pen'
+              ? tokens.accentTint
+              : pressed
+              ? tokens.bgBright
+              : 'transparent',
+          marginHorizontal: 1,
+        })}
+      >
+        <MaterialCommunityIcons
+          name="fountain-pen-tip"
+          size={16}
+          color={inkTool === 'pen' ? tokens.accent : tokens.textMuted}
+        />
+      </Pressable>
+      <Pressable
+        onPress={() => setInkTool('eraser')}
+        accessibilityLabel="Eraser"
+        accessibilityState={{ selected: inkTool === 'eraser' }}
+        style={({ pressed }) => ({
+          width: 30,
+          height: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor:
+            inkTool === 'eraser'
+              ? tokens.accentTint
+              : pressed
+              ? tokens.bgBright
+              : 'transparent',
+          marginHorizontal: 1,
+        })}
+      >
+        <MaterialCommunityIcons
+          name="eraser"
+          size={16}
+          color={inkTool === 'eraser' ? tokens.accent : tokens.textMuted}
+        />
+      </Pressable>
+    </View>
   );
 }
 
@@ -172,50 +237,188 @@ function InkSizeButtons() {
   );
 }
 
-// Build 117: pencil color swatches. Render only when inkMode=true.
-const INK_COLORS = [
-  '#FFFFFF',
-  '#F28500',
-  '#F44336',
-  '#A8D060',
-  '#4FC3F7',
+// Build 118: single color-indicator button that opens a popup picker
+// modal. Replaces the fixed swatch strip — users now reach a full HSL
+// grid plus a grayscale strip, keeping the toolbar compact when idle.
+function InkColorPickerButton() {
+  const inkColor = useEditorStore((s) => s.inkColor);
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityLabel="Pick pencil color"
+        style={({ pressed }) => ({
+          width: 30,
+          height: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: pressed ? tokens.bgBright : 'transparent',
+          marginHorizontal: 1,
+        })}
+      >
+        <View
+          style={{
+            width: 18,
+            height: 18,
+            backgroundColor: inkColor,
+            borderWidth: 1,
+            borderColor: tokens.border,
+          }}
+        />
+      </Pressable>
+      <InkColorPickerModal open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+// Build 118: HSL-sampled color grid. 12 hues × 5 lightness levels gives
+// 60 colors, plus a 9-step grayscale row. Flat squares, no gradients —
+// matches the Digital Monolith design system while still giving the user
+// a real spectrum of color choices.
+const HUE_STEPS = 12;
+const LIGHTNESS_STEPS = [0.25, 0.42, 0.55, 0.7, 0.85] as const;
+const GRAYSCALE = [
   '#000000',
+  '#1C1C1C',
+  '#333333',
+  '#555555',
+  '#7A7A7A',
+  '#9E9E9E',
+  '#C4C4C4',
+  '#E2E2E2',
+  '#FFFFFF',
 ] as const;
 
-function InkColorSwatches() {
+function hslToHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(c * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
+}
+
+function InkColorPickerModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const inkColor = useEditorStore((s) => s.inkColor);
   const setInkColor = useEditorStore((s) => s.setInkColor);
+
+  const hueGrid = useMemo(() => {
+    const rows: string[][] = [];
+    for (const l of LIGHTNESS_STEPS) {
+      const row: string[] = [];
+      for (let i = 0; i < HUE_STEPS; i++) {
+        const h = (i * 360) / HUE_STEPS;
+        row.push(hslToHex(h, 0.85, l));
+      }
+      rows.push(row);
+    }
+    return rows;
+  }, []);
+
+  const selectedUpper = inkColor.toUpperCase();
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {INK_COLORS.map((color) => {
-        const selected = inkColor.toUpperCase() === color.toUpperCase();
-        return (
-          <Pressable
-            key={color}
-            onPress={() => setInkColor(color)}
-            accessibilityLabel={`Pencil color ${color}`}
-            accessibilityState={{ selected }}
+    <Modal
+      visible={open}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        onPress={onClose}
+        style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Pressable
+          // Swallow taps inside the panel so they don't close the modal.
+          onPress={() => {}}
+          style={{
+            backgroundColor: tokens.bgSidebar,
+            padding: 16,
+          }}
+        >
+          <Text
             style={{
-              width: 24,
-              height: 30,
-              alignItems: 'center',
-              justifyContent: 'center',
+              color: tokens.textMuted,
+              fontSize: 11,
+              letterSpacing: 0.5,
+              textTransform: 'uppercase',
+              marginBottom: 10,
             }}
           >
+            Pencil Color
+          </Text>
+
+          {hueGrid.map((row, rowIdx) => (
             <View
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 8,
-                backgroundColor: color,
-                borderWidth: selected ? 2 : 1,
-                borderColor: selected ? tokens.accent : tokens.border,
-              }}
-            />
-          </Pressable>
-        );
-      })}
-    </View>
+              key={rowIdx}
+              style={{ flexDirection: 'row', marginBottom: 2 }}
+            >
+              {row.map((color) => {
+                const isSelected = color === selectedUpper;
+                return (
+                  <Pressable
+                    key={color}
+                    onPress={() => {
+                      setInkColor(color);
+                      onClose();
+                    }}
+                    accessibilityLabel={`Color ${color}`}
+                    style={{
+                      width: 26,
+                      height: 26,
+                      marginRight: 2,
+                      backgroundColor: color,
+                      borderWidth: isSelected ? 2 : 0,
+                      borderColor: tokens.accent,
+                    }}
+                  />
+                );
+              })}
+            </View>
+          ))}
+
+          <View style={{ height: 8 }} />
+          <View style={{ flexDirection: 'row' }}>
+            {GRAYSCALE.map((color) => {
+              const isSelected = color === selectedUpper;
+              return (
+                <Pressable
+                  key={color}
+                  onPress={() => {
+                    setInkColor(color);
+                    onClose();
+                  }}
+                  accessibilityLabel={`Color ${color}`}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    marginRight: 2,
+                    backgroundColor: color,
+                    borderWidth: isSelected ? 2 : 1,
+                    borderColor: isSelected ? tokens.accent : tokens.border,
+                  }}
+                />
+              );
+            })}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 

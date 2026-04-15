@@ -44,6 +44,11 @@ interface EditorState {
    * button row (visible only when inkMode=true) writes to this.
    */
   inkWidth: number;
+  /**
+   * Build 118: currently-selected ink tool. 'pen' draws; 'eraser' deletes
+   * entire strokes under the pointer. Only meaningful while inkMode=true.
+   */
+  inkTool: 'pen' | 'eraser';
   dispatchCommand: (cmd: FormatCommand) => void;
   clearCommand: () => void;
   setActiveFormats: (formats: FormatCommand[]) => void;
@@ -55,6 +60,7 @@ interface EditorState {
   incrementInkResponderGrant: () => void;
   setInkColor: (color: string) => void;
   setInkWidth: (width: number) => void;
+  setInkTool: (tool: 'pen' | 'eraser') => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -68,6 +74,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   inkResponderGrantCount: 0,
   inkColor: '#FFFFFF',
   inkWidth: 2.5,
+  inkTool: 'pen',
   dispatchCommand: (cmd) => set({ pendingCommand: cmd }),
   clearCommand: () => set({ pendingCommand: null }),
   setActiveFormats: (formats) => set({ activeFormats: formats }),
@@ -81,4 +88,5 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((s) => ({ inkResponderGrantCount: s.inkResponderGrantCount + 1 })),
   setInkColor: (color) => set({ inkColor: color }),
   setInkWidth: (width) => set({ inkWidth: width }),
+  setInkTool: (tool) => set({ inkTool: tool }),
 }));

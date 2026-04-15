@@ -79,6 +79,11 @@ export interface SpatialCanvasRendererProps {
   inkColor?: string;
   /** Build 117: ink stroke width. */
   inkWidth?: number;
+  /**
+   * Build 118: which drawing tool is active. 'pen' (default) appends new
+   * strokes; 'eraser' deletes whole strokes under the pointer path.
+   */
+  inkTool?: 'pen' | 'eraser';
 }
 
 export function SpatialCanvasRenderer({
@@ -98,6 +103,7 @@ export function SpatialCanvasRenderer({
   inkResponderGrantCount = 0,
   inkColor,
   inkWidth,
+  inkTool = 'pen',
 }: SpatialCanvasRendererProps) {
   const [contentSize, setContentSize] = useState<{ width: number; height: number }>({
     width: 0,
@@ -138,6 +144,29 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
+  const handleEraseStrokes = useCallback(
+    (ids: string[]) => {
+      if (!onInkChange) return;
+      if (ids.length === 0) return;
+      const set = new Set(ids);
+      onInkChange(spatialDoc.inkStrokes.filter((s) => !set.has(s.id)));
+    },
+    [onInkChange, spatialDoc.inkStrokes],
+  );
+
+  // Build 118: infinite-paper feel. Pad the scrollable canvas to at least
+  // 2000px so the user always has room to scroll/draw below their text.
+  // Also extend it if any ink stroke has been drawn past that threshold,
+  // so the canvas grows with content instead of clipping strokes.
+  const maxInkY = useMemo(() => {
+    let m = 0;
+    for (const s of spatialDoc.inkStrokes) {
+      for (const p of s.points) if (p.y > m) m = p.y;
+    }
+    return m;
+  }, [spatialDoc.inkStrokes]);
+  const canvasMinHeight = Math.max(2000, maxInkY + 400);
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -145,36 +174,48 @@ export function SpatialCanvasRenderer({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!inkMode}
+        // Build 118: hide the iOS default scroll indicator — on the dark
+        // editor bg its light track reads as a thin white stripe on the
+        // right edge that the user perceived as a "border around the
+        // editor".
+        showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
         onContentSizeChange={(w: number, h: number) =>
           setContentSize({ width: w, height: h })
         }
       >
-        <LivePreviewInput
-          key={focusKey ?? 'no-note'}
-          value={joinedMarkdown}
-          onChange={handleTextChange}
-          inputMode={readOnly || inkMode ? 'ink' : 'scroll'}
-          pendingCommand={pendingCommand}
-          onCommandApplied={onCommandApplied}
-          onActiveFormatsChange={onActiveFormatsChange}
-          autoFocus={autoFocusFirst}
-          diagInkActive={inkMode}
-          diagInkResponderGrantCount={inkResponderGrantCount}
-        />
-        {inkMode ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="auto">
+        <View style={{ minHeight: canvasMinHeight }}>
+          <LivePreviewInput
+            key={focusKey ?? 'no-note'}
+            value={joinedMarkdown}
+            onChange={handleTextChange}
+            inputMode={readOnly || inkMode ? 'ink' : 'scroll'}
+            pendingCommand={pendingCommand}
+            onCommandApplied={onCommandApplied}
+            onActiveFormatsChange={onActiveFormatsChange}
+            autoFocus={autoFocusFirst}
+            diagInkActive={inkMode}
+            diagInkResponderGrantCount={inkResponderGrantCount}
+          />
+          {/* Build 118: InkOverlay is always mounted so drawn strokes stay
+              visible after the pencil toggle flips off. pointerEvents gates
+              whether new touches land on ink vs pass through to the text
+              editor below. */}
+          <View style={StyleSheet.absoluteFill} pointerEvents={inkMode ? 'auto' : 'none'}>
             <InkOverlay
               strokes={spatialDoc.inkStrokes}
               width={contentSize.width}
-              height={contentSize.height}
-              pointerEvents="auto"
+              height={Math.max(contentSize.height, canvasMinHeight)}
+              pointerEvents={inkMode ? 'auto' : 'none'}
               onNewStroke={handleInkChange}
+              onEraseStrokes={handleEraseStrokes}
               onResponderGrantDiagnostic={onInkResponderGrant}
               strokeColor={inkColor}
               strokeWidth={inkWidth}
+              tool={inkTool}
             />
           </View>
-        ) : null}
+        </View>
       </ScrollView>
     </View>
   );

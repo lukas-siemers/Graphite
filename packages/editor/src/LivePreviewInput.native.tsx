@@ -594,8 +594,9 @@ const styles = StyleSheet.create({
     right: 8,
     padding: 12,
     backgroundColor: 'rgba(44, 24, 0, 0.92)',
-    borderWidth: 1,
-    borderColor: tokens.accentPressed,
+    // Build 118: all borders in the editor stack are banned. If the
+    // dead-state overlay ever lights up, the dark-orange fill alone has
+    // enough contrast on bgBase — no outline needed.
   },
   deadStateHeadline: {
     color: tokens.accentLight,

@@ -38,6 +38,12 @@ export interface InkOverlayProps {
   pointerEvents?: 'none' | 'auto';
   onNewStroke?: (stroke: SpatialInkStroke) => void;
   /**
+   * Build 118: called when the eraser tool crosses one or more existing
+   * strokes. The parent resolves `ids` against spatialDoc.inkStrokes and
+   * filters them out in the next onInkChange.
+   */
+  onEraseStrokes?: (ids: string[]) => void;
+  /**
    * Build 115 diagnostic: notified on every Pan.onBegin that
    * successfully claims a touch (finger or Apple Pencil). Lets the
    * parent render a pc:N counter in the phase pill so we can see
@@ -50,6 +56,44 @@ export interface InkOverlayProps {
   strokeColor?: string;
   /** Build 117: pencil width for new strokes. Defaults to 2. */
   strokeWidth?: number;
+  /** Build 118: 'pen' appends new strokes, 'eraser' deletes existing. */
+  tool?: 'pen' | 'eraser';
+}
+
+// Build 118: stroke-level eraser hit test. Returns true if the eraser
+// circle at (x, y) with `radius` intersects any segment of `stroke`.
+// Straight-line segment distance is sufficient for the polyline shape
+// we store; pressure-varying stroke width is ignored (we use the stored
+// base width plus the eraser radius).
+const ERASER_RADIUS = 14;
+function strokeHit(stroke: SpatialInkStroke, x: number, y: number): boolean {
+  const r = ERASER_RADIUS + stroke.width;
+  const r2 = r * r;
+  const pts = stroke.points;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const dx = p.x - x;
+    const dy = p.y - y;
+    if (dx * dx + dy * dy <= r2) return true;
+    if (i > 0) {
+      const a = pts[i - 1];
+      const abx = p.x - a.x;
+      const aby = p.y - a.y;
+      const apx = x - a.x;
+      const apy = y - a.y;
+      const ab2 = abx * abx + aby * aby;
+      if (ab2 === 0) continue;
+      let t = (apx * abx + apy * aby) / ab2;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const cx = a.x + abx * t;
+      const cy = a.y + aby * t;
+      const ddx = x - cx;
+      const ddy = y - cy;
+      if (ddx * ddx + ddy * ddy <= r2) return true;
+    }
+  }
+  return false;
 }
 
 function strokeToPath(stroke: SpatialInkStroke): SkPath {
@@ -76,19 +120,40 @@ export function InkOverlay({
   height,
   pointerEvents = 'none',
   onNewStroke,
+  onEraseStrokes,
   onResponderGrantDiagnostic,
   strokeColor = '#FFFFFF',
   strokeWidth = 2,
+  tool = 'pen',
 }: InkOverlayProps) {
   const strokeColorRef = useRef(strokeColor);
   const strokeWidthRef = useRef(strokeWidth);
+  const toolRef = useRef(tool);
+  const strokesRef = useRef(strokes);
   strokeColorRef.current = strokeColor;
   strokeWidthRef.current = strokeWidth;
+  toolRef.current = tool;
+  strokesRef.current = strokes;
   const [activeStroke, setActiveStroke] = useState<SpatialInkStroke | null>(null);
   const activeRef = useRef<SpatialInkStroke | null>(null);
+  // Build 118: ids of strokes the eraser has hit during the current pan.
+  // Buffered so one erase gesture can remove multiple strokes and emit a
+  // single onEraseStrokes call at gesture end.
+  const erasedIdsRef = useRef<Set<string>>(new Set());
 
   const handleStart = useCallback(
     (x: number, y: number, pressure: number, tilt: number) => {
+      // Build 118: branch on current tool. Pen starts a new stroke; eraser
+      // begins a hit-test accumulator — no visible cursor for now.
+      if (toolRef.current === 'eraser') {
+        erasedIdsRef.current = new Set();
+        for (const s of strokesRef.current) {
+          if (!erasedIdsRef.current.has(s.id) && strokeHit(s, x, y)) {
+            erasedIdsRef.current.add(s.id);
+          }
+        }
+        return;
+      }
       // Build 117: read color + width from refs so the stroke reflects
       // the current selection at the moment it starts, not whatever was
       // set at last memoization of this callback.
@@ -107,6 +172,14 @@ export function InkOverlay({
 
   const handleMove = useCallback(
     (x: number, y: number, pressure: number, tilt: number) => {
+      if (toolRef.current === 'eraser') {
+        for (const s of strokesRef.current) {
+          if (!erasedIdsRef.current.has(s.id) && strokeHit(s, x, y)) {
+            erasedIdsRef.current.add(s.id);
+          }
+        }
+        return;
+      }
       const s = activeRef.current;
       if (!s) return;
       const next: SpatialInkStroke = {
@@ -120,12 +193,18 @@ export function InkOverlay({
   );
 
   const handleEnd = useCallback(() => {
+    if (toolRef.current === 'eraser') {
+      const ids = Array.from(erasedIdsRef.current);
+      erasedIdsRef.current = new Set();
+      if (ids.length > 0) onEraseStrokes?.(ids);
+      return;
+    }
     const s = activeRef.current;
     if (!s) return;
     activeRef.current = null;
     setActiveStroke(null);
     onNewStroke?.(s);
-  }, [onNewStroke]);
+  }, [onNewStroke, onEraseStrokes]);
 
   // Build 116: Gesture.Pan() at the native gesture layer.
   // - minDistance: 0 captures taps-turned-to-strokes immediately, not
