@@ -1508,25 +1508,38 @@ post({ type: 'ready' });
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
  */
 export function buildEditorShellHtml(): string {
-  // Build 102: shell CSS reverted to the Build 97 minimal body-only style.
-  // Build 99 attempted to re-inject the full EDITOR_CSS into the shell so
-  // native + web shared the CSS contract. Under WKWebView that collapsed
-  // CM6's layout — .cm-content rendered at zero visible size, taps never
-  // landed on a focusable element (Build 101 counters confirmed t:N grew
-  // but i:0 meant CM6 received zero update activity, including the initial
-  // focus event). CM6's defaults produce a correct flex layout on their
-  // own; any site-specific styling (selection color, fenced block look,
-  // placeholder color) should flow through the CM6 `EditorView.theme(...)`
-  // extension in EDITOR_BOOTSTRAP_SCRIPT instead of via shell CSS.
+  // Build 106: shell CSS carries the COLOR overrides (bg, text, caret,
+  // selection, placeholder) with !important so they win over CM6's
+  // default stylesheet no matter what. Build 105's EditorView.theme()
+  // block didn't defeat CM6's defaults on iOS WKWebView — the editor
+  // surface rendered CM6's near-white default over our dark body.
+  //
+  // Strictly EXCLUDES the rules that caused Build 99's layout collapse:
+  //   - min-height: 100vh on html/body/#editor/.cm-content
+  //   - overflow: visible !important on .cm-scroller
+  //   - any fixed dimensions
+  // All layout-affecting rules stay with CM6's defaults so measurement
+  // works. Only pure cosmetic properties (color, background, caret,
+  // selection, padding on .cm-line, decorative borders) are overridden.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-html,body{margin:0;padding:0;background:#1E1E1E;color:#DCDDDE;font-family:-apple-system,sans-serif;}
+html,body{margin:0;padding:0;background:#1E1E1E;color:#FFFFFF;font-family:-apple-system,sans-serif;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
+.cm-editor{background:transparent !important;color:#FFFFFF !important;outline:none !important;border:none !important;}
+.cm-editor.cm-focused{outline:none !important;border:none !important;box-shadow:none !important;}
+.cm-scroller{background:transparent !important;}
+.cm-content{background:transparent !important;color:#FFFFFF !important;caret-color:#FF6A00 !important;}
+.cm-cursor,.cm-cursor-primary{border-left-color:#FF6A00 !important;border-left-width:3px !important;}
+.cm-selectionBackground{background:rgba(242,133,0,0.25) !important;}
+.cm-focused .cm-selectionBackground{background:rgba(242,133,0,0.3) !important;}
+.cm-placeholder{color:#8A8F98 !important;font-style:italic !important;}
+.cm-gutters{background:transparent !important;border:none !important;}
+.cm-line{padding:0 !important;}
 </style>
 </head>
 <body>

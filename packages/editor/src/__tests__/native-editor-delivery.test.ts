@@ -55,25 +55,32 @@ describe('native editor delivery — Build 89 guardrails', () => {
     expect(native).not.toMatch(/<script[\s>]/);
   });
 
-  it('native shell exposes minimal body + editor/status divs (Build 102)', () => {
-    // Build 102: shell carries ONLY bare-minimum body CSS. Build 99
-    // attempted to inject the full EDITOR_CSS (.cm-editor / .cm-scroller /
-    // .cm-content overrides) into the shell — that collapsed CM6's layout
-    // under WKWebView to zero visible size (Build 101 counters showed
-    // t:N / i:0 — taps landed but CM6 saw no input, not even the initial
-    // focus event). Any CM6-specific styling must flow through the
-    // EditorView.theme(...) extension inside EDITOR_BOOTSTRAP_SCRIPT, NOT
-    // through shell CSS. Guard against re-introducing those selectors.
+  it('native shell carries color-only CM6 overrides, not layout (Build 106)', () => {
+    // Build 99 collapsed CM6's layout by injecting the FULL EDITOR_CSS
+    // into the shell — specifically `.cm-scroller { overflow: visible
+    // !important }` and `min-height: 100vh` on html/body/#editor/.cm-content.
+    // Build 102 stripped ALL .cm-* rules in response, but CM6's default
+    // near-white background then showed through everywhere (Build 105's
+    // EditorView.theme(...) failed to win specificity on iOS WKWebView).
+    //
+    // Build 106 splits the baby: shell re-introduces ONLY pure cosmetic
+    // rules (background, color, caret, selection, placeholder) with
+    // !important so they win against CM6 defaults — and explicitly EXCLUDES
+    // every layout-affecting rule that caused the Build 99 collapse.
     expect(native).toMatch(/buildEditorShellHtml/);
     const shell = buildEditorShellHtml();
     // Positive: the two divs CM6 and the boot scaffold need.
     expect(shell).toContain('id="editor"');
     expect(shell).toContain('id="status"');
     expect(shell).not.toMatch(/<script[\s>]/);
-    // Negative: these CM6 selectors must NOT appear in the shell.
-    expect(shell).not.toContain('.cm-editor');
-    expect(shell).not.toContain('.cm-content');
-    expect(shell).not.toContain('.cm-scroller');
+    // Positive: color overrides we care about land in the shell.
+    expect(shell).toMatch(/\.cm-editor\s*\{[^}]*background:\s*transparent/);
+    expect(shell).toMatch(/\.cm-content\s*\{[^}]*background:\s*transparent/);
+    expect(shell).toMatch(/\.cm-placeholder\s*\{[^}]*color:\s*#8A8F98/);
+    // Negative guard: the Build 99 layout-collapse triggers must NEVER
+    // reappear, even if someone expands the color rule set.
+    expect(shell).not.toMatch(/overflow:\s*visible\s*!important/);
+    expect(shell).not.toMatch(/min-height:\s*100vh/);
   });
 
   it('LivePreviewInput.native.tsx does not write editor runtime files to disk', () => {
