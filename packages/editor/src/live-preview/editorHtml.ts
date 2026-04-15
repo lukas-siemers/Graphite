@@ -976,6 +976,97 @@ function buildFenceDecorations(view, widthsById) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Marker concealment plugin — Obsidian-style live preview.
+//
+// Mirrors packages/editor/src/live-preview/conceal.ts (which is what the
+// Vitest suite exercises). The two must stay in lockstep: conceal.ts is
+// the single source of truth for the policy, this is the runtime copy
+// compiled into the iframe / WebView bundle.
+//
+// Rules (see conceal.ts for the full rationale):
+//   - Line decorations only. Replace ranges are inline (never span a
+//     whole line). Block widgets are banned in this codebase.
+//   - Marker nodes (EmphasisMark, StrongEmphasisMark, CodeMark,
+//     StrikethroughMark, HeaderMark, LinkMark) are concealed when the
+//     active-line range does not cover the marker's line.
+//   - Inline link URL payload is concealed — visible link text is
+//     preserved.
+//   - Fenced code marks are skipped (fenceStylePlugin owns them).
+//   - Active-line range = every line crossed by the primary selection.
+// ---------------------------------------------------------------------------
+
+const CONCEAL_MARK_NAMES = new Set([
+  'EmphasisMark',
+  'StrongEmphasisMark',
+  'CodeMark',
+  'StrikethroughMark',
+  'HeaderMark',
+  'LinkMark',
+]);
+const concealDeco = Decoration.replace({});
+
+function concealInsideFencedCode(node) {
+  for (let p = node && node.parent; p; p = p.parent) {
+    if (p.name === 'FencedCode') return true;
+  }
+  return false;
+}
+
+function buildConcealDecorationsRuntime(state) {
+  const tree = syntaxTree(state);
+  const doc = state.doc;
+  const sel = state.selection.main;
+  const headLine = doc.lineAt(sel.head).number;
+  const anchorLine = doc.lineAt(sel.anchor).number;
+  const selLineFrom = Math.min(headLine, anchorLine);
+  const selLineTo = Math.max(headLine, anchorLine);
+  const ranges = [];
+
+  tree.iterate({
+    enter: (ref) => {
+      const name = ref.name;
+      const from = ref.from;
+      const to = ref.to;
+      if (to <= from) return;
+
+      if (name === 'URL') {
+        const lineNum = doc.lineAt(from).number;
+        if (lineNum < selLineFrom || lineNum > selLineTo) {
+          ranges.push(concealDeco.range(from, to));
+        }
+        return;
+      }
+
+      if (!CONCEAL_MARK_NAMES.has(name)) return;
+      if (name === 'CodeMark' && concealInsideFencedCode(ref.node)) return;
+
+      const lineNum = doc.lineAt(from).number;
+      if (lineNum >= selLineFrom && lineNum <= selLineTo) return;
+
+      ranges.push(concealDeco.range(from, to));
+    },
+  });
+
+  return Decoration.set(ranges, true);
+}
+
+const concealMarksPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = buildConcealDecorationsRuntime(view.state);
+    }
+    update(update) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        this.decorations = buildConcealDecorationsRuntime(update.state);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
 const fenceStylePlugin = ViewPlugin.fromClass(
   class {
     constructor(view) {
@@ -1322,6 +1413,7 @@ const view = capturedView = new EditorView({
       }),
       syntaxHighlighting(graphiteHighlight),
       fenceStylePlugin,
+      concealMarksPlugin,
       blockHeightsPlugin,
       placeholder('Start writing...'),
       readOnlyCompartment.of(EditorState.readOnly.of(false)),

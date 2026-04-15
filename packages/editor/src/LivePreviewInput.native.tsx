@@ -80,6 +80,13 @@ interface LivePreviewInputProps {
    * mounts LivePreviewInput. Purely informational.
    */
   diagInkResponderGrantCount?: number;
+  /**
+   * Build 119: CM6 posts a 'height' message whenever the document layout
+   * changes; we forward it upward so the spatial canvas can size its
+   * scrollable area exactly to the text height + drawable buffer instead
+   * of pinning a 2000px floor.
+   */
+  onHeightChange?: (height: number) => void;
 }
 
 // Build 97: Codex's call after Build 96 proved phase 0.05 (WKUserScript-
@@ -125,10 +132,16 @@ export function LivePreviewInput({
   onBlockHeights,
   diagInkActive = false,
   diagInkResponderGrantCount = 0,
+  onHeightChange,
 }: LivePreviewInputProps) {
+  const onHeightChangeRef = useRef(onHeightChange);
+  useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
-  const [contentHeight, setContentHeight] = useState<number>(500);
+  // Build 119: initialize to 200 instead of 500. The old 500 acted as an
+  // implicit canvas floor; now that SpatialCanvasRenderer sizes the canvas
+  // from reported height + scroll buffer, this is only the pre-ready seed.
+  const [contentHeight, setContentHeight] = useState<number>(200);
   const [webViewError, setWebViewError] = useState<string | null>(null);
 
   // Diagnostics carried over from Build 82 — earned their place during the
@@ -340,6 +353,7 @@ export function LivePreviewInput({
       case 'height':
         if (typeof msg.height === 'number' && msg.height > 0) {
           setContentHeight(msg.height);
+          onHeightChangeRef.current?.(msg.height);
         }
         break;
 
@@ -409,7 +423,12 @@ export function LivePreviewInput({
 
   return (
     <View
-      style={[styles.container, { height: Math.max(contentHeight, 500) }]}
+      // Build 119: drop the 500px floor. LivePreviewInput now sizes to
+       // exactly the CM6-reported content height (min 80 so the WebView
+       // has enough room to initialize before the first height message).
+       // The parent (SpatialCanvasRenderer) owns the scrollable canvas
+       // height and will extend below the editor for drawing space.
+      style={[styles.container, { height: Math.max(contentHeight, 80) }]}
       pointerEvents={inkMode ? 'none' : 'auto'}
       onTouchStart={() => {
         if (inkMode) return;

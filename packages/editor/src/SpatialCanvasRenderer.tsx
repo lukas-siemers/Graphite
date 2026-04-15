@@ -109,6 +109,11 @@ export function SpatialCanvasRenderer({
     width: 0,
     height: 0,
   });
+  // Build 119: track the CM6-reported text content height so the canvas
+  // sizes itself to exactly `text + drawable buffer` instead of pinning a
+  // 2000px floor. LivePreviewInput.native forwards CM6's 'height' messages
+  // via onHeightChange.
+  const [textHeight, setTextHeight] = useState<number>(200);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -154,10 +159,12 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
-  // Build 118: infinite-paper feel. Pad the scrollable canvas to at least
-  // 2000px so the user always has room to scroll/draw below their text.
-  // Also extend it if any ink stroke has been drawn past that threshold,
-  // so the canvas grows with content instead of clipping strokes.
+  // Build 119: canvas grows with actual content. No fixed floor — the
+  // scrollable area is exactly `max(textHeight, maxInkY) + SCROLL_BUFFER`.
+  // SCROLL_BUFFER gives the user a predictable chunk of drawable space
+  // below their content so they can always pull the pencil down a bit
+  // further; as soon as they draw into the buffer region, maxInkY shifts
+  // and the buffer re-extends.
   const maxInkY = useMemo(() => {
     let m = 0;
     for (const s of spatialDoc.inkStrokes) {
@@ -165,7 +172,8 @@ export function SpatialCanvasRenderer({
     }
     return m;
   }, [spatialDoc.inkStrokes]);
-  const canvasMinHeight = Math.max(2000, maxInkY + 400);
+  const SCROLL_BUFFER = 400;
+  const canvasMinHeight = Math.max(textHeight, maxInkY) + SCROLL_BUFFER;
 
   return (
     <View style={styles.root}>
@@ -184,7 +192,11 @@ export function SpatialCanvasRenderer({
           setContentSize({ width: w, height: h })
         }
       >
-        <View style={{ minHeight: canvasMinHeight }}>
+        {/* Build 119: explicit bgBase on both the canvas wrapper and the
+            absolute-fill overlay. Missing bg on a RN View defaults to
+            transparent, which on iPad can composite light artifacts at
+            the edge of the scroll view during layout transitions. */}
+        <View style={{ minHeight: canvasMinHeight, backgroundColor: tokens.bgBase }}>
           <LivePreviewInput
             key={focusKey ?? 'no-note'}
             value={joinedMarkdown}
@@ -196,12 +208,16 @@ export function SpatialCanvasRenderer({
             autoFocus={autoFocusFirst}
             diagInkActive={inkMode}
             diagInkResponderGrantCount={inkResponderGrantCount}
+            onHeightChange={setTextHeight}
           />
           {/* Build 118: InkOverlay is always mounted so drawn strokes stay
               visible after the pencil toggle flips off. pointerEvents gates
               whether new touches land on ink vs pass through to the text
               editor below. */}
-          <View style={StyleSheet.absoluteFill} pointerEvents={inkMode ? 'auto' : 'none'}>
+          <View
+            style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
+            pointerEvents={inkMode ? 'auto' : 'none'}
+          >
             <InkOverlay
               strokes={spatialDoc.inkStrokes}
               width={contentSize.width}
