@@ -210,27 +210,36 @@ export function SpatialCanvasRenderer({
             diagInkResponderGrantCount={inkResponderGrantCount}
             onHeightChange={setTextHeight}
           />
-          {/* Build 118: InkOverlay is always mounted so drawn strokes stay
-              visible after the pencil toggle flips off. pointerEvents gates
-              whether new touches land on ink vs pass through to the text
-              editor below. */}
-          <View
-            style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
-            pointerEvents={inkMode ? 'auto' : 'none'}
-          >
-            <InkOverlay
-              strokes={spatialDoc.inkStrokes}
-              width={contentSize.width}
-              height={Math.max(contentSize.height, canvasMinHeight)}
+          {/* Build 120: conditional mount gated on (inkMode || strokes > 0).
+              Build 118 made InkOverlay always-on so strokes would persist
+              when the user toggled the pencil off, but on iOS 26 + iPad
+              Pro M4 + react-native-skia 2.2.12 the always-on Skia-backed
+              CAMetalLayer crashed in [CAMetalLayer nextDrawable] with a
+              MTLTextureDescriptor validation abort during UIKit's normal
+              drawRect: cycle (see crash 1380A016-…, Build 119 feedback).
+              Gating on `strokes.length > 0` preserves the persistence
+              goal (once you've drawn anything, the overlay stays mounted
+              so the strokes keep rendering), while keeping Skia entirely
+              out of the tree for fresh text-only notes. */}
+          {(inkMode || spatialDoc.inkStrokes.length > 0) && (
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
               pointerEvents={inkMode ? 'auto' : 'none'}
-              onNewStroke={handleInkChange}
-              onEraseStrokes={handleEraseStrokes}
-              onResponderGrantDiagnostic={onInkResponderGrant}
-              strokeColor={inkColor}
-              strokeWidth={inkWidth}
-              tool={inkTool}
-            />
-          </View>
+            >
+              <InkOverlay
+                strokes={spatialDoc.inkStrokes}
+                width={contentSize.width}
+                height={Math.max(contentSize.height, canvasMinHeight)}
+                pointerEvents={inkMode ? 'auto' : 'none'}
+                onNewStroke={handleInkChange}
+                onEraseStrokes={handleEraseStrokes}
+                onResponderGrantDiagnostic={onInkResponderGrant}
+                strokeColor={inkColor}
+                strokeWidth={inkWidth}
+                tool={inkTool}
+              />
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
