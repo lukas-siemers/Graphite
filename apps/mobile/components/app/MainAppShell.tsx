@@ -319,8 +319,16 @@ export default function MainAppShell() {
   // mechanism RN offers for "cascade" since fontFamily does NOT inherit from
   // parent Views). Per-instance fontFamily still wins, which is what we want
   // for the CM6-side editor bundle (that has its own font system).
+  //
+  // Build 123: the mutation MUST run synchronously during render, not inside
+  // a useEffect. React evaluates children's render bodies BEFORE useEffect
+  // fires, so if we mutate Text.defaultProps in an effect, children on this
+  // render pass still read the previous value — the new font only surfaces
+  // if something else triggers another re-render. Moving the mutation to the
+  // render body fixes "font picker selection doesn't visibly change anything"
+  // reported on Build 122.
   const regularFamily = useFontStore((s) => s.regularFamily);
-  useEffect(() => {
+  {
     type WithDefaults = { defaultProps?: { style?: Record<string, unknown> } };
     const T = Text as unknown as WithDefaults;
     const TI = TextInput as unknown as WithDefaults;
@@ -334,7 +342,7 @@ export default function MainAppShell() {
       ...(TI.defaultProps.style || {}),
       fontFamily: regularFamily,
     };
-  }, [regularFamily]);
+  }
 
   async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
     let notebooks = await getNotebooks(db);

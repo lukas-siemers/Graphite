@@ -53,14 +53,95 @@ export function SettingsModal({ visible, onClose }: SettingsModalProps) {
           style={{
             width: 760,
             maxWidth: '92%',
-            height: 520,
+            height: 560,
             maxHeight: '92%',
             backgroundColor: tokens.bgSidebar,
-            flexDirection: 'row',
+            flexDirection: 'column',
           }}
         >
-          <SectionRail section={section} onSelect={setSection} />
-          <SectionBody section={section} onClose={onClose} />
+          {/* Build 123: X close button absolute-positioned in the panel's
+              top-right corner. Taps close the modal without saving anything
+              explicit — font changes auto-persist as the user picks them. */}
+          <Pressable
+            onPress={onClose}
+            accessibilityLabel="Close settings"
+            style={({ pressed }) => ({
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              width: 30,
+              height: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? tokens.bgHover : 'transparent',
+              zIndex: 10,
+            })}
+          >
+            <MaterialCommunityIcons
+              name="close"
+              size={18}
+              color={tokens.textMuted}
+            />
+          </Pressable>
+          <View style={{ flex: 1, flexDirection: 'row' }}>
+            <SectionRail section={section} onSelect={setSection} />
+            <SectionBody section={section} onClose={onClose} />
+          </View>
+          {/* Build 123: footer with a Save & Close action. Font / section
+              selections already auto-persist (font to SQLite, sections are
+              view-state only), so this button is semantically "Done" — it
+              just confirms the user's choice and dismisses the modal. */}
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'flex-end',
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              gap: 8,
+              backgroundColor: tokens.bgBase,
+            }}
+          >
+            <Pressable
+              onPress={onClose}
+              accessibilityLabel="Cancel"
+              style={({ pressed }) => ({
+                paddingVertical: 8,
+                paddingHorizontal: 16,
+                backgroundColor: pressed ? tokens.bgHover : 'transparent',
+                borderWidth: 1,
+                borderColor: tokens.border,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: tokens.textBody,
+                  fontWeight: '500',
+                }}
+              >
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={onClose}
+              accessibilityLabel="Save and close"
+              style={({ pressed }) => ({
+                paddingVertical: 8,
+                paddingHorizontal: 16,
+                backgroundColor: pressed ? tokens.accentPressed : tokens.accent,
+              })}
+            >
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: '#FFFFFF',
+                  fontWeight: '600',
+                }}
+              >
+                Save & Close
+              </Text>
+            </Pressable>
+          </View>
         </Pressable>
       </Pressable>
     </Modal>
