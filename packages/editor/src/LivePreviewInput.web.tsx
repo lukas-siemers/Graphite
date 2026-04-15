@@ -42,13 +42,6 @@ interface LivePreviewInputProps {
    * arrives. The consumer owns validation and the Y-recalc step.
    */
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
-  /**
-   * Parity with the native variant. Web path ignores these — they exist
-   * only so the shared SpatialCanvasRenderer can pass them unconditionally.
-   */
-  diagInkActive?: boolean;
-  diagInkResponderGrantCount?: number;
-  onHeightChange?: (height: number) => void;
 }
 
 const EDITOR_HTML = buildEditorHtml();

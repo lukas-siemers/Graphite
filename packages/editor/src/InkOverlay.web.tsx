@@ -18,16 +18,6 @@ export interface InkOverlayProps {
   height: number;
   pointerEvents?: 'none' | 'auto';
   onNewStroke?: (stroke: SpatialInkStroke) => void;
-  /** Build 118: web parity with native. Not yet wired on web — see below. */
-  onEraseStrokes?: (ids: string[]) => void;
-  /** Build 115 diagnostic (no-op on web). */
-  onResponderGrantDiagnostic?: () => void;
-  /** Build 117: pen stroke color. */
-  strokeColor?: string;
-  /** Build 117: pen stroke width. */
-  strokeWidth?: number;
-  /** Build 118: 'pen' (default) appends strokes, 'eraser' deletes. */
-  tool?: 'pen' | 'eraser';
 }
 
 function averagePressure(points: StrokePoint[]): number {
@@ -56,51 +46,15 @@ function drawStroke(ctx: CanvasRenderingContext2D, stroke: SpatialInkStroke) {
   ctx.restore();
 }
 
-const ERASER_RADIUS = 14;
-function strokeHit(stroke: SpatialInkStroke, x: number, y: number): boolean {
-  const r = ERASER_RADIUS + stroke.width;
-  const r2 = r * r;
-  const pts = stroke.points;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    const dx = p.x - x;
-    const dy = p.y - y;
-    if (dx * dx + dy * dy <= r2) return true;
-    if (i > 0) {
-      const a = pts[i - 1];
-      const abx = p.x - a.x;
-      const aby = p.y - a.y;
-      const apx = x - a.x;
-      const apy = y - a.y;
-      const ab2 = abx * abx + aby * aby;
-      if (ab2 === 0) continue;
-      let t = (apx * abx + apy * aby) / ab2;
-      if (t < 0) t = 0;
-      else if (t > 1) t = 1;
-      const cx = a.x + abx * t;
-      const cy = a.y + aby * t;
-      const ddx = x - cx;
-      const ddy = y - cy;
-      if (ddx * ddx + ddy * ddy <= r2) return true;
-    }
-  }
-  return false;
-}
-
 export function InkOverlay({
   strokes,
   width,
   height,
   pointerEvents = 'none',
   onNewStroke,
-  onEraseStrokes,
-  strokeColor = '#FFFFFF',
-  strokeWidth = 2,
-  tool = 'pen',
 }: InkOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef<SpatialInkStroke | null>(null);
-  const erasedIdsRef = useRef<Set<string>>(new Set());
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -138,18 +92,10 @@ export function InkOverlay({
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (pointerEvents === 'none') return;
       const { x, y } = pointToCanvas(e);
-      if (tool === 'eraser') {
-        erasedIdsRef.current = new Set();
-        for (const s of strokes) {
-          if (strokeHit(s, x, y)) erasedIdsRef.current.add(s.id);
-        }
-        (e.target as Element).setPointerCapture?.(e.pointerId);
-        return;
-      }
       const s: SpatialInkStroke = {
         id: nanoid(),
-        color: strokeColor,
-        width: strokeWidth,
+        color: '#FFFFFF',
+        width: 2,
         opacity: 1,
         points: [
           {
@@ -165,20 +111,11 @@ export function InkOverlay({
       (e.target as Element).setPointerCapture?.(e.pointerId);
       redraw();
     },
-    [pointToCanvas, pointerEvents, redraw, strokeColor, strokeWidth, tool, strokes],
+    [pointToCanvas, pointerEvents, redraw],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (tool === 'eraser') {
-        const { x, y } = pointToCanvas(e);
-        for (const s of strokes) {
-          if (!erasedIdsRef.current.has(s.id) && strokeHit(s, x, y)) {
-            erasedIdsRef.current.add(s.id);
-          }
-        }
-        return;
-      }
       const s = activeRef.current;
       if (!s) return;
       const { x, y } = pointToCanvas(e);
@@ -191,22 +128,16 @@ export function InkOverlay({
       });
       redraw();
     },
-    [pointToCanvas, redraw, tool, strokes],
+    [pointToCanvas, redraw],
   );
 
   const handlePointerUp = useCallback(() => {
-    if (tool === 'eraser') {
-      const ids = Array.from(erasedIdsRef.current);
-      erasedIdsRef.current = new Set();
-      if (ids.length > 0) onEraseStrokes?.(ids);
-      return;
-    }
     const s = activeRef.current;
     if (!s) return;
     activeRef.current = null;
     onNewStroke?.(s);
     redraw();
-  }, [onNewStroke, onEraseStrokes, redraw, tool]);
+  }, [onNewStroke, redraw]);
 
   return (
     <canvas

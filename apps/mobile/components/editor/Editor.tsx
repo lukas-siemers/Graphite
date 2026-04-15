@@ -73,7 +73,6 @@ export default function Editor() {
   );
   const inkColor = useEditorStore((s) => s.inkColor);
   const inkWidth = useEditorStore((s) => s.inkWidth);
-  const inkTool = useEditorStore((s) => s.inkTool);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -533,7 +532,6 @@ export default function Editor() {
               inkResponderGrantCount={inkResponderGrantCount}
               inkColor={inkColor}
               inkWidth={inkWidth}
-              inkTool={inkTool}
             />
           ) : spatialLoadError ? (
             <View
