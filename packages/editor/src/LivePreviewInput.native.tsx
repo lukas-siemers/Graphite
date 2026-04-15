@@ -80,6 +80,13 @@ interface LivePreviewInputProps {
    * mounts LivePreviewInput. Purely informational.
    */
   diagInkResponderGrantCount?: number;
+  /**
+   * Build 127: committed ink strokes to render inside the iframe's
+   * #ink-layer SVG. Pass [] (or omit) to clear. Host posts these as
+   * {type:'set-strokes', strokes}; handler lives in editorHtml.ts.
+   * Lightweight polyline SVG, no Skia / no Fabric compile path.
+   */
+  passiveStrokes?: unknown[];
 }
 
 // Build 97: Codex's call after Build 96 proved phase 0.05 (WKUserScript-
@@ -125,6 +132,7 @@ export function LivePreviewInput({
   onBlockHeights,
   diagInkActive = false,
   diagInkResponderGrantCount = 0,
+  passiveStrokes,
 }: LivePreviewInputProps) {
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
@@ -177,6 +185,7 @@ export function LivePreviewInput({
   const inputModeRef = useRef(inputMode);
   const enableBlockHeightsRef = useRef(enableBlockHeights);
   const onBlockHeightsRef = useRef(onBlockHeights);
+  const passiveStrokesRef = useRef(passiveStrokes);
   useEffect(() => { valueRef.current = value; }, [value]);
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
   useEffect(() => { onFocusRef.current = onFocus; }, [onFocus]);
@@ -186,6 +195,7 @@ export function LivePreviewInput({
   useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
   useEffect(() => { enableBlockHeightsRef.current = enableBlockHeights; }, [enableBlockHeights]);
   useEffect(() => { onBlockHeightsRef.current = onBlockHeights; }, [onBlockHeights]);
+  useEffect(() => { passiveStrokesRef.current = passiveStrokes; }, [passiveStrokes]);
 
   // Keep the fallback TextInput in sync with the parent's value prop while
   // the watchdog has NOT fired. After it fires, treat the user's keystrokes
@@ -292,6 +302,12 @@ export function LivePreviewInput({
         if (enableBlockHeightsRef.current) {
           postToFrame({ type: 'enable-block-heights' });
         }
+        // Build 127: seed the passive ink layer with the current stroke
+        // set on bootstrap so prior drawings are visible before the user
+        // does anything.
+        if (passiveStrokesRef.current) {
+          postToFrame({ type: 'set-strokes', strokes: passiveStrokesRef.current });
+        }
         if (autoFocusRef.current) postToFrame({ type: 'focus' });
         break;
       }
@@ -380,6 +396,15 @@ export function LivePreviewInput({
     if (!readyRef.current || !enableBlockHeights) return;
     postToFrame({ type: 'enable-block-heights' });
   }, [enableBlockHeights]);
+
+  // Build 127: sync passive strokes → iframe's #ink-layer SVG. Fires on
+  // every stroke-set change so drawn strokes appear in the iframe
+  // immediately, stay visible when the pencil toggles off, and get
+  // cleared (empty array) while the Skia InkOverlay owns live rendering.
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToFrame({ type: 'set-strokes', strokes: passiveStrokes ?? [] });
+  }, [passiveStrokes]);
 
   useEffect(() => {
     if (!readyRef.current || !focusKey || inputMode === 'ink') return;

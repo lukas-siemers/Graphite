@@ -160,6 +160,13 @@ export function SpatialCanvasRenderer({
           autoFocus={autoFocusFirst}
           diagInkActive={inkMode}
           diagInkResponderGrantCount={inkResponderGrantCount}
+          /* Build 127: committed strokes are rendered inside the iframe's
+             #ink-layer SVG when the pencil is OFF. When ink mode turns on,
+             pass an empty array so Skia's live InkOverlay is the sole
+             renderer for the duration of the drawing session — prevents
+             double-drawing the same stroke set while the user is mid-
+             stroke. */
+          passiveStrokes={inkMode ? [] : spatialDoc.inkStrokes}
         />
         {/* Build 124: InkPassiveOverlay (react-native-svg) removed in
             Build 126 — 15.11.2 collides with RN 0.81.5's Fabric/New-Arch

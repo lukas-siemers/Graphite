@@ -53,6 +53,21 @@ export const EDITOR_CSS = `
   #editor {
     padding: 0 32px 48px 32px;
     min-height: 100vh;
+    position: relative;
+  }
+
+  /* Build 127: passive ink overlay. Renders committed strokes inside the
+     iframe's own DOM as SVG <polyline> nodes positioned in canvas-pixel
+     coordinates. pointer-events: none lets taps fall through to CM6. */
+  #ink-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 5;
   }
 
   /* ── CodeMirror shell — fully transparent, no box ── */
@@ -1618,6 +1633,44 @@ window.addEventListener('message', (e) => {
       enableBlockHeights();
       break;
     }
+    case 'set-strokes': {
+      // Build 127: passive ink rendering. Replaces the Skia-based
+      // InkOverlay's always-mount behaviour (which crashed on iOS 26 +
+      // iPad Pro M4) and the rn-svg approach (failed to compile against
+      // RN 0.81.5 Fabric). Strokes land in the iframe's own DOM as SVG
+      // <polyline> nodes inside #ink-layer, which the iframe's native
+      // WebKit/WebView renderer paints without any Metal or Fabric
+      // involvement. Hiding + showing is driven by the host posting an
+      // empty strokes array (when the Skia InkOverlay takes over during
+      // active drawing) or the full stroke list (when pencil mode is off
+      // and we want the drawings visible alongside the text).
+      var svg = document.getElementById('ink-layer');
+      if (!svg) break;
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var strokes = Array.isArray(msg.strokes) ? msg.strokes : [];
+      for (var si = 0; si < strokes.length; si++) {
+        var s = strokes[si];
+        if (!s || !Array.isArray(s.points) || s.points.length === 0) continue;
+        var poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        var pts = '';
+        var sumP = 0;
+        for (var pi = 0; pi < s.points.length; pi++) {
+          var p = s.points[pi];
+          pts += (pi > 0 ? ' ' : '') + p.x + ',' + p.y;
+          sumP += (typeof p.pressure === 'number') ? p.pressure : 0.5;
+        }
+        var avgP = sumP / s.points.length;
+        poly.setAttribute('points', pts);
+        poly.setAttribute('stroke', s.color || '#FFFFFF');
+        poly.setAttribute('stroke-width', String((s.width || 2) * (0.5 + 0.5 * avgP)));
+        poly.setAttribute('stroke-linecap', 'round');
+        poly.setAttribute('stroke-linejoin', 'round');
+        poly.setAttribute('fill', 'none');
+        poly.setAttribute('opacity', String(typeof s.opacity === 'number' ? s.opacity : 1));
+        svg.appendChild(poly);
+      }
+      break;
+    }
   }
 });
 
@@ -1681,9 +1734,15 @@ export function buildEditorShellHtml(): string {
 <style>
 :root { color-scheme: dark; }
 html,body{margin:0;padding:0;background:#131313;color:#FFFFFF;font-family:-apple-system,sans-serif;outline:none;border:none;}
+body{position:relative;}
 html,body,*{-webkit-tap-highlight-color:transparent;}
 *:focus,*:focus-visible,*:focus-within{outline:none !important;box-shadow:none !important;}
-#editor{background:#131313;outline:none;border:none;}
+#editor{background:#131313;outline:none;border:none;position:relative;}
+/* Build 127: #ink-layer carries committed strokes as SVG polylines.
+   overflow:visible means polyline points past the SVG's box still paint,
+   which matters because the SVG's computed height may be 0 (parent body
+   has no definite height in the "shell is minimal" contract). */
+#ink-layer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
 </style>
@@ -1691,6 +1750,7 @@ html,body,*{-webkit-tap-highlight-color:transparent;}
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
+<svg id="ink-layer" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
 </body>
 </html>`;
 }
@@ -1706,6 +1766,7 @@ export function buildEditorHtml(): string {
 <body>
 <div id="status">Loading editor…</div>
 <div id="editor"></div>
+<svg id="ink-layer" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
 
 <script>${EDITOR_PRE_RUNTIME_SCRIPT}</script>
 

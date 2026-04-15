@@ -42,6 +42,14 @@ interface LivePreviewInputProps {
    * arrives. The consumer owns validation and the Y-recalc step.
    */
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
+  /**
+   * Parity with the native variant. Diagnostics + passive ink rendering —
+   * the web iframe picks `passiveStrokes` up via the same `set-strokes`
+   * message the native path uses (both go through `postToFrame`).
+   */
+  diagInkActive?: boolean;
+  diagInkResponderGrantCount?: number;
+  passiveStrokes?: unknown[];
 }
 
 const EDITOR_HTML = buildEditorHtml();
@@ -58,6 +66,7 @@ export function LivePreviewInput({
   focusKey = null,
   enableBlockHeights = false,
   onBlockHeights,
+  passiveStrokes,
 }: LivePreviewInputProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -199,6 +208,12 @@ export function LivePreviewInput({
     if (!readyRef.current || !enableBlockHeights) return;
     postToFrame({ type: 'enable-block-heights' });
   }, [enableBlockHeights]);
+
+  // Build 127: sync passive strokes → iframe's #ink-layer SVG.
+  useEffect(() => {
+    if (!readyRef.current) return;
+    postToFrame({ type: 'set-strokes', strokes: passiveStrokes ?? [] });
+  }, [passiveStrokes]);
 
   useEffect(() => {
     if (!readyRef.current || !focusKey || inputMode === 'ink') return;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, View, Text, TextInput, Pressable, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -26,7 +26,6 @@ import { tokens } from '@graphite/ui';
 import { useNotebookStore } from '../../stores/use-notebook-store';
 import { useNoteStore } from '../../stores/use-note-store';
 import { useFolderStore } from '../../stores/use-folder-store';
-import { useFontStore } from '../../stores/use-font-store';
 import { useSyncEngine } from '../../hooks/use-sync-engine';
 import { getCurrentSession } from '../../components/auth/AuthGate';
 import Sidebar from '../../components/sidebar/Sidebar';
@@ -295,10 +294,6 @@ export default function MainAppShell() {
         setOnboardingDone(true);
         setStartupStage('db-data-load');
         await loadAppData(db);
-        // Build 121: load the saved app-wide font choice from SQLite settings
-        // before the main shell renders, so the first paint uses the user's
-        // selected font instead of System fallback.
-        await useFontStore.getState().hydrate();
         setStartupStage('db-ready');
         setDbReady(true);
       })
@@ -313,36 +308,6 @@ export default function MainAppShell() {
       mounted = false;
     };
   }, []);
-
-  // Build 121: app-wide font application. Every <Text> / <TextInput> in the
-  // RN tree inherits the selected fontFamily via Text.defaultProps (the only
-  // mechanism RN offers for "cascade" since fontFamily does NOT inherit from
-  // parent Views). Per-instance fontFamily still wins, which is what we want
-  // for the CM6-side editor bundle (that has its own font system).
-  //
-  // Build 123: the mutation MUST run synchronously during render, not inside
-  // a useEffect. React evaluates children's render bodies BEFORE useEffect
-  // fires, so if we mutate Text.defaultProps in an effect, children on this
-  // render pass still read the previous value — the new font only surfaces
-  // if something else triggers another re-render. Moving the mutation to the
-  // render body fixes "font picker selection doesn't visibly change anything"
-  // reported on Build 122.
-  const regularFamily = useFontStore((s) => s.regularFamily);
-  {
-    type WithDefaults = { defaultProps?: { style?: Record<string, unknown> } };
-    const T = Text as unknown as WithDefaults;
-    const TI = TextInput as unknown as WithDefaults;
-    T.defaultProps = T.defaultProps || {};
-    T.defaultProps.style = {
-      ...(T.defaultProps.style || {}),
-      fontFamily: regularFamily,
-    };
-    TI.defaultProps = TI.defaultProps || {};
-    TI.defaultProps.style = {
-      ...(TI.defaultProps.style || {}),
-      fontFamily: regularFamily,
-    };
-  }
 
   async function loadAppData(db: Awaited<ReturnType<typeof initDatabase>>) {
     let notebooks = await getNotebooks(db);
@@ -455,19 +420,9 @@ export default function MainAppShell() {
     return <WelcomeScreen onComplete={handleOnboardingComplete} />;
   }
 
-  // Build 125: key the entire rendered layout on the selected font family.
-  // When the user picks a new font in Settings → Appearance, React unmounts
-  // the whole IPadLayout / PhoneLayout subtree and remounts it fresh, so
-  // every <Text> picks up the new Text.defaultProps on mount. Without this
-  // remount, many nodes (FlatList items, memoized components, Text inside
-  // the Skia/WebView Canvas chrome, etc.) hold onto their first-render
-  // fontFamily because they never re-render even though defaultProps has
-  // mutated. Active note / notebook / folder / scroll-restore state lives
-  // in Zustand stores, so the remount is visually effectively seamless.
-  const remountKey = regularFamily ?? 'system';
   if (isIPad) {
-    return <IPadLayout key={remountKey} />;
+    return <IPadLayout />;
   }
 
-  return <PhoneLayout key={remountKey} />;
+  return <PhoneLayout />;
 }

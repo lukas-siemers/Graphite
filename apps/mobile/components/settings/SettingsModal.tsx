@@ -10,11 +10,6 @@ import {
 import Constants from 'expo-constants';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
-import {
-  useFontStore,
-  APP_FONT_OPTIONS,
-  type AppFontKey,
-} from '../../stores/use-font-store';
 
 type SectionKey =
   | 'profile'
@@ -287,67 +282,11 @@ function ProfileSection() {
 }
 
 function AppearanceSection() {
-  const font = useFontStore((s) => s.font);
-  const setFont = useFontStore((s) => s.setFont);
   return (
     <View>
       <SectionHeading text="Appearance" />
-      <SectionSubtitle text="Choose a font family for the app interface." />
-      <View style={{ gap: 6 }}>
-        {APP_FONT_OPTIONS.map((opt) => {
-          const selected = opt.key === font;
-          return (
-            <Pressable
-              key={opt.key}
-              onPress={() => void setFont(opt.key as AppFontKey)}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                backgroundColor: selected
-                  ? tokens.accentTint
-                  : pressed
-                  ? tokens.bgHover
-                  : tokens.bgBase,
-                borderLeftWidth: selected ? 2 : 0,
-                borderLeftColor: tokens.accent,
-              })}
-            >
-              <View>
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: '600',
-                    color: selected ? tokens.accentLight : tokens.textPrimary,
-                    fontFamily: opt.bold ?? undefined,
-                  }}
-                >
-                  {opt.label}
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: tokens.textMuted,
-                    marginTop: 2,
-                    fontFamily: opt.regular ?? undefined,
-                  }}
-                >
-                  {opt.description} — The quick brown fox jumps over the lazy dog.
-                </Text>
-              </View>
-              {selected && (
-                <MaterialCommunityIcons
-                  name="check"
-                  size={18}
-                  color={tokens.accent}
-                />
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
+      <SectionSubtitle text="Theme and typography options." />
+      <ComingSoon note="Font picker temporarily removed — the RN Text fontFamily cascade proved unreliable on iOS. Coming back in a later build with a proven-working approach (rendering via the CM6 iframe's native font stack)." />
     </View>
   );
 }
