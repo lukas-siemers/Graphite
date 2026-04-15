@@ -32,6 +32,18 @@ interface EditorState {
    * pc > 0 with no visible stroke = downstream Skia paint bug.
    */
   inkResponderGrantCount: number;
+  /**
+   * Build 117: currently-selected pencil color. InkOverlay uses this
+   * as the stroke color when creating a new stroke. Toolbar color
+   * swatch row (visible only when inkMode=true) writes to this.
+   */
+  inkColor: string;
+  /**
+   * Build 117: currently-selected pencil width. InkOverlay uses this
+   * as the stroke width when creating a new stroke. Toolbar size
+   * button row (visible only when inkMode=true) writes to this.
+   */
+  inkWidth: number;
   dispatchCommand: (cmd: FormatCommand) => void;
   clearCommand: () => void;
   setActiveFormats: (formats: FormatCommand[]) => void;
@@ -41,6 +53,8 @@ interface EditorState {
   toggleInkMode: () => void;
   setSpatialReadyForInk: (ready: boolean) => void;
   incrementInkResponderGrant: () => void;
+  setInkColor: (color: string) => void;
+  setInkWidth: (width: number) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -52,6 +66,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   inkMode: false,
   spatialReadyForInk: false,
   inkResponderGrantCount: 0,
+  inkColor: '#FFFFFF',
+  inkWidth: 2.5,
   dispatchCommand: (cmd) => set({ pendingCommand: cmd }),
   clearCommand: () => set({ pendingCommand: null }),
   setActiveFormats: (formats) => set({ activeFormats: formats }),
@@ -63,4 +79,6 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSpatialReadyForInk: (ready) => set({ spatialReadyForInk: ready }),
   incrementInkResponderGrant: () =>
     set((s) => ({ inkResponderGrantCount: s.inkResponderGrantCount + 1 })),
+  setInkColor: (color) => set({ inkColor: color }),
+  setInkWidth: (width) => set({ inkWidth: width }),
 }));

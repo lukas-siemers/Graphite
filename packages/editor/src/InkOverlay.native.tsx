@@ -46,6 +46,10 @@ export interface InkOverlayProps {
    * the pan — a much deeper bug than the responder-race we just fixed.
    */
   onResponderGrantDiagnostic?: () => void;
+  /** Build 117: pencil color for new strokes. Defaults to #FFFFFF. */
+  strokeColor?: string;
+  /** Build 117: pencil width for new strokes. Defaults to 2. */
+  strokeWidth?: number;
 }
 
 function strokeToPath(stroke: SpatialInkStroke): SkPath {
@@ -73,16 +77,25 @@ export function InkOverlay({
   pointerEvents = 'none',
   onNewStroke,
   onResponderGrantDiagnostic,
+  strokeColor = '#FFFFFF',
+  strokeWidth = 2,
 }: InkOverlayProps) {
+  const strokeColorRef = useRef(strokeColor);
+  const strokeWidthRef = useRef(strokeWidth);
+  strokeColorRef.current = strokeColor;
+  strokeWidthRef.current = strokeWidth;
   const [activeStroke, setActiveStroke] = useState<SpatialInkStroke | null>(null);
   const activeRef = useRef<SpatialInkStroke | null>(null);
 
   const handleStart = useCallback(
     (x: number, y: number, pressure: number, tilt: number) => {
+      // Build 117: read color + width from refs so the stroke reflects
+      // the current selection at the moment it starts, not whatever was
+      // set at last memoization of this callback.
       const s: SpatialInkStroke = {
         id: nanoid(),
-        color: '#FFFFFF',
-        width: 2,
+        color: strokeColorRef.current,
+        width: strokeWidthRef.current,
         opacity: 1,
         points: [{ x, y, pressure, tilt, timestamp: Date.now() }],
       };

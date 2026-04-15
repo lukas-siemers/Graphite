@@ -73,6 +73,21 @@ function ToolbarButton({ command, icon, label, active = false, onPress, onLongPr
   );
 }
 
+// Build 117: conditionally render size + color pickers only when inkMode
+// is active. Keeps the toolbar minimal when user is just writing text.
+function InkControlsIfActive() {
+  const inkMode = useEditorStore((s) => s.inkMode);
+  if (!inkMode) return null;
+  return (
+    <>
+      <Separator />
+      <InkSizeButtons />
+      <Separator />
+      <InkColorSwatches />
+    </>
+  );
+}
+
 function InkToggleButton() {
   const inkMode = useEditorStore((s) => s.inkMode);
   const toggleInkMode = useEditorStore((s) => s.toggleInkMode);
@@ -109,6 +124,98 @@ function InkToggleButton() {
         />
       )}
     </Pressable>
+  );
+}
+
+// Build 117: pencil size picker. Renders only when inkMode=true. Three
+// options: thin / medium / thick, each shown as a filled dot of the
+// corresponding diameter. Selection persists via useEditorStore.
+const INK_SIZES = [
+  { width: 1.5, dotSize: 4 },
+  { width: 2.5, dotSize: 7 },
+  { width: 5, dotSize: 11 },
+] as const;
+
+function InkSizeButtons() {
+  const inkWidth = useEditorStore((s) => s.inkWidth);
+  const setInkWidth = useEditorStore((s) => s.setInkWidth);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {INK_SIZES.map(({ width, dotSize }) => {
+        const selected = Math.abs(inkWidth - width) < 0.01;
+        return (
+          <Pressable
+            key={width}
+            onPress={() => setInkWidth(width)}
+            accessibilityLabel={`Pencil width ${width}`}
+            accessibilityState={{ selected }}
+            style={{
+              width: 28,
+              height: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: selected ? tokens.accentTint : 'transparent',
+            }}
+          >
+            <View
+              style={{
+                width: dotSize,
+                height: dotSize,
+                borderRadius: dotSize / 2,
+                backgroundColor: selected ? tokens.accent : tokens.textMuted,
+              }}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// Build 117: pencil color swatches. Render only when inkMode=true.
+const INK_COLORS = [
+  '#FFFFFF',
+  '#F28500',
+  '#F44336',
+  '#A8D060',
+  '#4FC3F7',
+  '#000000',
+] as const;
+
+function InkColorSwatches() {
+  const inkColor = useEditorStore((s) => s.inkColor);
+  const setInkColor = useEditorStore((s) => s.setInkColor);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {INK_COLORS.map((color) => {
+        const selected = inkColor.toUpperCase() === color.toUpperCase();
+        return (
+          <Pressable
+            key={color}
+            onPress={() => setInkColor(color)}
+            accessibilityLabel={`Pencil color ${color}`}
+            accessibilityState={{ selected }}
+            style={{
+              width: 24,
+              height: 30,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: 8,
+                backgroundColor: color,
+                borderWidth: selected ? 2 : 1,
+                borderColor: selected ? tokens.accent : tokens.border,
+              }}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -204,6 +311,7 @@ export function FormattingToolbar() {
           <>
             <Separator />
             <InkToggleButton />
+            <InkControlsIfActive />
           </>
         )}
       </ScrollView>

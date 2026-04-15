@@ -71,6 +71,8 @@ export default function Editor() {
   const inkResponderGrantCount = useEditorStore(
     (s) => s.inkResponderGrantCount,
   );
+  const inkColor = useEditorStore((s) => s.inkColor);
+  const inkWidth = useEditorStore((s) => s.inkWidth);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -126,8 +128,25 @@ export default function Editor() {
 
   // v2 spatial canvas migration: resolves the SpatialCanvasDocument for the
   // active note, auto-upgrading v1 notes to v2 on first open.
-  const { spatialDoc, isReady: spatialReady } =
+  const { spatialDoc: hookSpatialDoc, isReady: spatialReady } =
     useSpatialCanvasMigration(activeNote);
+
+  // Build 117: mirror the hook's spatialDoc into local component state so
+  // mutations (new ink stroke, edited text block) cause an immediate
+  // re-render with the new document. Previously handleSpatialInkChange
+  // only updated spatialDocRef and scheduled a debounced DB write — the
+  // React-visible spatialDoc from the hook never changed, so when the
+  // pen lifted and InkOverlay's activeStroke cleared, the rendered
+  // strokes array was still the stale old one and the just-drawn stroke
+  // vanished. User report: "drawing doesnt stick, it dissapears when I
+  // let go of my pen". Local mirror fixes that with no change to the
+  // save path.
+  const [liveSpatialDoc, setLiveSpatialDoc] =
+    useState<SpatialCanvasDocument | null>(hookSpatialDoc);
+  useEffect(() => {
+    setLiveSpatialDoc(hookSpatialDoc);
+  }, [hookSpatialDoc]);
+  const spatialDoc = liveSpatialDoc;
 
   // v2 save pipeline — debounced 500ms to match CanvasRenderer save cadence.
   const spatialSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +192,7 @@ export default function Editor() {
         ...current,
         blocks,
       };
+      setLiveSpatialDoc(next);
       scheduleSpatialSave(next);
     },
     [scheduleSpatialSave],
@@ -197,6 +217,7 @@ export default function Editor() {
         ...current,
         blocks,
       };
+      setLiveSpatialDoc(next);
       scheduleSpatialSave(next);
     },
     [scheduleSpatialSave],
@@ -210,6 +231,10 @@ export default function Editor() {
         ...current,
         inkStrokes: strokes,
       };
+      // Build 117: mirror mutation into local state so SpatialCanvasRenderer
+      // re-renders with the new stroke BEFORE the debounced DB write
+      // completes. Without this, ink vanishes on pen-up.
+      setLiveSpatialDoc(next);
       scheduleSpatialSave(next);
     },
     [scheduleSpatialSave],
@@ -505,6 +530,8 @@ export default function Editor() {
               inkMode={inkMode}
               onInkResponderGrant={incrementInkResponderGrant}
               inkResponderGrantCount={inkResponderGrantCount}
+              inkColor={inkColor}
+              inkWidth={inkWidth}
             />
           ) : spatialLoadError ? (
             <View

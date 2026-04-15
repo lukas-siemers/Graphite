@@ -75,6 +75,10 @@ export interface SpatialCanvasRendererProps {
   onInkResponderGrant?: () => void;
   /** Build 115: current pc:N value to display in the LivePreviewInput pill. */
   inkResponderGrantCount?: number;
+  /** Build 117: ink stroke color. */
+  inkColor?: string;
+  /** Build 117: ink stroke width. */
+  inkWidth?: number;
 }
 
 export function SpatialCanvasRenderer({
@@ -92,6 +96,8 @@ export function SpatialCanvasRenderer({
   inkMode = false,
   onInkResponderGrant,
   inkResponderGrantCount = 0,
+  inkColor,
+  inkWidth,
 }: SpatialCanvasRendererProps) {
   const [contentSize, setContentSize] = useState<{ width: number; height: number }>({
     width: 0,
@@ -164,6 +170,8 @@ export function SpatialCanvasRenderer({
               pointerEvents="auto"
               onNewStroke={handleInkChange}
               onResponderGrantDiagnostic={onInkResponderGrant}
+              strokeColor={inkColor}
+              strokeWidth={inkWidth}
             />
           </View>
         ) : null}
