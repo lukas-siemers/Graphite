@@ -40,7 +40,6 @@ import {
 } from '@graphite/canvas';
 import { LivePreviewInput } from './LivePreviewInput';
 import { InkOverlay } from './InkOverlay';
-import { InkPassiveOverlay } from './InkPassiveOverlay';
 import type { FormatCommand } from './types';
 
 const DEBOUNCE_MS = 500;
@@ -162,18 +161,15 @@ export function SpatialCanvasRenderer({
           diagInkActive={inkMode}
           diagInkResponderGrantCount={inkResponderGrantCount}
         />
-        {/* Build 124: always-mounted SVG passive overlay renders committed
-            strokes without loading Skia's Metal-backed Canvas. Hidden while
-            the Skia InkOverlay is live (inkMode=true) so we don't double-
-            render the stroke set, and because the Skia overlay is what
-            captures the active in-flight stroke anyway. */}
-        {!inkMode && spatialDoc.inkStrokes.length > 0 ? (
-          <InkPassiveOverlay
-            strokes={spatialDoc.inkStrokes}
-            width={contentSize.width}
-            height={contentSize.height}
-          />
-        ) : null}
+        {/* Build 124: InkPassiveOverlay (react-native-svg) removed in
+            Build 126 — 15.11.2 collides with RN 0.81.5's Fabric/New-Arch
+            `ComponentDescriptor::ConcreteShadowNode` typedef and fails to
+            compile under Xcode 16.4 (archive error). Strokes drawn in an
+            ink session remain in spatialDoc.inkStrokes and become visible
+            again the next time the pencil toggles on — persistence at the
+            data layer is preserved, only the passive display is
+            temporarily missing. Follow-up: render strokes inside the CM6
+            iframe instead (native SVG, no Fabric compile path). */}
         {inkMode ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="auto">
             <InkOverlay
