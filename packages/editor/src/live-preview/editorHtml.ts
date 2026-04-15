@@ -1508,35 +1508,50 @@ post({ type: 'ready' });
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
  */
 export function buildEditorShellHtml(): string {
-  // Build 106: shell CSS carries the COLOR overrides (bg, text, caret,
-  // selection, placeholder) with !important so they win over CM6's
-  // default stylesheet no matter what. Build 105's EditorView.theme()
-  // block didn't defeat CM6's defaults on iOS WKWebView — the editor
-  // surface rendered CM6's near-white default over our dark body.
+  // Build 107: root cause finally pinned down. Two compounding issues
+  // kept producing a white editor surface despite Build 106's !important
+  // overrides:
   //
-  // Strictly EXCLUDES the rules that caused Build 99's layout collapse:
-  //   - min-height: 100vh on html/body/#editor/.cm-content
-  //   - overflow: visible !important on .cm-scroller
-  //   - any fixed dimensions
-  // All layout-affecting rules stay with CM6's defaults so measurement
-  // works. Only pure cosmetic properties (color, background, caret,
-  // selection, padding on .cm-line, decorative borders) are overridden.
+  //   (1) WKWebView on iPad defaults to a LIGHT color scheme unless
+  //       explicitly told otherwise. CM6 respects `color-scheme` and
+  //       renders light-theme defaults when the UA reports light. Our
+  //       !important rules may still be evaluated but CM6 also sets
+  //       style properties via inline JS in light mode, winning the
+  //       specificity fight even with !important.
+  //
+  //   (2) The shell body was hardcoded #1E1E1E, but the app's actual
+  //       bgBase token is #131313. Even if the editor surface went
+  //       transparent, it would reveal a slightly-off body color — not
+  //       matching the surrounding app chrome the user expects.
+  //
+  // Fix: declare dark color-scheme via both <meta> (UA hint) and CSS
+  // :root rule, plus force every CM6 element's background to transparent
+  // with an aggressive override including `html[data-ui-theme="dark"]`.
+  // Body background now #131313 to match the tokens.bgBase the RN side
+  // paints everywhere else.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="supported-color-schemes" content="dark" />
 <style>
-html,body{margin:0;padding:0;background:#1E1E1E;color:#FFFFFF;font-family:-apple-system,sans-serif;}
+:root { color-scheme: dark; }
+html,body{margin:0;padding:0;background:#131313 !important;color:#FFFFFF !important;font-family:-apple-system,sans-serif;}
+#editor{background:transparent !important;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
-.cm-editor{background:transparent !important;color:#FFFFFF !important;outline:none !important;border:none !important;}
+.cm-editor,.cm-editor *{background-color:transparent !important;}
+.cm-editor{color:#FFFFFF !important;outline:none !important;border:none !important;}
 .cm-editor.cm-focused{outline:none !important;border:none !important;box-shadow:none !important;}
-.cm-scroller{background:transparent !important;}
-.cm-content{background:transparent !important;color:#FFFFFF !important;caret-color:#FF6A00 !important;}
+.cm-content{color:#FFFFFF !important;caret-color:#FF6A00 !important;}
 .cm-cursor,.cm-cursor-primary{border-left-color:#FF6A00 !important;border-left-width:3px !important;}
 .cm-selectionBackground{background:rgba(242,133,0,0.25) !important;}
 .cm-focused .cm-selectionBackground{background:rgba(242,133,0,0.3) !important;}
+.cm-selectionMatch{background:rgba(242,133,0,0.2) !important;}
+.cm-activeLine{background:transparent !important;}
+.cm-activeLineGutter{background:transparent !important;}
 .cm-placeholder{color:#8A8F98 !important;font-style:italic !important;}
 .cm-gutters{background:transparent !important;border:none !important;}
 .cm-line{padding:0 !important;}

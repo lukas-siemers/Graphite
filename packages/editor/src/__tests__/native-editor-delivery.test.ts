@@ -74,9 +74,15 @@ describe('native editor delivery — Build 89 guardrails', () => {
     expect(shell).toContain('id="status"');
     expect(shell).not.toMatch(/<script[\s>]/);
     // Positive: color overrides we care about land in the shell.
-    expect(shell).toMatch(/\.cm-editor\s*\{[^}]*background:\s*transparent/);
-    expect(shell).toMatch(/\.cm-content\s*\{[^}]*background:\s*transparent/);
+    // Build 107: the universal `.cm-editor, .cm-editor *` rule handles
+    // transparent backgrounds; we assert its presence.
+    expect(shell).toMatch(/\.cm-editor,\.cm-editor\s*\*\s*\{[^}]*background-color:\s*transparent/);
+    expect(shell).toMatch(/\.cm-content\s*\{[^}]*color:\s*#FFFFFF/);
     expect(shell).toMatch(/\.cm-placeholder\s*\{[^}]*color:\s*#8A8F98/);
+    // Build 107: color-scheme hint must be present so WKWebView doesn't
+    // default to light mode (which made CM6 ignore our overrides).
+    expect(shell).toMatch(/color-scheme:\s*dark/);
+    expect(shell).toMatch(/<meta name="color-scheme" content="dark"/);
     // Negative guard: the Build 99 layout-collapse triggers must NEVER
     // reappear, even if someone expands the color rule set.
     expect(shell).not.toMatch(/overflow:\s*visible\s*!important/);

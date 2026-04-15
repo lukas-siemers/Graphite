@@ -555,6 +555,7 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     flexGrow: 1,
+    backgroundColor: tokens.bgBase,
   },
   webView: {
     flex: 1,
