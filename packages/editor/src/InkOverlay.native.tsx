@@ -119,7 +119,15 @@ export function InkOverlay({
 
   return (
     <View
-      style={[styles.root, { width, height }]}
+      // Build 112: InkOverlay fills its parent regardless of the
+      // width/height props, which can start at 0 before the ScrollView's
+      // onContentSizeChange fires. A zero-sized View has no hit area,
+      // so the RN responder system was silently dropping every pencil
+      // touch — user reported "Apple Pencil still does not work" even
+      // after mounting InkOverlay in inkMode=true. absoluteFill grants
+      // an immediate, always-valid hit region that matches whatever
+      // parent (scroll content) size the layout resolved.
+      style={StyleSheet.absoluteFill}
       pointerEvents={pointerEvents}
       onStartShouldSetResponder={() => pointerEvents === 'auto'}
       onMoveShouldSetResponder={() => pointerEvents === 'auto'}
