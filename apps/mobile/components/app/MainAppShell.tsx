@@ -455,9 +455,19 @@ export default function MainAppShell() {
     return <WelcomeScreen onComplete={handleOnboardingComplete} />;
   }
 
+  // Build 125: key the entire rendered layout on the selected font family.
+  // When the user picks a new font in Settings → Appearance, React unmounts
+  // the whole IPadLayout / PhoneLayout subtree and remounts it fresh, so
+  // every <Text> picks up the new Text.defaultProps on mount. Without this
+  // remount, many nodes (FlatList items, memoized components, Text inside
+  // the Skia/WebView Canvas chrome, etc.) hold onto their first-render
+  // fontFamily because they never re-render even though defaultProps has
+  // mutated. Active note / notebook / folder / scroll-restore state lives
+  // in Zustand stores, so the remount is visually effectively seamless.
+  const remountKey = regularFamily ?? 'system';
   if (isIPad) {
-    return <IPadLayout />;
+    return <IPadLayout key={remountKey} />;
   }
 
-  return <PhoneLayout />;
+  return <PhoneLayout key={remountKey} />;
 }

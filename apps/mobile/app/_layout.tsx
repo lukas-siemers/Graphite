@@ -86,7 +86,12 @@ export default function RootLayout() {
   // via the expo-font plugin in app.json (Info.plist UIAppFonts); the hook
   // keeps Android + Expo Go + web working off the same asset paths. `require`
   // is inline so metro can resolve the asset IDs at bundle time.
-  useFonts({
+  //
+  // Build 125: log the loaded/error state so we can tell from the Xcode
+  // console (or startup probe) whether fonts are reaching the device.
+  // Silent load failure looks identical to "my custom font isn't applied"
+  // on iOS, which is exactly what the user was hitting on Build 123.
+  const [fontsLoaded, fontError] = useFonts({
     'Newsreader-Regular': require('../assets/fonts/Newsreader-Regular.ttf'),
     'Newsreader-Bold': require('../assets/fonts/Newsreader-Bold.ttf'),
     'MPLUSRounded1c-Regular': require('../assets/fonts/MPLUSRounded1c-Regular.ttf'),
@@ -96,6 +101,15 @@ export default function RootLayout() {
     'Raleway-Regular': require('../assets/fonts/Raleway-Regular.otf'),
     'Raleway-Bold': require('../assets/fonts/Raleway-Bold.otf'),
   });
+  useEffect(() => {
+    if (fontError) {
+      // eslint-disable-next-line no-console
+      console.warn('[Graphite] useFonts load error:', fontError);
+    } else if (fontsLoaded) {
+      // eslint-disable-next-line no-console
+      console.log('[Graphite] useFonts: all 8 custom fonts loaded');
+    }
+  }, [fontsLoaded, fontError]);
 
   useEffect(() => {
     let active = true;
