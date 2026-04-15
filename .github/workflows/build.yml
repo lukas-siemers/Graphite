@@ -1,9 +1,13 @@
 name: Build
 
+# Disabled 2026-04-15 per user request — only ios.yml runs until further
+# notice. Re-enable by restoring the push trigger:
+#   on:
+#     push:
+#       branches:
+#         - main
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   build:

@@ -1,9 +1,13 @@
 name: CI
 
+# Disabled 2026-04-15 per user request — only ios.yml runs until further
+# notice. Re-enable by restoring the pull_request trigger:
+#   on:
+#     pull_request:
+#       branches:
+#         - main
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   test:
