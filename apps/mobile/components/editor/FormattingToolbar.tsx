@@ -121,6 +121,11 @@ export function FormattingToolbar() {
   const notes = useNoteStore((s) => s.notes);
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
   const isV2 = activeNote?.canvasVersion === 2;
+  // Build 114: pencil button visibility is gated on SpatialCanvasRenderer
+  // being actually mounted + ready for the active note, not just on
+  // canvasVersion===2. Editor.tsx computes this and threads it into the
+  // store; toolbar hides the button if the spatial pipeline isn't live.
+  const spatialReadyForInk = useEditorStore((s) => s.spatialReadyForInk);
   function isActive(cmd: FormatCommand) {
     return activeFormats.includes(cmd);
   }
@@ -195,7 +200,7 @@ export function FormattingToolbar() {
         {/* Group 5 — Insert */}
         <ToolbarButton command="link" icon="link-variant" />
 
-        {isV2 && (
+        {isV2 && spatialReadyForInk && (
           <>
             <Separator />
             <InkToggleButton />

@@ -149,8 +149,6 @@ function PhoneLayout() {
                 flexDirection: 'row',
                 alignItems: 'center',
                 backgroundColor: tokens.bgBase,
-                borderBottomWidth: 1,
-                borderBottomColor: tokens.border,
               }}
             >
               <FormattingToolbar />
@@ -177,8 +175,6 @@ function IPadLayout() {
             width: sidebarVisible ? 260 : 0,
             overflow: 'hidden',
             backgroundColor: tokens.bgSidebar,
-            borderRightWidth: sidebarVisible ? 1 : 0,
-            borderRightColor: tokens.border,
           }}
         >
           <Sidebar />
@@ -191,8 +187,6 @@ function IPadLayout() {
               flexDirection: 'row',
               alignItems: 'center',
               backgroundColor: tokens.bgBase,
-              borderBottomWidth: 1,
-              borderBottomColor: tokens.border,
               paddingLeft: 8,
             }}
           >

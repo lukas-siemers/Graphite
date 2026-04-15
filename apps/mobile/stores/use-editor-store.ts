@@ -14,6 +14,15 @@ interface EditorState {
   /** v2 spatial-canvas ink-capture mode. Toolbar toggles; Editor threads it
    *  into SpatialCanvasRenderer. Always false for v1 notes. */
   inkMode: boolean;
+  /**
+   * Build 114: true once SpatialCanvasRenderer has fully mounted for the
+   * active note (module lazy-loaded + spatialDoc resolved + spatialReady).
+   * The formatting toolbar's pencil/ink button gates its visibility on
+   * this flag so the user can never toggle ink mode against a non-ink
+   * renderer. Editor.tsx sets this in a useEffect whenever the render
+   * conditions change.
+   */
+  spatialReadyForInk: boolean;
   dispatchCommand: (cmd: FormatCommand) => void;
   clearCommand: () => void;
   setActiveFormats: (formats: FormatCommand[]) => void;
@@ -21,6 +30,7 @@ interface EditorState {
   setSyncState: (state: SyncState) => void;
   setInkMode: (value: boolean) => void;
   toggleInkMode: () => void;
+  setSpatialReadyForInk: (ready: boolean) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -30,6 +40,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectionSpansLines: false,
   syncState: 'disabled',
   inkMode: false,
+  spatialReadyForInk: false,
   dispatchCommand: (cmd) => set({ pendingCommand: cmd }),
   clearCommand: () => set({ pendingCommand: null }),
   setActiveFormats: (formats) => set({ activeFormats: formats }),
@@ -38,4 +49,5 @@ export const useEditorStore = create<EditorState>((set) => ({
   setSyncState: (syncState) => set({ syncState }),
   setInkMode: (value) => set({ inkMode: value }),
   toggleInkMode: () => set((s) => ({ inkMode: !s.inkMode })),
+  setSpatialReadyForInk: (ready) => set({ spatialReadyForInk: ready }),
 }));

@@ -64,6 +64,7 @@ export default function Editor() {
   const syncState = useEditorStore((s) => s.syncState);
   const inkMode = useEditorStore((s) => s.inkMode);
   const setInkMode = useEditorStore((s) => s.setInkMode);
+  const setSpatialReadyForInk = useEditorStore((s) => s.setSpatialReadyForInk);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -213,6 +214,25 @@ export default function Editor() {
   useEffect(() => {
     setInkMode(false);
   }, [activeNote?.id, setInkMode]);
+
+  // Build 114: thread SpatialCanvasRenderer readiness into the store so the
+  // formatting toolbar can gate the pencil/ink button. Ink only works when
+  // SpatialCanvasRenderer is actually live — the toolbar must not show a
+  // button that flips state nothing can honor.
+  useEffect(() => {
+    const ready =
+      activeNote?.canvasVersion === 2 &&
+      spatialReady &&
+      spatialDoc !== null &&
+      SpatialCanvasRendererModule !== null;
+    setSpatialReadyForInk(!!ready);
+  }, [
+    activeNote?.canvasVersion,
+    spatialReady,
+    spatialDoc,
+    SpatialCanvasRendererModule,
+    setSpatialReadyForInk,
+  ]);
 
   // Sync local state when active note changes
   useEffect(() => {
@@ -496,27 +516,36 @@ export default function Editor() {
               </Text>
             </View>
           ) : (
-            // v2 is still loading (lazy-require of @graphite/editor, or the
-            // spatial doc hasn't resolved yet). Rather than show a bare
-            // "Loading…" text and risk the user perceiving a blank editor,
-            // fall back to the v1 CanvasRenderer using the legacy body /
-            // canvasJson. Once the v2 pipeline is ready this branch is
-            // replaced by SpatialCanvasRendererModule on the next render.
+            // Build 114: NO MORE silent CanvasRenderer fallback for v2 notes.
+            // Prior builds fell back to CanvasRenderer while the spatial
+            // pipeline finished loading, which silently hid every failure
+            // mode in the spatial path (lazy require, spatial migration
+            // hook, Skia bridge). User ended up typing into a renderer that
+            // didn't support ink and had no idea why pencil did nothing.
             //
-            // The onTextChange handler routes through the spatial save path
-            // (see handleFallbackV2TextChange) so any keystrokes during the
-            // load window land on graphiteBlob — not on legacy body — and
-            // survive the hand-off to SpatialCanvasRenderer.
-            <CanvasRenderer
-              canvasDoc={activeCanvasDoc}
-              width={canvasWidth}
-              onTextChange={handleFallbackV2TextChange}
-              pendingCommand={pendingCommand}
-              onCommandApplied={clearCommand}
-              onActiveFormatsChange={setActiveFormats}
-              focusKey={activeNoteId}
-              inkMode={inkMode}
-            />
+            // Now: spatial is the only v2 renderer. If it's still loading
+            // we show a visible "Loading canvas..." state, which makes any
+            // hang immediately obvious. If it errors, the spatialLoadError
+            // branch above fires. Failing loudly > failing silently.
+            <View
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: tokens.bgBase,
+              }}
+            >
+              <Text
+                style={{
+                  color: tokens.textMuted,
+                  fontFamily: 'JetBrainsMono',
+                  fontSize: 12,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {`Loading canvas... · mod:${SpatialCanvasRendererModule ? 'loaded' : 'null'} · ready:${spatialReady ? 'true' : 'false'} · doc:${spatialDoc ? 'set' : 'null'}`}
+              </Text>
+            </View>
           )
         ) : (
           <CanvasRenderer
@@ -527,7 +556,6 @@ export default function Editor() {
             onCommandApplied={clearCommand}
             onActiveFormatsChange={setActiveFormats}
             focusKey={activeNoteId}
-            inkMode={inkMode}
           />
         )}
       </View>
@@ -538,8 +566,6 @@ export default function Editor() {
           flexDirection: 'row',
           height: 32,
           paddingHorizontal: 16,
-          borderTopWidth: 1,
-          borderTopColor: tokens.border,
           backgroundColor: tokens.bgBase,
           alignItems: 'center',
           justifyContent: 'space-between',
