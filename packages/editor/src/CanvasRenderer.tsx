@@ -38,6 +38,14 @@ export interface CanvasRendererProps {
   onActiveFormatsChange?: (formats: FormatCommand[]) => void;
   autoFocusFirst?: boolean;
   focusKey?: string | null;
+  /**
+   * Build 113 diagnostic: forwarded to LivePreviewInput so the on-device
+   * phase pill reflects ink-mode state when the user is in this renderer
+   * (which does NOT itself mount InkOverlay). If the user reports
+   * "pencil does nothing" and the pill shows ink:on here, they're stuck
+   * in the v2 fallback path.
+   */
+  inkMode?: boolean;
 }
 
 const DEBOUNCE_MS = 500;
@@ -51,6 +59,7 @@ export function CanvasRenderer({
   onActiveFormatsChange,
   autoFocusFirst = false,
   focusKey = null,
+  inkMode = false,
 }: CanvasRendererProps) {
   const body = canvasDoc.textContent.body;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +96,7 @@ export function CanvasRenderer({
           onCommandApplied={onCommandApplied}
           onActiveFormatsChange={onActiveFormatsChange}
           autoFocus={autoFocusFirst}
+          diagInkActive={inkMode}
         />
       </ScrollView>
     </View>

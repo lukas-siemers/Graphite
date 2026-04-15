@@ -515,6 +515,7 @@ export default function Editor() {
               onCommandApplied={clearCommand}
               onActiveFormatsChange={setActiveFormats}
               focusKey={activeNoteId}
+              inkMode={inkMode}
             />
           )
         ) : (
@@ -526,6 +527,7 @@ export default function Editor() {
             onCommandApplied={clearCommand}
             onActiveFormatsChange={setActiveFormats}
             focusKey={activeNoteId}
+            inkMode={inkMode}
           />
         )}
       </View>

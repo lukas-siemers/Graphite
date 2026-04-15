@@ -1590,6 +1590,7 @@ export function buildEditorShellHtml(): string {
 :root { color-scheme: dark; }
 html,body{margin:0;padding:0;background:#131313;color:#FFFFFF;font-family:-apple-system,sans-serif;outline:none;border:none;}
 html,body,*{-webkit-tap-highlight-color:transparent;}
+*:focus,*:focus-visible,*:focus-within{outline:none !important;box-shadow:none !important;}
 #editor{background:#131313;outline:none;border:none;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}

@@ -68,6 +68,12 @@ interface LivePreviewInputProps {
   focusKey?: string | null;
   enableBlockHeights?: boolean;
   onBlockHeights?: (msg: { type: 'block-heights'; blocks: Array<{ lineStart: number; lineEnd: number; height: number }> }) => void;
+  /**
+   * Build 113 diagnostic: surface whether ink mode is currently active in
+   * the on-device phase pill so the user can tell us which render path
+   * is live when Apple Pencil does nothing. Purely informational.
+   */
+  diagInkActive?: boolean;
 }
 
 // Build 97: Codex's call after Build 96 proved phase 0.05 (WKUserScript-
@@ -111,6 +117,7 @@ export function LivePreviewInput({
   focusKey = null,
   enableBlockHeights = false,
   onBlockHeights,
+  diagInkActive = false,
 }: LivePreviewInputProps) {
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
@@ -508,7 +515,7 @@ export function LivePreviewInput({
             phase 6 · ready · t:3 i:5 → everything working (not the bug) */}
       <View style={styles.phaseIndicator} pointerEvents="none">
         <Text style={styles.phaseIndicatorText}>
-          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount}`}
+          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount} · ink:${diagInkActive ? 'on' : 'off'}`}
         </Text>
       </View>
       {useFallback && (

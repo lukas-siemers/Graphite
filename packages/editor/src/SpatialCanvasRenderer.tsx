@@ -143,6 +143,7 @@ export function SpatialCanvasRenderer({
           onCommandApplied={onCommandApplied}
           onActiveFormatsChange={onActiveFormatsChange}
           autoFocus={autoFocusFirst}
+          diagInkActive={inkMode}
         />
         {inkMode ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="auto">
