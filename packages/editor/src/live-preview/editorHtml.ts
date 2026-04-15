@@ -1344,9 +1344,60 @@ const view = capturedView = new EditorView({
           post({ type: 'input-activity' });
         }
       }),
+      // Build 105: comprehensive editor theme. CM6's default stylesheet
+      // paints .cm-editor and .cm-content with a near-white background;
+      // Build 102's minimal shell stripped the old global !important
+      // overrides and left that default visible — hence the white page
+      // the user reported. Theme() injects higher-specificity scoped
+      // CSS so the editor surface is transparent to the shell body
+      // (#1E1E1E) without reintroducing the Build 99 layout collapse
+      // (no min-height:100vh, no overflow:visible on .cm-scroller).
       EditorView.theme({
-        '&': { background: 'transparent' },
-        '.cm-scroller': { fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif' },
+        '&': {
+          background: 'transparent',
+          color: '#DCDDDE',
+          fontSize: '16px',
+          lineHeight: '24px',
+          outline: 'none',
+          border: 'none',
+        },
+        '&.cm-focused': {
+          outline: 'none',
+          boxShadow: 'none',
+          border: 'none',
+        },
+        '.cm-scroller': {
+          background: 'transparent',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif',
+        },
+        '.cm-content': {
+          background: 'transparent',
+          caretColor: '#FF6A00',
+          padding: '24px 0 48px 0',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        },
+        '.cm-cursor, .cm-cursor-primary': {
+          borderLeftColor: '#FF6A00',
+          borderLeftWidth: '3px',
+        },
+        '.cm-gutters': {
+          background: 'transparent',
+          border: 'none',
+        },
+        '.cm-line': {
+          padding: '0',
+        },
+        '.cm-selectionBackground': {
+          background: 'rgba(242,133,0,0.25)',
+        },
+        '&.cm-focused .cm-selectionBackground': {
+          background: 'rgba(242,133,0,0.3)',
+        },
+        '.cm-placeholder': {
+          color: '#8A8F98',
+          fontStyle: 'italic',
+        },
       }),
     ],
   }),
