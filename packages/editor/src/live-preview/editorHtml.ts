@@ -1358,14 +1358,20 @@ const view = capturedView = new EditorView({
           color: '#FFFFFF',
           fontSize: '16px',
           lineHeight: '24px',
-          outline: 'none',
-          border: 'none',
+          outline: 'none !important',
+          border: 'none !important',
+          boxShadow: 'none !important',
           height: '100%',
         },
         '&.cm-focused': {
-          outline: 'none',
-          boxShadow: 'none',
-          border: 'none',
+          outline: 'none !important',
+          boxShadow: 'none !important',
+          border: 'none !important',
+        },
+        '&.cm-editor.cm-focused': {
+          outline: 'none !important',
+          boxShadow: 'none !important',
+          border: 'none !important',
         },
         '.cm-scroller': {
           backgroundColor: '#131313',
@@ -1582,8 +1588,9 @@ export function buildEditorShellHtml(): string {
 <meta name="supported-color-schemes" content="dark" />
 <style>
 :root { color-scheme: dark; }
-html,body{margin:0;padding:0;background:#131313;color:#FFFFFF;font-family:-apple-system,sans-serif;}
-#editor{background:#131313;}
+html,body{margin:0;padding:0;background:#131313;color:#FFFFFF;font-family:-apple-system,sans-serif;outline:none;border:none;}
+html,body,*{-webkit-tap-highlight-color:transparent;}
+#editor{background:#131313;outline:none;border:none;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
 </style>

@@ -401,41 +401,17 @@ export function LivePreviewInput({
         if (inkMode) return;
         setTapCount((n) => n + 1);
         onFocusRef.current?.();
-        // Build 101: direct .cm-content.focus() injection. Previously we
-        // dispatched a MessageEvent through postToFrame and relied on the
-        // bootstrap's message listener to call view.focus(). The indirection
-        // drops out of the evaluateJavaScript synchronous context, which
-        // (combined with WKWebView's keyboard policy) can silently prevent
-        // the iOS keyboard from showing even when keyboardDisplayRequiresUserAction
-        // is false. Calling .cm-content.focus() directly in the injection
-        // keeps focus inside the RN-originated evaluateJavaScript window.
-        // Also set a collapsed selection at offset 0 so CM6 syncs its
-        // internal selection state with the native caret on first focus.
-        if (readyRef.current) {
-          webViewRef.current?.injectJavaScript(`
-            (function(){
-              try {
-                var el = document.querySelector('.cm-content');
-                if (el) {
-                  el.focus();
-                  var sel = window.getSelection && window.getSelection();
-                  if (sel && el.firstChild) {
-                    var range = document.createRange();
-                    range.setStart(el, 0);
-                    range.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                  }
-                }
-              } catch (e) {
-                if (window.ReactNativeWebView) {
-                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: 'focus-inject:' + String(e) }));
-                }
-              }
-            })();
-            true;
-          `);
-        }
+        // Build 111: RN-side .cm-content.focus() injection removed. Earlier
+        // builds injected focus on every onTouchStart to force the iOS
+        // keyboard up, but that fired the keyboard on scroll gestures too
+        // (touch-and-drag triggers onTouchStart at the very start of the
+        // drag). With Build 104+ the CM6 editor is properly DOM-attached
+        // and `keyboardDisplayRequiresUserAction={false}` on the WebView
+        // lets CM6 itself focus .cm-content on a tap inside the WebView —
+        // the iOS keyboard comes up naturally without RN interference, and
+        // scroll gestures no longer accidentally raise it. onFocusRef is
+        // still notified (for editor-level focus tracking) and tapCount
+        // still increments for diagnostics.
       }}
     >
       {source ? (
