@@ -23,6 +23,15 @@ interface EditorState {
    * conditions change.
    */
   spatialReadyForInk: boolean;
+  /**
+   * Build 115 diagnostic: increments every time InkOverlay's
+   * onResponderGrant successfully claims a touch (finger or pencil).
+   * LivePreviewInput reads this and shows pc:N in the phase pill.
+   * pc remaining 0 after the user tries to draw = touches are not
+   * reaching InkOverlay → gesture-race problem (needs RNGH migration).
+   * pc > 0 with no visible stroke = downstream Skia paint bug.
+   */
+  inkResponderGrantCount: number;
   dispatchCommand: (cmd: FormatCommand) => void;
   clearCommand: () => void;
   setActiveFormats: (formats: FormatCommand[]) => void;
@@ -31,6 +40,7 @@ interface EditorState {
   setInkMode: (value: boolean) => void;
   toggleInkMode: () => void;
   setSpatialReadyForInk: (ready: boolean) => void;
+  incrementInkResponderGrant: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -41,6 +51,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   syncState: 'disabled',
   inkMode: false,
   spatialReadyForInk: false,
+  inkResponderGrantCount: 0,
   dispatchCommand: (cmd) => set({ pendingCommand: cmd }),
   clearCommand: () => set({ pendingCommand: null }),
   setActiveFormats: (formats) => set({ activeFormats: formats }),
@@ -50,4 +61,6 @@ export const useEditorStore = create<EditorState>((set) => ({
   setInkMode: (value) => set({ inkMode: value }),
   toggleInkMode: () => set((s) => ({ inkMode: !s.inkMode })),
   setSpatialReadyForInk: (ready) => set({ spatialReadyForInk: ready }),
+  incrementInkResponderGrant: () =>
+    set((s) => ({ inkResponderGrantCount: s.inkResponderGrantCount + 1 })),
 }));

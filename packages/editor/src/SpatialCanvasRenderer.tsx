@@ -68,6 +68,13 @@ export interface SpatialCanvasRendererProps {
    * text editing.
    */
   inkMode?: boolean;
+  /**
+   * Build 115 diagnostic callback forwarded to InkOverlay. Fires on each
+   * onResponderGrant so the parent can surface an on-device pc:N counter.
+   */
+  onInkResponderGrant?: () => void;
+  /** Build 115: current pc:N value to display in the LivePreviewInput pill. */
+  inkResponderGrantCount?: number;
 }
 
 export function SpatialCanvasRenderer({
@@ -83,6 +90,8 @@ export function SpatialCanvasRenderer({
   autoFocusFirst = false,
   focusKey = null,
   inkMode = false,
+  onInkResponderGrant,
+  inkResponderGrantCount = 0,
 }: SpatialCanvasRendererProps) {
   const [contentSize, setContentSize] = useState<{ width: number; height: number }>({
     width: 0,
@@ -144,6 +153,7 @@ export function SpatialCanvasRenderer({
           onActiveFormatsChange={onActiveFormatsChange}
           autoFocus={autoFocusFirst}
           diagInkActive={inkMode}
+          diagInkResponderGrantCount={inkResponderGrantCount}
         />
         {inkMode ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="auto">
@@ -153,6 +163,7 @@ export function SpatialCanvasRenderer({
               height={contentSize.height}
               pointerEvents="auto"
               onNewStroke={handleInkChange}
+              onResponderGrantDiagnostic={onInkResponderGrant}
             />
           </View>
         ) : null}
@@ -169,5 +180,9 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 48,
     flexGrow: 1,
+    // Build 115: explicit bgBase here too. Previously the inner content
+    // container had no bg set, which could render as default white in
+    // the padding area on some iOS layouts. Belt-and-suspenders.
+    backgroundColor: tokens.bgBase,
   },
 });

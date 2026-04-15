@@ -111,5 +111,6 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 48,
     flexGrow: 1,
+    backgroundColor: tokens.bgBase,
   },
 });

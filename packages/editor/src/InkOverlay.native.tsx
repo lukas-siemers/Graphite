@@ -28,6 +28,17 @@ export interface InkOverlayProps {
   height: number;
   pointerEvents?: 'none' | 'auto';
   onNewStroke?: (stroke: SpatialInkStroke) => void;
+  /**
+   * Build 115 diagnostic: notified on every onResponderGrant that
+   * successfully claims a touch (finger or Apple Pencil). Lets the
+   * parent render a pc:N counter in the phase pill so we can see
+   * on-device whether touches are landing at all. If pc stays at 0
+   * when the user tries to draw, the RN responder never grants —
+   * meaning either a gesture-race with ScrollView or a known Pencil
+   * bridging issue. If pc > 0 but no stroke is visible, the
+   * failure is downstream (Skia paint, size 0, color mismatch).
+   */
+  onResponderGrantDiagnostic?: () => void;
 }
 
 function strokeToPath(stroke: SpatialInkStroke): SkPath {
@@ -54,6 +65,7 @@ export function InkOverlay({
   height,
   pointerEvents = 'none',
   onNewStroke,
+  onResponderGrantDiagnostic,
 }: InkOverlayProps) {
   const [activeStroke, setActiveStroke] = useState<SpatialInkStroke | null>(null);
   const activeRef = useRef<SpatialInkStroke | null>(null);
@@ -134,6 +146,8 @@ export function InkOverlay({
       onResponderGrant={(e) => {
         const { locationX, locationY, force } = e.nativeEvent;
         handleStart(locationX, locationY, typeof force === 'number' ? force : 0.5, 0);
+        // Build 115: notify parent for on-device pc:N counter.
+        onResponderGrantDiagnostic?.();
       }}
       onResponderMove={(e) => {
         const { locationX, locationY, force } = e.nativeEvent;

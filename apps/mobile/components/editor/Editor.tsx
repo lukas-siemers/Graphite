@@ -65,6 +65,12 @@ export default function Editor() {
   const inkMode = useEditorStore((s) => s.inkMode);
   const setInkMode = useEditorStore((s) => s.setInkMode);
   const setSpatialReadyForInk = useEditorStore((s) => s.setSpatialReadyForInk);
+  const incrementInkResponderGrant = useEditorStore(
+    (s) => s.incrementInkResponderGrant,
+  );
+  const inkResponderGrantCount = useEditorStore(
+    (s) => s.inkResponderGrantCount,
+  );
 
   const [localTitle, setLocalTitle] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -497,6 +503,8 @@ export default function Editor() {
               onActiveFormatsChange={setActiveFormats}
               focusKey={activeNoteId}
               inkMode={inkMode}
+              onInkResponderGrant={incrementInkResponderGrant}
+              inkResponderGrantCount={inkResponderGrantCount}
             />
           ) : spatialLoadError ? (
             <View

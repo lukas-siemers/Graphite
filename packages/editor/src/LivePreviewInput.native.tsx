@@ -74,6 +74,12 @@ interface LivePreviewInputProps {
    * is live when Apple Pencil does nothing. Purely informational.
    */
   diagInkActive?: boolean;
+  /**
+   * Build 115 diagnostic: pc:N counter — InkOverlay's onResponderGrant
+   * fire count. Piped in from the editor store by whichever parent
+   * mounts LivePreviewInput. Purely informational.
+   */
+  diagInkResponderGrantCount?: number;
 }
 
 // Build 97: Codex's call after Build 96 proved phase 0.05 (WKUserScript-
@@ -118,6 +124,7 @@ export function LivePreviewInput({
   enableBlockHeights = false,
   onBlockHeights,
   diagInkActive = false,
+  diagInkResponderGrantCount = 0,
 }: LivePreviewInputProps) {
   const webViewRef = useRef<WebView>(null);
   const readyRef = useRef(false);
@@ -515,7 +522,7 @@ export function LivePreviewInput({
             phase 6 · ready · t:3 i:5 → everything working (not the bug) */}
       <View style={styles.phaseIndicator} pointerEvents="none">
         <Text style={styles.phaseIndicatorText}>
-          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount} · ink:${diagInkActive ? 'on' : 'off'}`}
+          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount} · ink:${diagInkActive ? 'on' : 'off'} · pc:${diagInkResponderGrantCount}`}
         </Text>
       </View>
       {useFallback && (
@@ -564,8 +571,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     backgroundColor: 'rgba(20, 20, 20, 0.75)',
-    borderWidth: 1,
-    borderColor: tokens.border,
+    // Build 115: removed borderWidth/borderColor. The thin #333 border
+    // on dark bg was reading as a faint white-ish ring; user reported
+    // "white border around editor" persistently through Build 114 even
+    // after layout dividers were killed — the phase pill border was
+    // the remaining culprit.
   },
   phaseIndicatorText: {
     color: tokens.textMuted,
