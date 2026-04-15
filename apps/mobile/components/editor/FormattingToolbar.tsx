@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { View, Pressable, Text, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { tokens } from '@graphite/ui';
 import type { FormatCommand } from '@graphite/editor';
 import { useEditorStore } from '../../stores/use-editor-store';
 import { useNoteStore } from '../../stores/use-note-store';
+import { InkColorPickerModal } from './InkColorPickerModal';
 
 function Separator() {
   return (
@@ -172,50 +174,44 @@ function InkSizeButtons() {
   );
 }
 
-// Build 117: pencil color swatches. Render only when inkMode=true.
-const INK_COLORS = [
-  '#FFFFFF',
-  '#F28500',
-  '#F44336',
-  '#A8D060',
-  '#4FC3F7',
-  '#000000',
-] as const;
-
+// Build 124: replaces the fixed 6-color swatch row with a single color-
+// indicator button that opens a full HSV color picker modal (hue bar + SV
+// square + hex input + presets). Styled after macOS System Color Picker.
 function InkColorSwatches() {
   const inkColor = useEditorStore((s) => s.inkColor);
   const setInkColor = useEditorStore((s) => s.setInkColor);
+  const [open, setOpen] = useState(false);
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {INK_COLORS.map((color) => {
-        const selected = inkColor.toUpperCase() === color.toUpperCase();
-        return (
-          <Pressable
-            key={color}
-            onPress={() => setInkColor(color)}
-            accessibilityLabel={`Pencil color ${color}`}
-            accessibilityState={{ selected }}
-            style={{
-              width: 24,
-              height: 30,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <View
-              style={{
-                width: 16,
-                height: 16,
-                borderRadius: 8,
-                backgroundColor: color,
-                borderWidth: selected ? 2 : 1,
-                borderColor: selected ? tokens.accent : tokens.border,
-              }}
-            />
-          </Pressable>
-        );
-      })}
-    </View>
+    <>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityLabel="Pick pencil color"
+        style={({ pressed }) => ({
+          width: 30,
+          height: 30,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: pressed ? tokens.bgBright : 'transparent',
+          marginHorizontal: 1,
+        })}
+      >
+        <View
+          style={{
+            width: 18,
+            height: 18,
+            backgroundColor: inkColor,
+            borderWidth: 1,
+            borderColor: tokens.border,
+          }}
+        />
+      </Pressable>
+      <InkColorPickerModal
+        visible={open}
+        onClose={() => setOpen(false)}
+        initialColor={inkColor}
+        onSelect={(hex) => setInkColor(hex)}
+      />
+    </>
   );
 }
 

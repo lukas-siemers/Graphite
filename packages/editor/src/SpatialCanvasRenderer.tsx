@@ -40,6 +40,7 @@ import {
 } from '@graphite/canvas';
 import { LivePreviewInput } from './LivePreviewInput';
 import { InkOverlay } from './InkOverlay';
+import { InkPassiveOverlay } from './InkPassiveOverlay';
 import type { FormatCommand } from './types';
 
 const DEBOUNCE_MS = 500;
@@ -161,6 +162,18 @@ export function SpatialCanvasRenderer({
           diagInkActive={inkMode}
           diagInkResponderGrantCount={inkResponderGrantCount}
         />
+        {/* Build 124: always-mounted SVG passive overlay renders committed
+            strokes without loading Skia's Metal-backed Canvas. Hidden while
+            the Skia InkOverlay is live (inkMode=true) so we don't double-
+            render the stroke set, and because the Skia overlay is what
+            captures the active in-flight stroke anyway. */}
+        {!inkMode && spatialDoc.inkStrokes.length > 0 ? (
+          <InkPassiveOverlay
+            strokes={spatialDoc.inkStrokes}
+            width={contentSize.width}
+            height={contentSize.height}
+          />
+        ) : null}
         {inkMode ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="auto">
             <InkOverlay
