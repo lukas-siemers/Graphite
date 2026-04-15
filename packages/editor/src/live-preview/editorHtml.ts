@@ -1431,6 +1431,35 @@ try {
   post({ type: 'error', message: 'attach:' + String(e && e.message || e) });
 }
 
+// Build 108: post-CM6 style injection. The root cause of Builds 105-107's
+// failed color fixes was CSS source order: CM6 uses style-mod to inject
+// its theme stylesheets dynamically AFTER the shell HTML parses, so
+// when our shell <style> rules and CM6's baseTheme rules both use
+// !important and have equal specificity, CM6's later-injected rules
+// win the tie. This block appends a <style> element to document.head
+// AFTER new EditorView(...) has run — putting our rules last in source
+// order and flipping the tie in our favor.
+try {
+  var bgStyleEl = document.createElement('style');
+  bgStyleEl.setAttribute('data-graphite', 'post-cm6-overrides');
+  bgStyleEl.textContent = [
+    '.cm-editor,.cm-editor *{background-color:transparent !important;background:transparent !important;}',
+    '.cm-editor{color:#FFFFFF !important;}',
+    '.cm-content{color:#FFFFFF !important;caret-color:#FF6A00 !important;}',
+    '.cm-cursor,.cm-cursor-primary{border-left-color:#FF6A00 !important;border-left-width:3px !important;}',
+    '.cm-selectionBackground{background:rgba(242,133,0,0.25) !important;}',
+    '.cm-focused .cm-selectionBackground{background:rgba(242,133,0,0.3) !important;}',
+    '.cm-placeholder{color:#8A8F98 !important;font-style:italic !important;}',
+    '.cm-gutters{background:transparent !important;border:none !important;}',
+    '.cm-activeLine,.cm-activeLineGutter{background:transparent !important;}',
+    '.cm-line{padding:0 !important;}',
+  ].join('\n');
+  document.head.appendChild(bgStyleEl);
+  postPhase(5.1, 'post-cm6-style-injected');
+} catch (e) {
+  post({ type: 'error', message: 'style-inject:' + String(e && e.message || e) });
+}
+
 // ---------------------------------------------------------------------------
 // Message bridge
 // ---------------------------------------------------------------------------
