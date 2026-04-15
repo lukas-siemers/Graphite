@@ -1,15 +1,23 @@
 /**
  * InkOverlay (native) — renders SpatialInkStroke[] on a Skia canvas.
  *
- * Positioned inside scroll content at absolute canvas coordinates: the parent
- * sizes it to (canvasWidth, totalCanvasHeight) and places it under the text
- * layer. When `pointerEvents === 'none'` the overlay forwards touches to the
- * text layer beneath; when `'auto'` it captures pen input and emits strokes
- * via `onNewStroke`.
+ * Build 116: touch handling migrated from RN's responder system to
+ * react-native-gesture-handler's Gesture.Pan. The previous responder-
+ * based implementation could not compete with the parent ScrollView's
+ * native UIPanGestureRecognizer even with scrollEnabled={!inkMode}; on
+ * iPad iOS 18+ the scroll pan claimed every pencil touch BEFORE the RN
+ * responder negotiation got a chance, so InkOverlay's onStartShouldSet-
+ * Responder never fired. Build 115's pc:0 telemetry confirmed it.
  *
- * Pressure → stroke width: `stroke.width * (0.5 + 0.5 * pressure)`, the same
- * shape used by the legacy drawing canvas. Computed per-point via a Skia
- * Path with sub-segments — not a single Path.line, so we can vary width.
+ * Gesture.Pan runs at the UIGestureRecognizer layer alongside the
+ * ScrollView's pan recognizer, so the two compete on equal native
+ * footing. Pan detects Apple Pencil touches correctly on iPad and
+ * exposes pressure via e.x/y/velocityX. Pressure sensitivity is kept
+ * at a flat 0.5 on native for now (Pencil Pro pressure is in nativeEvent
+ * under a different shape; wire that in a follow-up build).
+ *
+ * Pressure → stroke width: `stroke.width * (0.5 + 0.5 * pressure)`, the
+ * same shape used by the legacy drawing canvas.
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
@@ -19,6 +27,7 @@ import {
   Skia,
   type SkPath,
 } from '@shopify/react-native-skia';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { nanoid } from 'nanoid/non-secure';
 import type { SpatialInkStroke, StrokePoint } from './ink-types';
 
@@ -29,14 +38,12 @@ export interface InkOverlayProps {
   pointerEvents?: 'none' | 'auto';
   onNewStroke?: (stroke: SpatialInkStroke) => void;
   /**
-   * Build 115 diagnostic: notified on every onResponderGrant that
+   * Build 115 diagnostic: notified on every Pan.onBegin that
    * successfully claims a touch (finger or Apple Pencil). Lets the
    * parent render a pc:N counter in the phase pill so we can see
-   * on-device whether touches are landing at all. If pc stays at 0
-   * when the user tries to draw, the RN responder never grants —
-   * meaning either a gesture-race with ScrollView or a known Pencil
-   * bridging issue. If pc > 0 but no stroke is visible, the
-   * failure is downstream (Skia paint, size 0, color mismatch).
+   * on-device whether touches are landing. If pc stays at 0 when the
+   * user tries to draw, the native gesture system itself is rejecting
+   * the pan — a much deeper bug than the responder-race we just fixed.
    */
   onResponderGrantDiagnostic?: () => void;
 }
@@ -107,6 +114,33 @@ export function InkOverlay({
     onNewStroke?.(s);
   }, [onNewStroke]);
 
+  // Build 116: Gesture.Pan() at the native gesture layer.
+  // - minDistance: 0 captures taps-turned-to-strokes immediately, not
+  //   after a threshold.
+  // - runOnJS on each callback so we can mutate React state.
+  // - onBegin fires on finger-down; onUpdate fires per move; onEnd/
+  //   onFinalize fire on release.
+  const panGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .minDistance(0)
+        .onBegin((e) => {
+          handleStart(e.x, e.y, 0.5, 0);
+          onResponderGrantDiagnostic?.();
+        })
+        .onUpdate((e) => {
+          handleMove(e.x, e.y, 0.5, 0);
+        })
+        .onEnd(() => {
+          handleEnd();
+        })
+        .onFinalize(() => {
+          handleEnd();
+        })
+        .runOnJS(true),
+    [handleStart, handleMove, handleEnd, onResponderGrantDiagnostic],
+  );
+
   const paths = useMemo(
     () =>
       strokes.map((s) => ({
@@ -129,32 +163,15 @@ export function InkOverlay({
     [activeStroke],
   );
 
-  return (
+  // Build 116: wrap the overlay in GestureDetector so Pan is attached
+  // to the native view. pointerEvents on the inner View still gates
+  // whether the gesture is active (when pointerEvents='none' we don't
+  // activate the gesture logic — parent controls this via inkMode).
+  const isActive = pointerEvents === 'auto';
+  const content = (
     <View
-      // Build 112: InkOverlay fills its parent regardless of the
-      // width/height props, which can start at 0 before the ScrollView's
-      // onContentSizeChange fires. A zero-sized View has no hit area,
-      // so the RN responder system was silently dropping every pencil
-      // touch — user reported "Apple Pencil still does not work" even
-      // after mounting InkOverlay in inkMode=true. absoluteFill grants
-      // an immediate, always-valid hit region that matches whatever
-      // parent (scroll content) size the layout resolved.
       style={StyleSheet.absoluteFill}
       pointerEvents={pointerEvents}
-      onStartShouldSetResponder={() => pointerEvents === 'auto'}
-      onMoveShouldSetResponder={() => pointerEvents === 'auto'}
-      onResponderGrant={(e) => {
-        const { locationX, locationY, force } = e.nativeEvent;
-        handleStart(locationX, locationY, typeof force === 'number' ? force : 0.5, 0);
-        // Build 115: notify parent for on-device pc:N counter.
-        onResponderGrantDiagnostic?.();
-      }}
-      onResponderMove={(e) => {
-        const { locationX, locationY, force } = e.nativeEvent;
-        handleMove(locationX, locationY, typeof force === 'number' ? force : 0.5, 0);
-      }}
-      onResponderRelease={handleEnd}
-      onResponderTerminate={handleEnd}
     >
       <Canvas style={styles.canvas}>
         {paths.map(({ stroke, path, avgPressure }) => (
@@ -185,14 +202,18 @@ export function InkOverlay({
       </Canvas>
     </View>
   );
+
+  if (!isActive) {
+    // When inkMode is false the overlay is in the tree but not capturing
+    // touches. Skip the gesture wrapper entirely to avoid any overhead
+    // / hit-test interference with the text editor below.
+    return content;
+  }
+
+  return <GestureDetector gesture={panGesture}>{content}</GestureDetector>;
 }
 
 const styles = StyleSheet.create({
-  root: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-  },
   canvas: {
     flex: 1,
   },

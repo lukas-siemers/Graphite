@@ -2,6 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+// Build 116: GestureHandlerRootView must wrap the entire app tree for
+// react-native-gesture-handler's native gesture recognizers to work on
+// iOS. Without it, GestureDetector silently no-ops (touches fall through
+// to the underlying responder system instead). InkOverlay's Pan gesture
+// migration depends on this — pc:0 on Build 115 confirmed RN's responder
+// was losing the race to ScrollView's UIPanGestureRecognizer; only native
+// gestures via RNGH can beat a native scroll gesture.
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 type AuthGateComponent = (props: { children: React.ReactNode }) => React.JSX.Element;
 
@@ -140,16 +148,18 @@ export default function RootLayout() {
   }
 
   return (
-    <RootErrorBoundary>
-      <StatusBar
-        hidden={Platform.OS === 'ios'}
-        style="light"
-        backgroundColor="transparent"
-        translucent
-      />
-      <AuthGate>
-        <Stack screenOptions={{ headerShown: false }} />
-      </AuthGate>
-    </RootErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#131313' }}>
+      <RootErrorBoundary>
+        <StatusBar
+          hidden={Platform.OS === 'ios'}
+          style="light"
+          backgroundColor="transparent"
+          translucent
+        />
+        <AuthGate>
+          <Stack screenOptions={{ headerShown: false }} />
+        </AuthGate>
+      </RootErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
