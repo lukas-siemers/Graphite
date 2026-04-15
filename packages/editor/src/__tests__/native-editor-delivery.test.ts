@@ -55,36 +55,38 @@ describe('native editor delivery — Build 89 guardrails', () => {
     expect(native).not.toMatch(/<script[\s>]/);
   });
 
-  it('native shell carries color-only CM6 overrides, not layout (Build 106)', () => {
-    // Build 99 collapsed CM6's layout by injecting the FULL EDITOR_CSS
-    // into the shell — specifically `.cm-scroller { overflow: visible
-    // !important }` and `min-height: 100vh` on html/body/#editor/.cm-content.
-    // Build 102 stripped ALL .cm-* rules in response, but CM6's default
-    // near-white background then showed through everywhere (Build 105's
-    // EditorView.theme(...) failed to win specificity on iOS WKWebView).
-    //
-    // Build 106 splits the baby: shell re-introduces ONLY pure cosmetic
-    // rules (background, color, caret, selection, placeholder) with
-    // !important so they win against CM6 defaults — and explicitly EXCLUDES
-    // every layout-affecting rule that caused the Build 99 collapse.
+  it('native shell is minimal — theme owns all CM6 coloring (Build 110)', () => {
+    // Build 110: shell CSS carries only the bare body/html/status rules
+    // plus the color-scheme hint. All CM6 element coloring (.cm-editor,
+    // .cm-scroller, .cm-content, .cm-line, .cm-cursor, .cm-placeholder,
+    // .cm-selectionBackground, .cm-gutters, .cm-tooltip, .cm-panels) is
+    // owned by EditorView.theme({...}, { dark: true }) in the bootstrap.
+    // Builds 106-109 kept a mix of shell !important rules and theme rules
+    // and ended up with patchy half-white editors because the two rule
+    // sets fought at different specificity / !important levels. This test
+    // asserts the shell stays minimal so that fight can't restart.
     expect(native).toMatch(/buildEditorShellHtml/);
     const shell = buildEditorShellHtml();
     // Positive: the two divs CM6 and the boot scaffold need.
     expect(shell).toContain('id="editor"');
     expect(shell).toContain('id="status"');
     expect(shell).not.toMatch(/<script[\s>]/);
-    // Positive: color overrides we care about land in the shell.
-    // Build 107: the universal `.cm-editor, .cm-editor *` rule handles
-    // transparent backgrounds; we assert its presence.
-    expect(shell).toMatch(/\.cm-editor,\.cm-editor\s*\*\s*\{[^}]*background-color:\s*transparent/);
-    expect(shell).toMatch(/\.cm-content\s*\{[^}]*color:\s*#FFFFFF/);
-    expect(shell).toMatch(/\.cm-placeholder\s*\{[^}]*color:\s*#8A8F98/);
-    // Build 107: color-scheme hint must be present so WKWebView doesn't
+    // Positive: color-scheme hint must be present so WKWebView doesn't
     // default to light mode (which made CM6 ignore our overrides).
     expect(shell).toMatch(/color-scheme:\s*dark/);
     expect(shell).toMatch(/<meta name="color-scheme" content="dark"/);
+    // Positive: body/html dark background is in place so any uncovered
+    // CM6 area reveals the correct color.
+    expect(shell).toMatch(/html,body\s*\{[^}]*background:\s*#131313/);
+    // Negative: shell MUST NOT carry .cm-* rules. That's the theme's job.
+    // Lone exceptions are content references (e.g., ellipsis strings), but
+    // no <style>-block CSS selectors should match.
+    expect(shell).not.toMatch(/\.cm-editor\s*[\{,]/);
+    expect(shell).not.toMatch(/\.cm-content\s*\{/);
+    expect(shell).not.toMatch(/\.cm-scroller\s*\{/);
+    expect(shell).not.toMatch(/\.cm-placeholder\s*\{/);
     // Negative guard: the Build 99 layout-collapse triggers must NEVER
-    // reappear, even if someone expands the color rule set.
+    // reappear.
     expect(shell).not.toMatch(/overflow:\s*visible\s*!important/);
     expect(shell).not.toMatch(/min-height:\s*100vh/);
   });

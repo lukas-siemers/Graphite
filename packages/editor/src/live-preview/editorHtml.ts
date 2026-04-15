@@ -1344,15 +1344,14 @@ const view = capturedView = new EditorView({
           post({ type: 'input-activity' });
         }
       }),
-      // Build 109: dark editor theme with { dark: true } flag. Passing
-      // dark:true as the second argument tells CM6 to merge this theme
-      // with its DARK baseTheme defaults rather than the LIGHT ones,
-      // which was the root cause of the white background surviving every
-      // override attempt in Builds 105-108. CM6's baseTheme ships paired
-      // light/dark variants; the { dark: true } flag flips the base
-      // variant, so our overrides compose with dark defaults instead of
-      // fighting light ones. Solid #131313 backgrounds (not transparent)
-      // also dodge iPad WKWebView's opaque/transparent compositor skip.
+      // Build 110: single authoritative color source. Theme extension with
+      // { dark: true } flag tells CM6 to merge rules with its DARK
+      // baseTheme variant instead of the LIGHT default. Shell CSS no
+      // longer sets any .cm-* rules (Build 110 stripped them to avoid the
+      // shell-!important vs theme-normal specificity war that produced
+      // patchy half-white editors through Build 109). Every CM6 surface
+      // the user can see gets an explicit #131313 here so no CM6 baseTheme
+      // leaks a default-white paint anywhere.
       EditorView.theme({
         '&': {
           backgroundColor: '#131313',
@@ -1361,6 +1360,7 @@ const view = capturedView = new EditorView({
           lineHeight: '24px',
           outline: 'none',
           border: 'none',
+          height: '100%',
         },
         '&.cm-focused': {
           outline: 'none',
@@ -1370,6 +1370,7 @@ const view = capturedView = new EditorView({
         '.cm-scroller': {
           backgroundColor: '#131313',
           fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif',
+          overflow: 'auto',
         },
         '.cm-content': {
           backgroundColor: '#131313',
@@ -1379,6 +1380,11 @@ const view = capturedView = new EditorView({
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         },
+        '.cm-line': {
+          backgroundColor: '#131313',
+          padding: '0',
+          color: '#FFFFFF',
+        },
         '.cm-cursor, .cm-cursor-primary': {
           borderLeftColor: '#FF6A00',
           borderLeftWidth: '3px',
@@ -1386,9 +1392,20 @@ const view = capturedView = new EditorView({
         '.cm-gutters': {
           backgroundColor: '#131313',
           border: 'none',
+          color: '#8A8F98',
         },
-        '.cm-line': {
-          padding: '0',
+        '.cm-gutterElement': {
+          backgroundColor: '#131313',
+          color: '#8A8F98',
+        },
+        '.cm-activeLine': {
+          backgroundColor: '#131313',
+        },
+        '.cm-activeLineGutter': {
+          backgroundColor: '#131313',
+        },
+        '.cm-selectionMatch': {
+          backgroundColor: 'rgba(242,133,0,0.2)',
         },
         '.cm-selectionBackground': {
           backgroundColor: 'rgba(242,133,0,0.25)',
@@ -1400,8 +1417,24 @@ const view = capturedView = new EditorView({
           color: '#8A8F98',
           fontStyle: 'italic',
         },
-        '.cm-activeLine': {
-          backgroundColor: '#131313',
+        '.cm-tooltip': {
+          backgroundColor: '#1B1B1C',
+          color: '#FFFFFF',
+          border: '1px solid #333333',
+        },
+        '.cm-tooltip-autocomplete': {
+          backgroundColor: '#1B1B1C',
+          color: '#FFFFFF',
+        },
+        '.cm-panels': {
+          backgroundColor: '#1B1B1C',
+          color: '#FFFFFF',
+        },
+        '.cm-panels-top': {
+          borderBottom: '1px solid #333333',
+        },
+        '.cm-panels-bottom': {
+          borderTop: '1px solid #333333',
         },
       }, { dark: true }),
     ],
@@ -1525,27 +1558,21 @@ post({ type: 'ready' });
  * react-native-webview bridge as source={{ html }} (Builds 76–81).
  */
 export function buildEditorShellHtml(): string {
-  // Build 107: root cause finally pinned down. Two compounding issues
-  // kept producing a white editor surface despite Build 106's !important
-  // overrides:
+  // Build 110: shell CSS is now MINIMAL — html/body bg + status pill only.
+  // All CM6 element coloring flows through EditorView.theme({...},
+  // { dark: true }) in EDITOR_BOOTSTRAP_SCRIPT. Previous builds had shell
+  // rules like `.cm-editor * { background-color: transparent !important }`
+  // which conflicted with the theme's solid #131313 backgrounds: shell's
+  // !important beat the theme's normal-specificity rule, so some CM6
+  // elements ended up transparent (showing body through, looked correct)
+  // and others (where the theme was more specific, e.g. `&.cm-focused
+  // .cm-selectionBackground`) ended up dark, giving a patchy "half-white,
+  // half-dark" editor. One authoritative color source avoids the race.
   //
-  //   (1) WKWebView on iPad defaults to a LIGHT color scheme unless
-  //       explicitly told otherwise. CM6 respects `color-scheme` and
-  //       renders light-theme defaults when the UA reports light. Our
-  //       !important rules may still be evaluated but CM6 also sets
-  //       style properties via inline JS in light mode, winning the
-  //       specificity fight even with !important.
-  //
-  //   (2) The shell body was hardcoded #1E1E1E, but the app's actual
-  //       bgBase token is #131313. Even if the editor surface went
-  //       transparent, it would reveal a slightly-off body color — not
-  //       matching the surrounding app chrome the user expects.
-  //
-  // Fix: declare dark color-scheme via both <meta> (UA hint) and CSS
-  // :root rule, plus force every CM6 element's background to transparent
-  // with an aggressive override including `html[data-ui-theme="dark"]`.
-  // Body background now #131313 to match the tokens.bgBase the RN side
-  // paints everywhere else.
+  // color-scheme:dark stays — it's the UA-level hint to WKWebView that
+  // triggers CM6's dark baseTheme path (paired with { dark: true } in
+  // the theme extension). Shell body stays #131313 so any uncovered
+  // CM6 area reveals the correct color.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1555,23 +1582,10 @@ export function buildEditorShellHtml(): string {
 <meta name="supported-color-schemes" content="dark" />
 <style>
 :root { color-scheme: dark; }
-html,body{margin:0;padding:0;background:#131313 !important;color:#FFFFFF !important;font-family:-apple-system,sans-serif;}
-#editor{background:transparent !important;}
+html,body{margin:0;padding:0;background:#131313;color:#FFFFFF;font-family:-apple-system,sans-serif;}
+#editor{background:#131313;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
-.cm-editor,.cm-editor *{background-color:transparent !important;}
-.cm-editor{color:#FFFFFF !important;outline:none !important;border:none !important;}
-.cm-editor.cm-focused{outline:none !important;border:none !important;box-shadow:none !important;}
-.cm-content{color:#FFFFFF !important;caret-color:#FF6A00 !important;}
-.cm-cursor,.cm-cursor-primary{border-left-color:#FF6A00 !important;border-left-width:3px !important;}
-.cm-selectionBackground{background:rgba(242,133,0,0.25) !important;}
-.cm-focused .cm-selectionBackground{background:rgba(242,133,0,0.3) !important;}
-.cm-selectionMatch{background:rgba(242,133,0,0.2) !important;}
-.cm-activeLine{background:transparent !important;}
-.cm-activeLineGutter{background:transparent !important;}
-.cm-placeholder{color:#8A8F98 !important;font-style:italic !important;}
-.cm-gutters{background:transparent !important;border:none !important;}
-.cm-line{padding:0 !important;}
 </style>
 </head>
 <body>
