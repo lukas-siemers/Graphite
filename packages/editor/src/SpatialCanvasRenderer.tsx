@@ -138,27 +138,6 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
-  // Build 128: translate stroke coords from the InkOverlay's gesture space
-  // (origin = scrollContent padding-box top-left, since absoluteFill
-  // anchors against the positioned ancestor's padding box) into the
-  // iframe body's coord space (origin = WebView content top-left, which
-  // sits inside the scroll padding by paddingHorizontal / paddingTop).
-  // Without this, polylines render `(+24, +16)` away from where the user
-  // drew them. Skia rendering doesn't need this transform because Skia
-  // ALSO sits in the absoluteFill / gesture space.
-  const PADDING_LEFT = 24;
-  const PADDING_TOP = 16;
-  const passiveStrokes = useMemo(() => {
-    if (inkMode) return [];
-    return spatialDoc.inkStrokes.map((s) => ({
-      ...s,
-      points: s.points.map((p) => ({
-        ...p,
-        x: p.x - PADDING_LEFT,
-        y: p.y - PADDING_TOP,
-      })),
-    }));
-  }, [inkMode, spatialDoc.inkStrokes]);
 
   return (
     <View style={styles.root}>
@@ -182,39 +161,29 @@ export function SpatialCanvasRenderer({
           autoFocus={autoFocusFirst}
           diagInkActive={inkMode}
           diagInkResponderGrantCount={inkResponderGrantCount}
-          /* Build 127: committed strokes are rendered inside the iframe's
-             #ink-layer SVG when the pencil is OFF. When ink mode turns on,
-             pass an empty array so Skia's live InkOverlay is the sole
-             renderer for the duration of the drawing session — prevents
-             double-drawing the same stroke set while the user is mid-
-             stroke.
-             Build 128: passiveStrokes is now the padding-corrected copy
-             so coords align with iframe body origin (see useMemo above). */
-          passiveStrokes={passiveStrokes}
         />
-        {/* Build 124: InkPassiveOverlay (react-native-svg) removed in
-            Build 126 — 15.11.2 collides with RN 0.81.5's Fabric/New-Arch
-            `ComponentDescriptor::ConcreteShadowNode` typedef and fails to
-            compile under Xcode 16.4 (archive error). Strokes drawn in an
-            ink session remain in spatialDoc.inkStrokes and become visible
-            again the next time the pencil toggles on — persistence at the
-            data layer is preserved, only the passive display is
-            temporarily missing. Follow-up: render strokes inside the CM6
-            iframe instead (native SVG, no Fabric compile path). */}
-        {inkMode ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="auto">
-            <InkOverlay
-              strokes={spatialDoc.inkStrokes}
-              width={contentSize.width}
-              height={contentSize.height}
-              pointerEvents="auto"
-              onNewStroke={handleInkChange}
-              onResponderGrantDiagnostic={onInkResponderGrant}
-              strokeColor={inkColor}
-              strokeWidth={inkWidth}
-            />
-          </View>
-        ) : null}
+        {/* Build 129: restore Build 118's always-mount pattern. InkOverlay
+            stays in the tree so drawn strokes remain visible while the
+            pencil is OFF — pointerEvents gates touch capture (auto when
+            drawing, none when typing). This is the exact diff that made
+            drawings persist in Build 118. The earlier Metal crash
+            (Build 119) was caused by the minHeight:2000 wrapper + Skia
+            Canvas sizing combo, not by always-mounting itself — confirmed
+            because Skia works fine in Build 128 when the pencil toggles
+            on. No wrapper, no minHeight, just the mount + pointerEvents
+            flip. */}
+        <View style={StyleSheet.absoluteFill} pointerEvents={inkMode ? 'auto' : 'none'}>
+          <InkOverlay
+            strokes={spatialDoc.inkStrokes}
+            width={contentSize.width}
+            height={contentSize.height}
+            pointerEvents={inkMode ? 'auto' : 'none'}
+            onNewStroke={handleInkChange}
+            onResponderGrantDiagnostic={onInkResponderGrant}
+            strokeColor={inkColor}
+            strokeWidth={inkWidth}
+          />
+        </View>
       </ScrollView>
     </View>
   );
