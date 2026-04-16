@@ -154,6 +154,10 @@ export function LivePreviewInput({
   // Build 101: diagnostic counters for the post-ready "can't type" bug.
   const [tapCount, setTapCount] = useState(0);
   const [inputCount, setInputCount] = useState(0);
+  // Build 128: ix:N counter for iframe-side passive ink rendering.
+  // -1 means SVG element wasn't found, 0 means handler ran but received
+  // no strokes, N>0 means N polylines were appended on the last update.
+  const [inkRenderedCount, setInkRenderedCount] = useState<number>(0);
   // Build 104: persist the one-shot diagnostic phase labels (4.1 parent
   // resolution, 5.05 attachment) so the phase pill doesn't lose them
   // when phase 6 ready overwrites the main display. Shown alongside as
@@ -366,6 +370,16 @@ export function LivePreviewInput({
         setInputCount((n) => n + 1);
         break;
 
+      case 'ink-rendered':
+        // Build 128: round-trip from the iframe's set-strokes handler.
+        // count = number of <polyline> children in #ink-layer after the
+        // last set-strokes message processed. Surfaces in phase pill as
+        // ix:N. count=-1 means the SVG element wasn't found in the DOM.
+        if (typeof msg.count === 'number') {
+          setInkRenderedCount(msg.count);
+        }
+        break;
+
       case 'command-applied':
         onCommandAppliedRef.current?.();
         break;
@@ -547,7 +561,7 @@ export function LivePreviewInput({
             phase 6 · ready · t:3 i:5 → everything working (not the bug) */}
       <View style={styles.phaseIndicator} pointerEvents="none">
         <Text style={styles.phaseIndicatorText}>
-          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount} · ink:${diagInkActive ? 'on' : 'off'} · pc:${diagInkResponderGrantCount}`}
+          {`${phaseDisplay} · par:${parentStatusDisplay} · att:${attachStatusDisplay} · t:${tapCount} i:${inputCount} · ink:${diagInkActive ? 'on' : 'off'} · pc:${diagInkResponderGrantCount} · ix:${inkRenderedCount}`}
         </Text>
       </View>
       {useFallback && (

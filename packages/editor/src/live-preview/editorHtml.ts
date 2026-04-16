@@ -58,16 +58,19 @@ export const EDITOR_CSS = `
 
   /* Build 127: passive ink overlay. Renders committed strokes inside the
      iframe's own DOM as SVG <polyline> nodes positioned in canvas-pixel
-     coordinates. pointer-events: none lets taps fall through to CM6. */
+     coordinates. pointer-events: none lets taps fall through to CM6.
+     Build 128: explicit 10000px height + z-index:999 so polylines actually
+     paint over CM6's z-index:6 fence overlay and aren't clipped by a
+     0-height parent on bare-body layouts. */
   #ink-layer {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
+    height: 10000px;
     pointer-events: none;
     overflow: visible;
-    z-index: 5;
+    z-index: 999;
   }
 
   /* ── CodeMirror shell — fully transparent, no box ── */
@@ -1644,8 +1647,14 @@ window.addEventListener('message', (e) => {
       // empty strokes array (when the Skia InkOverlay takes over during
       // active drawing) or the full stroke list (when pencil mode is off
       // and we want the drawings visible alongside the text).
+      // Build 128: round-trip a diagnostic count back to the host so we
+      // can see on-device whether the handler ran and how many polylines
+      // landed. Surfaced in the phase pill as ix:N.
       var svg = document.getElementById('ink-layer');
-      if (!svg) break;
+      if (!svg) {
+        try { post({ type: 'ink-rendered', count: -1 }); } catch (_) {}
+        break;
+      }
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       var strokes = Array.isArray(msg.strokes) ? msg.strokes : [];
       for (var si = 0; si < strokes.length; si++) {
@@ -1669,6 +1678,7 @@ window.addEventListener('message', (e) => {
         poly.setAttribute('opacity', String(typeof s.opacity === 'number' ? s.opacity : 1));
         svg.appendChild(poly);
       }
+      try { post({ type: 'ink-rendered', count: svg.childNodes.length }); } catch (_) {}
       break;
     }
   }
@@ -1739,10 +1749,12 @@ html,body,*{-webkit-tap-highlight-color:transparent;}
 *:focus,*:focus-visible,*:focus-within{outline:none !important;box-shadow:none !important;}
 #editor{background:#131313;outline:none;border:none;position:relative;}
 /* Build 127: #ink-layer carries committed strokes as SVG polylines.
-   overflow:visible means polyline points past the SVG's box still paint,
-   which matters because the SVG's computed height may be 0 (parent body
-   has no definite height in the "shell is minimal" contract). */
-#ink-layer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:5;}
+   Build 128: explicit large height so polylines render even on bare-body
+   layouts (height:100% would resolve to 0 with no definite parent height,
+   and some WebKit versions skip painting in that case despite
+   overflow:visible). z-index 999 to sit above CM6's fence overlay
+   (z-index 6) so strokes never get covered. */
+#ink-layer{position:absolute;top:0;left:0;width:100%;height:10000px;pointer-events:none;overflow:visible;z-index:999;}
 .error{color:#F28500;padding:12px;}
 #status{padding:8px 12px;font-size:11px;color:#8A8F98;}
 </style>

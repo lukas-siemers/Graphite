@@ -138,6 +138,28 @@ export function SpatialCanvasRenderer({
     [onInkChange, spatialDoc.inkStrokes],
   );
 
+  // Build 128: translate stroke coords from the InkOverlay's gesture space
+  // (origin = scrollContent padding-box top-left, since absoluteFill
+  // anchors against the positioned ancestor's padding box) into the
+  // iframe body's coord space (origin = WebView content top-left, which
+  // sits inside the scroll padding by paddingHorizontal / paddingTop).
+  // Without this, polylines render `(+24, +16)` away from where the user
+  // drew them. Skia rendering doesn't need this transform because Skia
+  // ALSO sits in the absoluteFill / gesture space.
+  const PADDING_LEFT = 24;
+  const PADDING_TOP = 16;
+  const passiveStrokes = useMemo(() => {
+    if (inkMode) return [];
+    return spatialDoc.inkStrokes.map((s) => ({
+      ...s,
+      points: s.points.map((p) => ({
+        ...p,
+        x: p.x - PADDING_LEFT,
+        y: p.y - PADDING_TOP,
+      })),
+    }));
+  }, [inkMode, spatialDoc.inkStrokes]);
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -165,8 +187,10 @@ export function SpatialCanvasRenderer({
              pass an empty array so Skia's live InkOverlay is the sole
              renderer for the duration of the drawing session — prevents
              double-drawing the same stroke set while the user is mid-
-             stroke. */
-          passiveStrokes={inkMode ? [] : spatialDoc.inkStrokes}
+             stroke.
+             Build 128: passiveStrokes is now the padding-corrected copy
+             so coords align with iframe body origin (see useMemo above). */
+          passiveStrokes={passiveStrokes}
         />
         {/* Build 124: InkPassiveOverlay (react-native-svg) removed in
             Build 126 — 15.11.2 collides with RN 0.81.5's Fabric/New-Arch
