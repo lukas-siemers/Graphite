@@ -43,7 +43,40 @@ const MIME_TYPES: Record<string, string> = {
 
 let staticServerPort = 0;
 
+// Scan the dist/assets tree for icon font files and build @font-face CSS.
+// This is injected into index.html so icon fonts load before React mounts —
+// expo-font's runtime loader can fail or race in the Electron context.
+const ICON_FONT_MAP: Record<string, string> = {
+  'MaterialCommunityIcons': 'material-community',
+};
+
+function buildIconFontCss(distDir: string): string {
+  const fontsDir = path.join(
+    distDir,
+    'assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts',
+  );
+  const rules: string[] = [];
+  try {
+    const files = fs.readdirSync(fontsDir);
+    for (const file of files) {
+      if (!file.endsWith('.ttf')) continue;
+      // Extract font name from "MaterialCommunityIcons.6e435534bd...ttf"
+      const baseName = file.split('.')[0];
+      const cssFamily = ICON_FONT_MAP[baseName];
+      if (!cssFamily) continue;
+      const relUrl = `/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/${file}`;
+      rules.push(
+        `@font-face{font-family:"${cssFamily}";src:url("${relUrl}") format("truetype");font-display:block;}`
+      );
+    }
+  } catch { /* fonts dir missing — skip */ }
+  return rules.length > 0 ? `<style id="icon-fonts">${rules.join('')}</style>` : '';
+}
+
 function startStaticServer(distDir: string): Promise<number> {
+  // Pre-compute icon font CSS once at startup.
+  const iconFontCss = buildIconFontCss(distDir);
+
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const urlPath = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname);
@@ -65,7 +98,12 @@ function startStaticServer(distDir: string): Promise<number> {
       const mime = MIME_TYPES[ext] || 'application/octet-stream';
 
       try {
-        const content = fs.readFileSync(filePath);
+        let content: Buffer | string = fs.readFileSync(filePath);
+        // Inject icon font CSS into HTML responses so fonts load before React.
+        if (ext === '.html' && iconFontCss) {
+          const html = content.toString('utf8');
+          content = html.replace('</head>', `${iconFontCss}</head>`);
+        }
         res.writeHead(200, { 'Content-Type': mime });
         res.end(content);
       } catch {
@@ -86,269 +124,113 @@ function startStaticServer(distDir: string): Promise<number> {
 
 // ---------------------------------------------------------------------------
 // Database
+//
+// The main process only opens the database file and sets pragmas. All schema
+// creation and migrations are driven by the renderer through the raw SQL IPC
+// handlers below — the single source of truth for the schema lives in
+// packages/db/src/schema.ts + migrations.ts.
 // ---------------------------------------------------------------------------
 
 let db: Database.Database;
-
-function tableHasColumn(tableName: string, columnName: string): boolean {
-  const rows = db.prepare(`PRAGMA table_info('${tableName.replace(/'/g, "''")}')`).all() as Array<{ name: string }>;
-  return rows.some((r) => r.name === columnName);
-}
 
 function initDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'graphite.db');
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notebooks (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      synced_at INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS folders (
-      id TEXT PRIMARY KEY,
-      notebook_id TEXT NOT NULL REFERENCES notebooks(id),
-      parent_id TEXT REFERENCES folders(id),
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS notes (
-      id TEXT PRIMARY KEY,
-      folder_id TEXT REFERENCES folders(id),
-      notebook_id TEXT NOT NULL REFERENCES notebooks(id),
-      title TEXT NOT NULL DEFAULT 'Untitled',
-      body TEXT NOT NULL DEFAULT '',
-      drawing_asset_id TEXT,
-      canvas_json TEXT,
-      is_dirty INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      synced_at INTEGER
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-      title,
-      body,
-      content='notes',
-      content_rowid='rowid'
-    );
-  `);
-
-  // Migration 15 — spatial canvas (.graphite) storage. Idempotent ALTERs so
-  // existing installs upgrade safely without re-running on next launch.
-  if (!tableHasColumn('notes', 'graphite_blob')) {
-    db.exec('ALTER TABLE notes ADD COLUMN graphite_blob BLOB;');
-  }
-  if (!tableHasColumn('notes', 'canvas_version')) {
-    db.exec('ALTER TABLE notes ADD COLUMN canvas_version INTEGER DEFAULT 1;');
-  }
-  if (!tableHasColumn('notes', 'fts_body')) {
-    db.exec('ALTER TABLE notes ADD COLUMN fts_body TEXT;');
-  }
+  db.pragma('foreign_keys = ON');
 }
 
-// better-sqlite3 returns Buffer for BLOB columns; the renderer is a pure web
-// context and must see plain Uint8Array. Wrap any row coming out of the IPC
-// layer through this helper.
-function normalizeNoteRow<T extends { graphite_blob?: unknown } | undefined | null>(row: T): T {
+// Normalise Buffer → Uint8Array in any row returned over IPC. Electron's
+// structured clone can handle Uint8Array but better-sqlite3 returns Buffer
+// for BLOB columns. Walk every value and convert in-place.
+function normalizeRow(row: Record<string, unknown> | null | undefined): Record<string, unknown> | null | undefined {
   if (!row) return row;
-  const blob = (row as any).graphite_blob;
-  if (blob && (blob as any).constructor && (blob as any).constructor.name === 'Buffer') {
-    (row as any).graphite_blob = new Uint8Array(
-      (blob as Buffer).buffer,
-      (blob as Buffer).byteOffset,
-      (blob as Buffer).byteLength,
-    );
+  for (const key of Object.keys(row)) {
+    const val = row[key];
+    if (val && Buffer.isBuffer(val)) {
+      row[key] = new Uint8Array(val.buffer, val.byteOffset, val.byteLength);
+    }
   }
   return row;
 }
 
-// Inverse of normalizeNoteRow: better-sqlite3 requires a Node Buffer when
-// binding BLOB values. IPC delivers Uint8Array from the renderer, so convert
-// at the bind site. Null / undefined pass through.
-function toBlobBuffer(value: Uint8Array | Buffer | null | undefined): Buffer | null {
-  if (value == null) return null;
-  if (Buffer.isBuffer(value)) return value;
-  // Buffer.from copies when given an ArrayBufferView; safe against later
-  // mutation on the renderer side.
-  return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+function normalizeRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return rows.map((r) => normalizeRow(r) as Record<string, unknown>);
+}
+
+// Convert Uint8Array params to Buffer for better-sqlite3 BLOB binding.
+function normalizeParams(params: unknown[]): unknown[] {
+  return params.map((p) => {
+    if (p instanceof Uint8Array && !Buffer.isBuffer(p)) {
+      return Buffer.from(p.buffer, p.byteOffset, p.byteLength);
+    }
+    return p;
+  });
 }
 
 // ---------------------------------------------------------------------------
-// IPC handlers
+// IPC handlers — raw SQL interface
+//
+// The renderer's @graphite/db IPC adapter calls these to execute arbitrary SQL
+// against the local better-sqlite3 database. This replaces the previous
+// per-operation IPC handlers — the operation logic now lives entirely in the
+// shared packages/db code, executed in the renderer and forwarded here as SQL.
 // ---------------------------------------------------------------------------
-
-function wrap<T>(fn: () => T): { data: T } | { error: string } {
-  try {
-    return { data: fn() };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
 
 function registerIpcHandlers() {
-  ipcMain.handle('db:getNotebooks', () =>
-    wrap(() => db.prepare('SELECT * FROM notebooks ORDER BY updated_at DESC').all())
-  );
+  // Execute one or more SQL statements (no params, no return value).
+  // Used for PRAGMA, CREATE TABLE, multi-statement DDL.
+  ipcMain.handle('sql:exec', (_e, sql: string) => {
+    try {
+      db.exec(sql);
+      return { ok: true };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
-  ipcMain.handle('db:createNotebook', (_e, notebook: { id: string; name: string; created_at: number; updated_at: number }) =>
-    wrap(() => {
-      db.prepare(
-        'INSERT INTO notebooks (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)'
-      ).run(notebook.id, notebook.name, notebook.created_at, notebook.updated_at);
-      return notebook;
-    })
-  );
+  // Execute a single statement with params. Returns lastInsertRowId + changes.
+  ipcMain.handle('sql:run', (_e, sql: string, params?: unknown[]) => {
+    try {
+      const stmt = db.prepare(sql);
+      const result = params && params.length > 0
+        ? stmt.run(...normalizeParams(params))
+        : stmt.run();
+      return {
+        ok: true,
+        lastInsertRowId: Number(result.lastInsertRowid),
+        changes: result.changes,
+      };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
-  ipcMain.handle('db:getFolders', (_e, notebookId: string) =>
-    wrap(() => db.prepare('SELECT * FROM folders WHERE notebook_id = ? ORDER BY name ASC').all(notebookId))
-  );
+  // Fetch all matching rows.
+  ipcMain.handle('sql:getAll', (_e, sql: string, params?: unknown[]) => {
+    try {
+      const stmt = db.prepare(sql);
+      const rows = params && params.length > 0
+        ? stmt.all(...normalizeParams(params)) as Array<Record<string, unknown>>
+        : stmt.all() as Array<Record<string, unknown>>;
+      return { ok: true, rows: normalizeRows(rows) };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
-  ipcMain.handle('db:createFolder', (_e, folder: { id: string; notebook_id: string; parent_id?: string; name: string; created_at: number; updated_at: number }) =>
-    wrap(() => {
-      db.prepare(
-        'INSERT INTO folders (id, notebook_id, parent_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(folder.id, folder.notebook_id, folder.parent_id ?? null, folder.name, folder.created_at, folder.updated_at);
-      return folder;
-    })
-  );
-
-  ipcMain.handle('db:getNotes', (_e, notebookId: string) =>
-    wrap(() => {
-      const rows = db.prepare('SELECT * FROM notes WHERE notebook_id = ? ORDER BY updated_at DESC').all(notebookId) as Array<Record<string, unknown>>;
-      return rows.map((r) => normalizeNoteRow(r));
-    })
-  );
-
-  ipcMain.handle('db:getNote', (_e, id: string) =>
-    wrap(() => {
-      const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-      return normalizeNoteRow(row ?? null);
-    })
-  );
-
-  ipcMain.handle('db:createNote', (_e, note: { id: string; notebook_id: string; folder_id?: string; title: string; body: string; canvas_version?: number; graphite_blob?: Uint8Array | null; fts_body?: string | null; created_at: number; updated_at: number }) =>
-    wrap(() => {
-      const canvasVersion = note.canvas_version ?? 2;
-      const graphiteBlob = toBlobBuffer(note.graphite_blob);
-      const ftsBody = note.fts_body ?? null;
-      db.prepare(
-        `INSERT INTO notes (id, notebook_id, folder_id, title, body, canvas_version, graphite_blob, fts_body, is_dirty, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-      ).run(
-        note.id,
-        note.notebook_id,
-        note.folder_id ?? null,
-        note.title,
-        note.body,
-        canvasVersion,
-        graphiteBlob,
-        ftsBody,
-        note.created_at,
-        note.updated_at,
-      );
-      db.prepare(
-        'INSERT INTO notes_fts(rowid, title, body) SELECT rowid, title, COALESCE(fts_body, body) FROM notes WHERE id = ?'
-      ).run(note.id);
-      return normalizeNoteRow({ ...note, canvas_version: canvasVersion, graphite_blob: graphiteBlob, fts_body: ftsBody });
-    })
-  );
-
-  ipcMain.handle('db:updateNote', (_e, id: string, fields: {
-    title?: string;
-    body?: string;
-    drawing_asset_id?: string;
-    canvas_json?: string | null;
-    graphite_blob?: Uint8Array | null;
-    canvas_version?: number;
-    fts_body?: string | null;
-    updated_at: number;
-  }) =>
-    wrap(() => {
-      const sets: string[] = [];
-      const values: unknown[] = [];
-      if (fields.title !== undefined)            { sets.push('title = ?');            values.push(fields.title); }
-      if (fields.body !== undefined)             { sets.push('body = ?');             values.push(fields.body); }
-      if (fields.drawing_asset_id !== undefined) { sets.push('drawing_asset_id = ?'); values.push(fields.drawing_asset_id); }
-      if (fields.canvas_json !== undefined)      { sets.push('canvas_json = ?');      values.push(fields.canvas_json); }
-      if (fields.graphite_blob !== undefined)    { sets.push('graphite_blob = ?');    values.push(toBlobBuffer(fields.graphite_blob)); }
-      if (fields.canvas_version !== undefined)   { sets.push('canvas_version = ?');   values.push(fields.canvas_version); }
-      if (fields.fts_body !== undefined)         { sets.push('fts_body = ?');         values.push(fields.fts_body); }
-      sets.push('updated_at = ?');
-      values.push(fields.updated_at);
-      if (sets.length === 1) {
-        // Only updated_at provided — still a valid update
-      }
-      values.push(id);
-      db.prepare(`UPDATE notes SET ${sets.join(', ')} WHERE id = ?`).run(...values);
-      // Keep FTS in sync. Precedence: caller-provided fts_body > canvas_json
-      // textContent extraction > legacy body.
-      db.prepare(
-        `INSERT OR REPLACE INTO notes_fts(rowid, title, body)
-         SELECT rowid, title,
-                COALESCE(fts_body, json_extract(canvas_json, '$.textContent.body'), body)
-         FROM notes WHERE id = ?`
-      ).run(id);
-      const row = db.prepare('SELECT * FROM notes WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-      return normalizeNoteRow(row ?? null);
-    })
-  );
-
-  ipcMain.handle('db:deleteNote', (_e, id: string) =>
-    wrap(() => {
-      // Remove from FTS index before deleting the source row
-      db.prepare(
-        "INSERT INTO notes_fts(notes_fts, rowid, title, body) SELECT 'delete', rowid, title, body FROM notes WHERE id = ?"
-      ).run(id);
-      db.prepare('DELETE FROM notes WHERE id = ?').run(id);
-      return { id };
-    })
-  );
-
-  ipcMain.handle('db:deleteFolder', (_e, id: string) =>
-    wrap(() => {
-      // Clean up FTS entries for all notes in this folder before deleting them
-      const notes = db.prepare('SELECT rowid, title, body FROM notes WHERE folder_id = ?').all(id) as Array<{ rowid: number; title: string; body: string }>;
-      const deleteFts = db.prepare("INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)");
-      for (const note of notes) {
-        deleteFts.run(note.rowid, note.title, note.body);
-      }
-      db.prepare('DELETE FROM notes WHERE folder_id = ?').run(id);
-      db.prepare('DELETE FROM folders WHERE id = ?').run(id);
-      return { id };
-    })
-  );
-
-  ipcMain.handle('db:deleteNotebook', (_e, id: string) =>
-    wrap(() => {
-      // Clean up FTS entries for all notes in this notebook before deleting them
-      const notes = db.prepare('SELECT rowid, title, body FROM notes WHERE notebook_id = ?').all(id) as Array<{ rowid: number; title: string; body: string }>;
-      const deleteFts = db.prepare("INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', ?, ?, ?)");
-      for (const note of notes) {
-        deleteFts.run(note.rowid, note.title, note.body);
-      }
-      db.prepare('DELETE FROM notes WHERE notebook_id = ?').run(id);
-      db.prepare('DELETE FROM folders WHERE notebook_id = ?').run(id);
-      db.prepare('DELETE FROM notebooks WHERE id = ?').run(id);
-      return { id };
-    })
-  );
-
-  ipcMain.handle('db:searchNotes', (_e, query: string) =>
-    wrap(() =>
-      db.prepare(
-        `SELECT notes.* FROM notes
-         INNER JOIN notes_fts ON notes.rowid = notes_fts.rowid
-         WHERE notes_fts MATCH ?
-         ORDER BY rank`
-      ).all(query)
-    )
-  );
+  // Fetch the first matching row (or null).
+  ipcMain.handle('sql:getFirst', (_e, sql: string, params?: unknown[]) => {
+    try {
+      const stmt = db.prepare(sql);
+      const row = params && params.length > 0
+        ? stmt.get(...normalizeParams(params)) as Record<string, unknown> | undefined
+        : stmt.get() as Record<string, unknown> | undefined;
+      return { ok: true, row: normalizeRow(row ?? null) ?? null };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +246,19 @@ function createWindow() {
     width: 1280,
     height: 800,
     backgroundColor: '#1E1E1E',
+    // Remove the OS title bar. On Windows, titleBarOverlay keeps the native
+    // minimize / maximize / close buttons overlaid in the top-right corner.
+    // On macOS, titleBarStyle: 'hiddenInset' preserves the traffic lights.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : {
+          frame: false,
+          titleBarOverlay: {
+            color: '#1E1E1E',
+            symbolColor: '#8A8F98',
+            height: 32,
+          },
+        }),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

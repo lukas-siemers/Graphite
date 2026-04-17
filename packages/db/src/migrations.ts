@@ -113,7 +113,7 @@ let _db: SQLiteDatabase | null = null;
 
 // ---------------------------------------------------------------------------
 // Web no-op database
-// On web (Electron dev / browser preview), expo-sqlite's WASM worker cannot
+// On non-Electron web (browser preview), expo-sqlite's WASM worker cannot
 // be bundled by Metro. We return a no-op DB so initDatabase() completes and
 // the UI renders. All data operations return empty results — no persistence.
 // ---------------------------------------------------------------------------
@@ -138,17 +138,131 @@ const noopDb: SQLiteDatabase = {
   databasePath: '',
 } as unknown as SQLiteDatabase;
 
+// ---------------------------------------------------------------------------
+// Electron IPC database adapter
+//
+// When running inside Electron, window.graphite.sql is exposed by the preload
+// script. This adapter implements the SQLiteDatabase interface by forwarding
+// all SQL operations to the main process's better-sqlite3 instance via IPC.
+// This lets ALL existing @graphite/db operations and migrations work unchanged
+// on desktop — they call db.runAsync / db.getAllAsync etc. which transparently
+// route through IPC to real persistent storage.
+// ---------------------------------------------------------------------------
+
+interface ElectronSqlBridge {
+  exec: (sql: string) => Promise<{ ok?: boolean; error?: string }>;
+  run: (sql: string, params?: unknown[]) => Promise<{
+    ok?: boolean;
+    error?: string;
+    lastInsertRowId?: number;
+    changes?: number;
+  }>;
+  getAll: (sql: string, params?: unknown[]) => Promise<{
+    ok?: boolean;
+    error?: string;
+    rows?: unknown[];
+  }>;
+  getFirst: (sql: string, params?: unknown[]) => Promise<{
+    ok?: boolean;
+    error?: string;
+    row?: unknown;
+  }>;
+}
+
+function getElectronSql(): ElectronSqlBridge | null {
+  if (typeof window !== 'undefined' && (window as any).graphite?.sql) {
+    return (window as any).graphite.sql as ElectronSqlBridge;
+  }
+  return null;
+}
+
+function createElectronDb(sql: ElectronSqlBridge): SQLiteDatabase {
+  return {
+    execAsync: async (statement: string) => {
+      const result = await sql.exec(statement);
+      if (result.error) throw new Error(result.error);
+    },
+
+    runAsync: async (statement: string, params?: unknown[]) => {
+      // expo-sqlite accepts params as rest args or an array; normalise to array.
+      const p = Array.isArray(params) ? params : params !== undefined ? [params] : [];
+      const result = await sql.run(statement, p);
+      if (result.error) throw new Error(result.error);
+      return { lastInsertRowId: result.lastInsertRowId ?? 0, changes: result.changes ?? 0 } as any;
+    },
+
+    getFirstAsync: async <T = unknown>(statement: string, params?: unknown[]): Promise<T | null> => {
+      const p = Array.isArray(params) ? params : params !== undefined ? [params] : [];
+      const result = await sql.getFirst(statement, p);
+      if (result.error) throw new Error(result.error);
+      return (result.row ?? null) as T | null;
+    },
+
+    getAllAsync: async <T = unknown>(statement: string, params?: unknown[]): Promise<T[]> => {
+      const p = Array.isArray(params) ? params : params !== undefined ? [params] : [];
+      const result = await sql.getAll(statement, p);
+      if (result.error) throw new Error(result.error);
+      return (result.rows ?? []) as T[];
+    },
+
+    withTransactionAsync: async (fn: () => Promise<void>) => {
+      await sql.exec('BEGIN');
+      try {
+        await fn();
+        await sql.exec('COMMIT');
+      } catch (e) {
+        await sql.exec('ROLLBACK');
+        throw e;
+      }
+    },
+
+    withExclusiveTransactionAsync: async (fn: () => Promise<void>) => {
+      await sql.exec('BEGIN EXCLUSIVE');
+      try {
+        await fn();
+        await sql.exec('COMMIT');
+      } catch (e) {
+        await sql.exec('ROLLBACK');
+        throw e;
+      }
+    },
+
+    prepareAsync: async () => ({
+      executeAsync: async () => ({
+        lastInsertRowId: 0,
+        changes: 0,
+        getAllAsync: async () => [],
+        getFirstAsync: async () => null,
+      }) as any,
+      finalizeAsync: async () => {},
+    }) as any,
+
+    closeAsync: async () => {},
+    isInTransaction: false,
+    databasePath: 'electron-ipc',
+  } as unknown as SQLiteDatabase;
+}
+
 export async function initDatabase(): Promise<SQLiteDatabase> {
   if (_db) return _db;
 
-  // Skip expo-sqlite on web — its WASM worker cannot load in the Metro dev
-  // server. The no-op DB lets the UI mount without persistence.
+  // Electron: use IPC bridge to better-sqlite3 in the main process.
+  // This check MUST come before the generic web check below.
+  const electronSql = getElectronSql();
+  if (electronSql) {
+    const electronDb = createElectronDb(electronSql);
+    await runMigrations(electronDb);
+    _db = electronDb;
+    return _db;
+  }
+
+  // Web (non-Electron browser preview): no-op DB, no persistence.
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     _db = noopDb;
     return _db;
   }
 
-  // Lazy import so this module can be imported in tests without Expo
+  // Native: use expo-sqlite
   const { openDatabaseAsync } = await import('expo-sqlite');
   const db = await openDatabaseAsync('graphite.db');
   await runMigrations(db);

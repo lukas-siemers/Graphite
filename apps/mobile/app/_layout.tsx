@@ -87,6 +87,17 @@ export default function RootLayout() {
 
     async function boot() {
       try {
+        // On web/Electron, eagerly load the icon font so MaterialCommunityIcons
+        // render on first paint. The production Electron static server also
+        // injects @font-face CSS, but this covers dev mode (Metro) too.
+        if (Platform.OS === 'web') {
+          try {
+            const { MaterialCommunityIcons } = require('@expo/vector-icons');
+            const Font = require('expo-font');
+            await Font.loadAsync(MaterialCommunityIcons.font);
+          } catch { /* font load failure is non-fatal — icons degrade gracefully */ }
+        }
+
         setStage('auth-storage-config');
         if (Platform.OS !== 'web') {
           const SecureStore = require('expo-secure-store');

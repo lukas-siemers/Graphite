@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, View, Text, Pressable, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   initDatabase,
@@ -163,12 +163,16 @@ function PhoneLayout() {
   );
 }
 
+// On Electron (web + frameless window), the titleBarOverlay is 32px tall.
+// Add top padding so app content doesn't hide behind it.
+const ELECTRON_TITLE_BAR_HEIGHT = Platform.OS === 'web' ? 32 : 0;
+
 function IPadLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const handleCreateNote = useCreateNoteAction();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase }} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: tokens.bgBase, paddingTop: ELECTRON_TITLE_BAR_HEIGHT }} edges={Platform.OS === 'web' ? [] : ['top', 'left', 'right']}>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: tokens.bgBase }}>
         <View
           style={{
